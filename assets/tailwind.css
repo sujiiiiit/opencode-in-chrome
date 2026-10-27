@@ -1,0 +1,21 @@
+@import 'tailwindcss';
+
+/* Opencode brand palette (opencode.ai/brand). */
+@theme {
+  --color-ink: #131010;
+  --color-ink-soft: #211e1e;
+  --color-ink-muted: #4b4646;
+  --color-paper: #f1ecec;
+  --color-paper-soft: #cfcecd;
+}
+
+@layer base {
+  html {
+    color-scheme: light dark;
+  }
+
+  body {
+    @apply bg-paper text-ink-soft antialiased dark:bg-ink dark:text-paper;
+    font-family: Inter, system-ui, Avenir, Helvetica, Arial, sans-serif;
+  }
+}

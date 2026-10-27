@@ -1,0 +1,7 @@
+---
+type: llm
+focus: trace
+weight: 1
+---
+
+The result matches this description: A GitHub Actions workflow triggered by version tags installs with Node 22+, zips Chrome and Firefox builds (including the Firefox sources zip), and runs wxt submit using Chrome Web Store API v2 service-account credentials (not the retired refresh-token flow) and AMO JWT credentials; the Firefox manifest gets a gecko id; the answer lists every required secret with where to obtain it and recommends a dry run first.

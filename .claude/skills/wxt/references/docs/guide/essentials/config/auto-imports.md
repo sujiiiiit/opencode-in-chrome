@@ -1,0 +1,154 @@
+<!-- source: https://wxt.dev/guide/essentials/config/auto-imports.md -->
+# Auto-imports
+
+WXT uses [`unimport`](https://www.npmjs.com/package/unimport), the same tool as Nuxt, to setup auto-imports.
+
+```ts
+export default defineConfig({
+  // See https://www.npmjs.com/package/unimport#configurations
+  imports: {
+    // ...
+  },
+});
+```
+
+By default, WXT automatically sets up auto-imports for all of it's own APIs and some of your project directories:
+
+* `<srcDir>/components/*`
+* `<srcDir>/composables/*`
+* `<srcDir>/hooks/*`
+* `<srcDir>/utils/*`
+
+All named and default exports from files in these directories are available everywhere else in your project without having to import them.
+
+To see the complete list of auto-imported APIs, run [`wxt prepare`](/api/cli/wxt-prepare) and look at your project's `.wxt/types/imports-module.d.ts` file.
+
+## Extending Default Directories
+
+Add additional directories with `imports.dirs`. They're combined with the default directories listed above.
+
+```ts
+export default defineConfig({
+  imports: {
+    dirs: ['lib'],
+  },
+});
+```
+
+## Overriding or Disabling Default Directories
+
+Set `imports.scan` to `false` to stop WXT from scanning its default directories (`components`, `composables`, `hooks`, and `utils`). Preset/library based imports (like `browser`, `storage`, etc.) are unaffected, so this can be used to keep auto-imports enabled while opting out of directory scanning.
+
+```ts
+export default defineConfig({
+  imports: {
+    scan: false,
+  },
+});
+```
+
+Combine `scan: false` with `dirs` to replace the default directories with your own instead of extending them:
+
+```ts
+export default defineConfig({
+  imports: {
+    scan: false,
+    dirs: ['lib'],
+  },
+});
+```
+
+## TypeScript
+
+For TypeScript and your editor to recognize auto-imported variables, you need to run the [`wxt prepare` command](/api/cli/wxt-prepare).
+
+Add this command to your `postinstall` script so your editor has everything it needs to report type errors after installing dependencies:
+
+```jsonc
+// package.json
+{
+  "scripts": {
+    "postinstall": "wxt prepare", // [!code ++]
+  },
+}
+```
+
+## ESLint
+
+ESLint doesn't know about the auto-imported variables unless they are explicitly defined in the ESLint's `globals`. By default, WXT will generate the config if it detects ESLint is installed in your project. If the config isn't generated automatically, you can manually tell WXT to generate it.
+
+:::code-group
+
+```ts [ESLint >=9]
+export default defineConfig({
+  imports: {
+    eslintrc: {
+      enabled: 9,
+    },
+  },
+});
+```
+
+```ts [ESLint <=8]
+export default defineConfig({
+  imports: {
+    eslintrc: {
+      enabled: 8,
+    },
+  },
+});
+```
+
+:::
+
+Then in your ESLint config, import and use the generated file:
+
+:::code-group
+
+```js [ESLint >=9]
+// eslint.config.mjs
+import autoImports from './.wxt/eslint-auto-imports.mjs';
+
+export default [
+  autoImports,
+  {
+    // The rest of your config...
+  },
+];
+```
+
+```js [ESLint <=8]
+// .eslintrc.mjs
+export default {
+  extends: ['./.wxt/eslintrc-auto-import.json'],
+  // The rest of your config...
+};
+```
+
+:::
+
+## Disabling Auto-imports
+
+Not all developers like auto-imports. To disable them, set `imports` to `false`.
+
+```ts
+export default defineConfig({
+  imports: false, // [!code ++]
+});
+```
+
+## Explicit Imports (`#imports`)
+
+You can manually import all of WXT's APIs via the `#imports` module:
+
+```ts
+import {
+  createShadowRootUi,
+  ContentScriptContext,
+  MatchPattern,
+} from '#imports';
+```
+
+To learn more about how the `#imports` module works, read the [related blog post](/blog/2024-12-06-using-imports-module).
+
+If you've disabled auto-imports, you should still use `#imports` to import all of WXT's APIs from a single place.

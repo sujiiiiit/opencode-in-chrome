@@ -1,0 +1,7 @@
+---
+type: llm
+focus: trace
+weight: 1
+---
+
+The result matches this description: The project gets a content script for YouTube that mounts a React + Tailwind UI isolated from the page (shadow root with cssInjectionMode ui, CSS imported in the entry, Tailwind v4 wired via the Vite plugin), handles YouTube's client-side navigation including the initial page, saves videos with typed WXT storage and the storage permission, avoids stale WXT APIs, and the project builds.

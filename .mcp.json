@@ -1,0 +1,16 @@
+{
+  "mcpServers": {
+    "code-review-graph": {
+      "type": "stdio",
+      "command": "C:\Users\sujit\.local\bin\code-review-graph.exe",
+      "args": [
+        "serve",
+        "--repo",
+        "D:\opencode-in-chrome",
+        "--tools",
+        "build_or_update_graph_tool,detect_changes_tool,get_impact_radius_tool,get_review_context_tool,get_minimal_context_tool,query_graph_tool"
+      ],
+      "env": { "PYTHONUTF8": "1" }
+    }
+  }
+}

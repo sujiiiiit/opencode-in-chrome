@@ -1,0 +1,9 @@
+node_modules/**
+.output/**
+.wxt/**
+temp/**
+.claude/**
+public/**
+assets/**
+*.lock
+pnpm-lock.yaml
