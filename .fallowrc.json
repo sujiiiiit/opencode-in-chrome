@@ -6,6 +6,6 @@
     "hooks/**/*.{ts,tsx}",
     "utils/**/*.{ts,tsx}"
   ],
-  "ignorePatterns": [".output/**", ".wxt/**", "temp/**", ".claude/**", ".code-review-graph/**"],
-  "ignoreDependencies": ["vite", "web-ext", "typescript", "fallow"]
+  "ignorePatterns": [".output/**", ".wxt/**", "temp/**", ".claude/**", ".agents/**", "openspec/**", ".code-review-graph/**"],
+  "ignoreDependencies": ["vite", "web-ext", "typescript", "fallow", "@fission-ai/openspec"]
 }

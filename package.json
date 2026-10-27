@@ -25,6 +25,7 @@
     "react-dom": "^19.2.4"
   },
   "devDependencies": {
+    "@fission-ai/openspec": "1.15.0",
     "@tailwindcss/vite": "^4.3.3",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
