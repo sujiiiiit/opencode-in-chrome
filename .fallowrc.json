@@ -1,0 +1,11 @@
+{
+  "$schema": "./node_modules/fallow/schema.json",
+  "entry": [
+    "components/**/*.{ts,tsx}",
+    "composables/**/*.{ts,tsx}",
+    "hooks/**/*.{ts,tsx}",
+    "utils/**/*.{ts,tsx}"
+  ],
+  "ignorePatterns": [".output/**", ".wxt/**", "temp/**", ".claude/**", ".code-review-graph/**"],
+  "ignoreDependencies": ["vite", "web-ext", "typescript", "fallow"]
+}
