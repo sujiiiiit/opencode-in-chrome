@@ -1,6 +1,6 @@
 # Code review checklist
 
-Run `node scripts/wxt-env.mjs` first (it flags stale APIs and layout problems automatically), then check:
+Run `node scripts/wxt-env.mjs` first (it flags stale APIs and layout problems automatically). If code-review-graph MCP tools are available, run `detect_changes`/`get_impact_radius` to find affected entrypoints (it misses `@/`/`~/` alias imports, so also grep for the module name). Then check:
 
 **Background**
 - [ ] `main()` is sync; all listeners registered at its top
