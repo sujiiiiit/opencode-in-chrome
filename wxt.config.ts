@@ -13,5 +13,9 @@ export default defineConfig({
     // No popup is built for Chromium/Firefox, so declare the toolbar action
     // explicitly. Clicking it opens the side panel (see entrypoints/background.ts).
     action: { default_title: 'Opencode' },
+    // Loopback only: the extension talks to the local opencode server and
+    // nothing else. Non-loopback servers need optional_host_permissions later.
+    permissions: ['storage', 'sidePanel'],
+    host_permissions: ['http://127.0.0.1/*', 'http://localhost/*'],
   },
 });

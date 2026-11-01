@@ -63,3 +63,21 @@ Rules:
 - Don't run `fallow watch` (it never exits). Don't add suppression comments unless the user agrees.
 - code-review-graph does not resolve WXT's `@/`/`~/` alias imports: when checking impact, also grep for the module name. fallow does resolve them.
 <!-- /fallow -->
+
+<!-- shadcn-baseui -->
+## UI: shadcn/ui + Base UI (not Radix)
+
+This project uses shadcn/ui with **Base UI**: `components.json` has `"style": "base-luma"` and the dependency is `@base-ui/react`. Load the `shadcn-baseui` skill before any UI work and never use Radix-only APIs.
+
+- Use the `render` prop instead of `asChild` on every trigger/wrapper part (Dialog, AlertDialog, DropdownMenu, Popover, Tooltip, Select, Tabs, Accordion, ...).
+
+  ```tsx
+  <DropdownMenuTrigger render={<Button variant="outline" />}>Open</DropdownMenuTrigger>
+  ```
+
+- `Button` rendered as a link or other non-button element: pass `nativeButton={false}` with `render`.
+- `Accordion`: no `type` prop. Use the boolean `multiple` prop; `defaultValue` is always an array (`<Accordion multiple defaultValue={["item-1"]}>`).
+- `SelectContent`: use `alignItemWithTrigger={false}` instead of `position="popper"`.
+- Dropdown menu group parts: `DropdownMenuLabel` must be inside `DropdownMenuGroup` (or `DropdownMenuRadioGroup`), otherwise Base UI throws `MenuGroupContext is missing` and the whole menu renders blank. Keep labels and their items/radio groups in the same `DropdownMenuGroup`.
+- When a Base UI prop is unclear, check the actual types in `node_modules/@base-ui/react/<component>` or the shadcn registry; do not assume Radix prop names.
+<!-- /shadcn-baseui -->
