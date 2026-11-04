@@ -42,6 +42,19 @@ describe('SseParser', () => {
     expect(p.feed('data: {"type":"a","data":{}}\n')).toEqual([]);
     expect(p.feed('\n')).toHaveLength(1);
     expect(p.feed('data: {"type":"b","data":{}}\r\n\r\n')).toHaveLength(1);
+    expect(p.feed('data: {"type":"c","data":{}}\r')).toEqual([]);
+    expect(p.feed('\n\r')).toEqual([]);
+    expect(p.feed('\n')).toHaveLength(1);
+  });
+
+  it('accumulates a large image event across many chunks', () => {
+    const data = 'a'.repeat(250_000);
+    const raw = frame({ type: 'session.inbox.enqueued', data: { file: data } });
+    const parser = new SseParser();
+    const events: ServerEvent[] = [];
+    for (let at = 0; at < raw.length; at += 1024) events.push(...parser.feed(raw.slice(at, at + 1024)));
+    expect(events).toHaveLength(1);
+    expect(events[0]?.data.file).toBe(data);
   });
 
   it('skips malformed JSON and events without a string type', () => {

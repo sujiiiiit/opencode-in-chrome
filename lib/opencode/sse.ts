@@ -43,15 +43,18 @@ function toEvent(raw: unknown): ServerEvent | null {
 
 /** Incremental parser: feed text chunks, get complete events back. */
 export class SseParser {
-  private buffer = '';
+  private parts: string[] = [];
+  private pendingCR = '';
 
   feed(chunk: string): ServerEvent[] {
-    this.buffer = (this.buffer + chunk).replace(/\r\n/g, '\n');
+    let input = this.pendingCR + chunk;
+    this.pendingCR = input.endsWith('\r') ? '\r' : '';
+    if (this.pendingCR) input = input.slice(0, -1);
+    input = input.replace(/\r\n/g, '\n');
     const events: ServerEvent[] = [];
-    let boundary = this.buffer.indexOf('\n\n');
-    while (boundary >= 0) {
-      const block = this.buffer.slice(0, boundary);
-      this.buffer = this.buffer.slice(boundary + 2);
+    const finish = () => {
+      const block = this.parts.join('');
+      this.parts = [];
       const data = block
         .split('\n')
         .filter((line) => line.startsWith('data:'))
@@ -65,8 +68,22 @@ export class SseParser {
           // Malformed frame from an untrusted source: skip it.
         }
       }
-      boundary = this.buffer.indexOf('\n\n');
+    };
+    let start = 0;
+    if (this.parts.at(-1)?.endsWith('\n') && input.startsWith('\n')) {
+      const last = this.parts.pop()!;
+      this.parts.push(last.slice(0, -1));
+      finish();
+      start = 1;
     }
+    let boundary = input.indexOf('\n\n', start);
+    while (boundary >= 0) {
+      this.parts.push(input.slice(start, boundary));
+      finish();
+      start = boundary + 2;
+      boundary = input.indexOf('\n\n', start);
+    }
+    if (start < input.length) this.parts.push(input.slice(start));
     return events;
   }
 }
