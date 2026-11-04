@@ -21,6 +21,8 @@ import { useModelShortcuts, useModelStore, useModelSync } from './model/use-mode
 import { FormCard } from './form-card';
 import { Notice } from './notice';
 import { WebSearchMenu } from './web-search-menu';
+import { DropOverlay } from './drop-overlay';
+import { useFileDrop } from './use-file-drop';
 import { AttachMenu } from './prompt-box/attach-menu';
 import { AttachmentStrip } from './prompt-box/attachment-strip';
 import { PromptBox, type PromptBoxHandle } from './prompt-box/prompt-box';
@@ -114,6 +116,8 @@ type ChatPaneProps = {
   connection: Connection;
   session: ReturnType<typeof useChatSession>;
   models: Models;
+  /** The chat is the view on screen (not History): files can be dropped on it. */
+  active: boolean;
   onHistory: () => void;
   onNewChat: () => void;
 };
@@ -197,31 +201,42 @@ type ChatComposerProps = {
   box: RefObject<PromptBoxHandle | null>;
   composer: ReturnType<typeof useComposer>;
   models: Models;
+  /** The chat is on screen: files dropped on the panel attach to the draft. */
+  active: boolean;
   onOpenPicker: () => void;
 };
 
-/** The prompt box with its attach menu, attached images and model chips. */
-function ChatComposer({ box, composer, models, onOpenPicker }: ChatComposerProps) {
+/**
+ * The prompt box with its attach menu, attached images and model chips, and the drop zone that
+ * covers the whole pane (the overlay is placed against the pane, its nearest positioned box).
+ */
+function ChatComposer({ box, composer, models, active, onOpenPicker }: ChatComposerProps) {
+  // History, sliding over the chat, takes no drops.
+  const dragging = useFileDrop(composer.addFiles, active);
   return (
-    <PromptBox
-      ref={box}
-      controls={<AttachMenu onFiles={composer.addFiles} />}
-      footer={models.store && <ComposerFooter models={models} onOpenPicker={onOpenPicker} />}
-      attachments={<AttachmentStrip images={composer.images} onRemove={composer.removeImage} />}
-      placeholder={composer.placeholder}
-      working={composer.working}
-      held={composer.held}
-      stopping={composer.stopping}
-      disabled={composer.disabled}
-      onChange={composer.onChange}
-      onSubmit={composer.submit}
-      onStop={composer.stop}
-    />
+    <>
+      <DropOverlay visible={dragging} />
+      <PromptBox
+        ref={box}
+        controls={<AttachMenu onFiles={composer.addFiles} />}
+        footer={models.store && <ComposerFooter models={models} onOpenPicker={onOpenPicker} />}
+        attachments={<AttachmentStrip images={composer.images} onRemove={composer.removeImage} />}
+        placeholder={composer.placeholder}
+        working={composer.working}
+        held={composer.held}
+        stopping={composer.stopping}
+        disabled={composer.disabled}
+        onChange={composer.onChange}
+        onSubmit={composer.submit}
+        onStop={composer.stop}
+        onPasteFiles={composer.addFiles}
+      />
+    </>
   );
 }
 
 /** The conversation and the composer. */
-function ChatPane({ connection, session, models, onHistory, onNewChat }: ChatPaneProps) {
+function ChatPane({ connection, session, models, active, onHistory, onNewChat }: ChatPaneProps) {
   const { chat, state, activeID } = session;
   const box = useRef<PromptBoxHandle>(null);
   const composer = useComposer({
@@ -240,7 +255,7 @@ function ChatPane({ connection, session, models, onHistory, onNewChat }: ChatPan
   const loadEarlier = useCallback(() => void chat?.loadEarlier(), [chat]);
 
   return (
-    <div className="flex h-full min-h-0 flex-col">
+    <div className="relative flex h-full min-h-0 flex-col">
       <ChatHeader title={title} activeID={activeID} connection={connection} onError={setSearchError} onHistory={onHistory} onNewChat={onNewChat} />
       <ConnectionBanners connection={connection} />
       {/* Shell tools in the replies read their live output through the open chat. */}
@@ -260,7 +275,7 @@ function ChatPane({ connection, session, models, onHistory, onNewChat }: ChatPan
         <PaneForms session={session} />
         {searchError && <Notice text={`Web search: ${searchError}`} onDismiss={() => setSearchError(null)} />}
         <PaneNotice session={session} models={models} />
-        <ChatComposer box={box} composer={composer} models={models} onOpenPicker={picker.open} />
+        <ChatComposer box={box} composer={composer} models={models} active={active} onOpenPicker={picker.open} />
       </div>
       {store && <ModelPicker open={picker.picking} onOpenChange={picker.onOpenChange} store={store} state={models.state} />}
     </div>
@@ -332,6 +347,7 @@ export function ChatScreen({ connection, onUnauthorized }: Props) {
             connection={connection}
             session={session}
             models={models}
+            active={view === 'chat'}
             onHistory={() => setView('history')}
             onNewChat={startNewChat}
           />

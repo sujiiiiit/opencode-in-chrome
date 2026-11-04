@@ -1,4 +1,5 @@
 import { useImperativeHandle, useRef, useState, type ClipboardEvent, type DragEvent, type FormEvent, type Ref } from 'react';
+import { isFileDrag, pastedFiles } from '@/lib/transfer-files';
 import { caretToEnd, insertPlainText, placeCaretAt, readText } from './editor-dom';
 
 export type PromptBoxHandle = {
@@ -28,7 +29,12 @@ const focusEnd = (el: HTMLElement) => {
  * The plain-text `contenteditable` editor: reads it back as a string, exposes `setText`/`focus`
  * through `ref`, and reduces paste and drop to `text/plain` while blocking rich-text commands.
  */
-export function usePlainTextEditor(ref: Ref<PromptBoxHandle> | undefined, onChange: (text: string) => void) {
+export function usePlainTextEditor(
+  ref: Ref<PromptBoxHandle> | undefined,
+  onChange: (text: string) => void,
+  /** Files pasted into the editor (a screenshot, copied images or files); absent, a paste is text only. */
+  onPasteFiles?: (files: File[]) => void,
+) {
   const editor = useRef<HTMLDivElement>(null);
   const [text, setText] = useState('');
 
@@ -66,13 +72,19 @@ export function usePlainTextEditor(ref: Ref<PromptBoxHandle> | undefined, onChan
     if (type.startsWith('format') || type === 'insertFromPasteAsQuotation') event.preventDefault();
   };
 
+  // Ctrl+V and Cmd+V both arrive here as the same `paste` event, so no key handling is needed.
   const onPaste = (event: ClipboardEvent<HTMLDivElement>) => {
     event.preventDefault();
+    const files = onPasteFiles ? pastedFiles(event.clipboardData) : [];
+    if (files.length) return void onPasteFiles?.(files);
     insertPlainText(event.currentTarget, event.clipboardData.getData('text/plain'));
   };
 
   const onDrop = (event: DragEvent<HTMLDivElement>) => {
     event.preventDefault();
+    // Dropped files belong to the pane's drop zone (useFileDrop); a file's path or name, which
+    // Finder and some file managers add as text, must not land in the message as well.
+    if (isFileDrag(event.dataTransfer)) return;
     const value = event.dataTransfer.getData('text/plain');
     if (!value) return;
     const target = event.currentTarget;

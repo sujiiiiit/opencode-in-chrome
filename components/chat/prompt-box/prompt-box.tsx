@@ -31,6 +31,8 @@ type Props = {
   onChange: (text: string) => void;
   onSubmit: () => void;
   onStop: () => void;
+  /** Files pasted into the box (Ctrl/Cmd+V of a screenshot, copied images or files). */
+  onPasteFiles?: (files: File[]) => void;
 };
 
 /**
@@ -88,7 +90,7 @@ function SubmitButton({
  * (Ctrl+B, …) are blocked, so no markup from the clipboard or another page reaches the DOM.
  */
 export function PromptBox({ ref, placeholder = PLACEHOLDER, ...props }: Props) {
-  const { editor, text, handlers } = usePlainTextEditor(ref, props.onChange);
+  const { editor, text, handlers } = usePlainTextEditor(ref, props.onChange, props.onPasteFiles);
 
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     const { key, ctrlKey, metaKey, altKey, shiftKey, repeat, keyCode } = event;

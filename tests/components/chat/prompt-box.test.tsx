@@ -1,8 +1,9 @@
 import { act, createRef, type ComponentProps } from 'react';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { createEvent, fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { PromptBox, type PromptBoxHandle } from '@/components/chat/prompt-box/prompt-box';
+import { fileOf, transfer } from '@/tests/support/transfer';
 
 const box = () => screen.getByRole('textbox', { name: /message/i });
 const submit = () => screen.getByRole('button', { name: /^(send|stop)$/i });
@@ -73,6 +74,43 @@ describe('PromptBox editor', () => {
     expect(box().querySelector('img, b')).toBeNull();
     expect(box()).toHaveTextContent('<b>bold</b>');
     expect(onChange).toHaveBeenLastCalledWith('<b>bold</b>');
+  });
+});
+
+describe('PromptBox paste and drop of files', () => {
+  it('hands a pasted screenshot to onPasteFiles and inserts nothing', () => {
+    const onPasteFiles = vi.fn();
+    const { onChange } = setup({ onPasteFiles });
+    const shot = fileOf('image.png');
+    const paste = createEvent.paste(box(), { clipboardData: transfer({ files: [shot] }) });
+    fireEvent(box(), paste);
+    expect(paste.defaultPrevented).toBe(true);
+    expect(onPasteFiles).toHaveBeenCalledWith([shot]);
+    expect(box()).toBeEmptyDOMElement();
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it('pastes copied spreadsheet cells as text, not as their picture', () => {
+    const onPasteFiles = vi.fn();
+    const { onChange } = setup({ onPasteFiles });
+    box().focus();
+    fireEvent.paste(box(), { clipboardData: transfer({ files: [fileOf('image.png')], text: 'Q1\t120' }) });
+    expect(onPasteFiles).not.toHaveBeenCalled();
+    expect(onChange).toHaveBeenLastCalledWith('Q1\t120');
+  });
+
+  it('without onPasteFiles, a paste with files still pastes only its text', () => {
+    const { onChange } = setup();
+    box().focus();
+    fireEvent.paste(box(), { clipboardData: transfer({ files: [fileOf('holiday.jpg', 'image/jpeg')], text: 'holiday.jpg' }) });
+    expect(onChange).toHaveBeenLastCalledWith('holiday.jpg');
+  });
+
+  it('leaves dropped files to the drop zone: no file name lands in the message', () => {
+    const { onChange } = setup();
+    fireEvent.drop(box(), { dataTransfer: transfer({ files: [fileOf('holiday.jpg', 'image/jpeg')], text: '/Users/me/holiday.jpg' }) });
+    expect(box()).toBeEmptyDOMElement();
+    expect(onChange).not.toHaveBeenCalled();
   });
 });
 

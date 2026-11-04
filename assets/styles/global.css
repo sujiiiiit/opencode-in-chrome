@@ -50,6 +50,8 @@
   --viewer-control-hover: #ffffff2e; /* 18% */
   --tile-shade: #00000061; /* 38%: under a gallery's "+N", frosted */
   --tile-hover: #00000014; /* 8%: a picture that opens, under the pointer */
+  /* The drop overlay (components/chat/drop-overlay): the panel fades behind a white veil. */
+  --drop-veil: #ffffffd9; /* 85% */
   /* Streamdown's code block and table headers (its `bg-sidebar` / `border-sidebar`). */
   --sidebar: var(--background-secondary);
   /* Terminal output in a shell tool's details. */
@@ -191,6 +193,7 @@
   --color-viewer-control-hover: var(--viewer-control-hover);
   --color-tile-shade: var(--tile-shade);
   --color-tile-hover: var(--tile-hover);
+  --color-drop-veil: var(--drop-veil);
   --color-popover: var(--popover);
   --color-popover-foreground: var(--popover-foreground);
   --color-background-primary-transparent: var(--bacPriTra);
