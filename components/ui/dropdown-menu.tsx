@@ -1,15 +1,14 @@
 import * as React from 'react';
 import { Menu as MenuPrimitive } from '@base-ui/react/menu';
 import { cn } from 'cn';
-import { HugeiconsIcon } from '@hugeicons/react';
-import { ArrowRight01Icon, Tick02Icon } from '@hugeicons/core-free-icons';
+import { Icon, Tick2Icon } from '@/components/ui/icon';
 import { shortcutLabel } from '@/lib/keyboard';
 
 // ─── Shared ────────────────────────────────────────────────────────────────
 
 /** Base className shared by all interactive item variants */
 const itemCn =
-  "focus:bg-accent focus:text-accent-foreground min-h-7 py-1.5 gap-4 w-full text-sm leading-tight rounded-2xl px-2 pl-2.5 data-inset:pl-7 [&_svg:not([class*='size-'])]:size-4 group/dropdown-menu-item relative flex items-center outline-hidden select-none data-disabled:pointer-events-none data-disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 cursor-pointer font-medium justify-start";
+  "focus:bg-accent min-h-7 py-1.5 gap-4 w-full text-sm leading-[1.2] rounded-2xl px-2 pl-2.5 data-inset:pl-7 [&_svg:not([class*='size-'])]:size-4 group/dropdown-menu-item relative flex items-center outline-hidden select-none data-disabled:pointer-events-none data-disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 cursor-pointer justify-start";
 
 type ItemSharedProps = {
   inset?: boolean;
@@ -75,7 +74,7 @@ function ItemTrailing({
       {subtext && (
         <div
           data-slot="dropdown-menu-item-subtext"
-          className="text-muted-foreground mr-1 ml-auto text-sm leading-tight text-nowrap"
+          className="text-muted-foreground mr-1 ml-auto text-sm leading-[1.2] text-nowrap"
         >
           {subtext}
         </div>
@@ -141,7 +140,7 @@ const DropdownMenuSeparator = React.forwardRef<
   <MenuPrimitive.Separator
     ref={ref}
     data-slot="dropdown-menu-separator"
-    className={cn('bg-border mx-1 my-1 h-px', className)}
+    className={cn('bg-border/50 mx-1 my-1 h-px', className)}
     {...props}
   />
 ));
@@ -209,7 +208,7 @@ function DropdownMenuSubContent({
   align = 'start',
   alignOffset = -3,
   side = 'right',
-  sideOffset = 12,
+  sideOffset = 0,
   className,
   ...props
 }: DropdownMenuContentProps) {
@@ -238,7 +237,7 @@ function DropdownMenuLabel({
 }: MenuPrimitive.GroupLabel.Props & { inset?: boolean }) {
   const insideGroup = React.useContext(DropdownMenuGroupContext);
   const labelClassName = cn(
-    'text-muted-foreground pointer-events-none px-2 py-1.5 text-xs font-medium select-none data-inset:pl-7',
+    'text-muted-foreground pointer-events-none px-2 py-1.5 text-xs select-none data-inset:pl-7',
     className
   );
 
@@ -294,6 +293,7 @@ function DropdownMenuItem({
           'text-destructive',
           '[&_svg]:text-destructive',
           'focus:bg-destructive/10',
+          'dark:focus:bg-destructive/20',
           'focus:text-destructive'
         ],
         className
@@ -336,8 +336,8 @@ function DropdownMenuSubTrigger({
       <ItemContent icon={icon} text={text} subtext={subtext} shortcut={shortcut} badge={badge}>
         {children}
       </ItemContent>
-      <HugeiconsIcon
-        icon={ArrowRight01Icon}
+      <Icon
+        name="arrow-right"
         strokeWidth={2}
         className="text-muted-foreground ml-auto shrink-0"
       />
@@ -354,7 +354,7 @@ function CheckIndicator({ slot }: { slot: string }) {
       data-slot={slot}
     >
       <MenuPrimitive.CheckboxItemIndicator>
-        <HugeiconsIcon icon={Tick02Icon} strokeWidth={2} />
+        <Tick2Icon />
       </MenuPrimitive.CheckboxItemIndicator>
     </span>
   );
@@ -367,7 +367,7 @@ function RadioIndicator({ slot }: { slot: string }) {
       data-slot={slot}
     >
       <MenuPrimitive.RadioItemIndicator>
-        <HugeiconsIcon icon={Tick02Icon} strokeWidth={2} />
+        <Tick2Icon />
       </MenuPrimitive.RadioItemIndicator>
     </span>
   );
