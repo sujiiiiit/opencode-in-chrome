@@ -1,4 +1,4 @@
-import { memo } from 'react';
+import { createContext, memo, useContext, useDeferredValue, useState } from 'react';
 import { cn } from 'cn';
 import { BLOCK_COMPONENTS, codePlugin } from './markdown-blocks';
 import { parseBlocks } from './media/image-blocks';
@@ -57,6 +57,9 @@ const ANIMATION: AnimateOptions = {
 
 const CONTROLS: ControlsConfig = { mermaid: false, image: false };
 
+/** Whether the reply around an answer's markdown is still streaming (AssistantReply); null elsewhere. */
+export const ReplyLive = createContext<boolean | null>(null);
+
 type Props = {
   text: string;
   /** `work` is one step smaller, for text inside an open work group. */
@@ -72,13 +75,25 @@ type Props = {
  * stops (and its last words have faded in) the text renders without the per-word wrappers.
  */
 export const Markdown = memo(function Markdown({ text, animate, size = 'body', className }: Props) {
+  // Dropping the word wrappers re-parses every block (Streamdown swaps its plugins) while nothing
+  // on screen changes: the words have already faded in. So an answer that streamed keeps them
+  // until the whole reply finishes (re-parsing while later parts stream would be interrupted and
+  // redone with every delta), then drops them in a background render instead of blocking a frame.
+  // Text outside a ReplyLive answer (work groups, tool output) drops them at once: a collapsed
+  // group is display:none, and showing it again would replay any fade it still carried.
+  const replyLive = useContext(ReplyLive);
+  const [streamed, setStreamed] = useState(animate);
+  if (animate && !streamed) setStreamed(true);
+  const held = animate || (streamed && replyLive === true);
+  const settling = useDeferredValue(held);
+  const animating = replyLive === null ? animate : held || settling;
   return (
     <Streamdown
       // Spacing, headings, lists, tables and code are sized for the narrow panel by `.reply-md`
       // (global.css), not by Streamdown's page-sized defaults.
       className={cn('reply-md min-w-0 text-text-primary wrap-anywhere', size === 'work' ? 'type-work' : 'type-body', className)}
       mode="streaming"
-      isAnimating={animate}
+      isAnimating={animating}
       animated={ANIMATION}
       plugins={PLUGINS}
       components={BLOCK_COMPONENTS}

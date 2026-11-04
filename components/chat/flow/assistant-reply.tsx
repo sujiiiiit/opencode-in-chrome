@@ -4,7 +4,7 @@ import { replyFlow, type FlowItem, type WorkGroup as Group } from '@/lib/opencod
 import type { ReplyState } from '@/lib/opencode/reply';
 import type { TurnStats } from '@/lib/opencode/turn-stats';
 import { AnswerFooter } from '../message-footer';
-import { Markdown } from './markdown';
+import { Markdown, ReplyLive } from './markdown';
 import { WorkGroup } from './work-group';
 
 const PENDING: Group = { type: 'work', key: 'work:pending', parts: [] };
@@ -57,7 +57,10 @@ export const AssistantReply = memo(function AssistantReply({
             data-slot="assistant-answer"
             className={index > 0 && flow[index - 1]?.type === 'work' ? 'mt-1' : undefined}
           >
-            <Markdown text={item.part.text} animate={live && index === items.length - 1} />
+            {/* An answer keeps its streamed words' wrappers until the whole reply finishes (markdown.tsx). */}
+            <ReplyLive value={live}>
+              <Markdown text={item.part.text} animate={live && index === items.length - 1} />
+            </ReplyLive>
           </div>
         ),
       )}

@@ -343,7 +343,8 @@ describe('AssistantReply', () => {
     rerender(<AssistantReply reply={reply('running', [text('early', 'Checking.')])} />);
     expect(answer().querySelector('[data-sd-animate]')).toBe(early);
     rerender(<AssistantReply reply={reply('running', [text('early', 'Checking.'), tool('x1', 'read')])} />);
-    expect(answer().querySelector('[data-sd-animate]')).toBeNull();
+    // The faded-in words keep their nodes while the reply runs (no re-parse, no fade replay).
+    expect(answer().querySelector('[data-sd-animate]')).toBe(early);
     expect(answer().textContent).toContain('Checking.');
     expect(groupHeader()).toHaveAttribute('aria-expanded', 'false');
     const originalGroup = group();
@@ -355,16 +356,20 @@ describe('AssistantReply', () => {
 
   it('animates only the latest text part', () => {
     const { rerender } = render(<AssistantReply reply={reply('running', [text('a', 'First', { done: false })])} />);
-    expect(answer().querySelectorAll('[data-sd-animate]').length).toBeGreaterThan(0);
+    const firstWords = [...answer().querySelectorAll('[data-sd-animate]')];
+    expect(firstWords.length).toBeGreaterThan(0);
+    const answers = () => [...document.querySelectorAll('[data-slot="assistant-answer"]')];
+    const words = (element: Element) => [...element.querySelectorAll('[data-sd-animate]')];
     rerender(<AssistantReply reply={reply('running', [text('a', 'First'), text('b', 'Second', { done: false })])} />);
-    const items = answer().querySelectorAll('[data-sd-animate]');
-    expect(items.length).toBeGreaterThan(0);
-    expect([...items].map((item) => item.textContent).join('')).toContain('Second');
-    expect([...items].map((item) => item.textContent).join('')).not.toContain('First');
+    // The new part fades in; the earlier one keeps the nodes it faded in with, so it never fades again.
+    expect(words(answers()[1]!).map((item) => item.textContent).join('')).toContain('Second');
+    expect(words(answers()[0]!)).toEqual(firstWords);
     rerender(<AssistantReply reply={reply('running', [text('a', 'First', { done: false }), text('b', 'Second', { done: false })])} />);
-    const stillAnimating = [...answer().querySelectorAll('[data-sd-animate]')].map((item) => item.textContent).join('');
-    expect(stillAnimating).toContain('Second');
-    expect(stillAnimating).not.toContain('First');
+    expect(words(answers()[0]!)).toEqual(firstWords);
+    // Once the reply finishes, its answers render as plain settled text.
+    rerender(<AssistantReply reply={reply('succeeded', [text('a', 'First'), text('b', 'Second')])} />);
+    expect(answer().querySelector('[data-sd-animate]')).toBeNull();
+    expect(answer().textContent).toContain('FirstSecond');
   });
 
   it('compresses a fast batch into a short reveal backlog', () => {
