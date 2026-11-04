@@ -549,7 +549,7 @@ body {
   margin-block: 0.75em;
 }
 
-.reply-md :is([data-streamdown="code-block"], [data-streamdown="table-wrapper"]) {
+.reply-md :is([data-streamdown="code-block"], [data-streamdown="table-wrapper"], [data-streamdown="image-wrapper"]) {
   margin-block: 1em;
 }
 
@@ -661,6 +661,11 @@ body {
 
 .reply-md li > :last-child {
   margin-bottom: 0;
+}
+
+/* An image in a list item (a numbered gallery) keeps a little air from the next item's image. */
+.reply-md li > [data-streamdown="image-wrapper"] {
+  margin-block: 0.25em 0.5em;
 }
 
 .reply-md li::marker {

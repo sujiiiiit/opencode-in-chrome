@@ -1,6 +1,8 @@
 import { memo } from 'react';
 import { cn } from 'cn';
 import { BLOCK_COMPONENTS, codePlugin } from './markdown-blocks';
+import { parseBlocks } from './media/image-blocks';
+import { IMAGE_SOURCE } from './media/reply-image';
 import {
   defaultRehypePlugins,
   defaultRemarkPlugins,
@@ -26,15 +28,24 @@ function remarkHtmlAsText() {
   return walk;
 }
 
+type SanitizeSchema = { protocols?: Record<string, string[] | undefined> };
+const [sanitize, schema] = defaultRehypePlugins.sanitize as [unknown, SanitizeSchema];
+
+/** Streamdown's sanitizer, letting an image's source also be inline data (`data:image/...`). */
+const sanitizeWithDataImages = [
+  sanitize,
+  { ...schema, protocols: { ...schema.protocols, src: [...(schema.protocols?.src ?? []), 'data'] } },
+];
+
 // Streamdown's sanitizer and hardening, without its raw-HTML pass (nothing is HTML any more).
-const rehypePlugins = [defaultRehypePlugins.sanitize, defaultRehypePlugins.harden] as StreamdownProps['rehypePlugins'];
+const rehypePlugins = [sanitizeWithDataImages, defaultRehypePlugins.harden] as StreamdownProps['rehypePlugins'];
 const remarkPlugins = [...Object.values(defaultRemarkPlugins), remarkHtmlAsText] as StreamdownProps['remarkPlugins'];
 
-/**
- * Links only to the web and mail, and no image source at all: a reply cannot make the panel
- * fetch anything (which would tell a remote server the chat was read).
- */
-const urlTransform: UrlTransform = (url, key) => (key !== 'src' && /^(https?:|mailto:)/i.test(url) ? url : null);
+/** Links only to the web and mail; images from the web or inline data (see reply-image.tsx). */
+const urlTransform: UrlTransform = (url, key) => {
+  if (key === 'src') return IMAGE_SOURCE.test(url) ? url : null;
+  return /^(https?:|mailto:)/i.test(url) ? url : null;
+};
 
 /** Arrival drives the reveal. Streamdown compresses each batch's stagger to this short backlog. */
 /** Highlighting for the code blocks (see markdown-blocks.tsx). */
@@ -75,6 +86,8 @@ export const Markdown = memo(function Markdown({ text, animate, size = 'body', c
       rehypePlugins={rehypePlugins}
       urlTransform={urlTransform}
       controls={CONTROLS}
+      // Runs of images join into one block, so they render as one gallery.
+      parseMarkdownIntoBlocksFn={parseBlocks}
       // No confirmation dialog: a link opens in a new tab on click.
       linkSafety={{ enabled: false }}
       dir="auto"

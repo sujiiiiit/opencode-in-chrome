@@ -11,6 +11,8 @@ import {
 } from 'streamdown';
 import { CopyButton } from '@/components/ui/copy-button';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { ReplyParagraph } from './media/image-blocks';
+import { ReplyImage } from './media/reply-image';
 
 const syntax = (name: string) => `var(--syntax-${name})`;
 const token = (scope: string[], name: string) => ({ scope, settings: { foreground: syntax(name) } });
@@ -162,4 +164,4 @@ const ReplyTable: Components['table'] = ({ children, node: _node, ...props }) =>
   );
 };
 
-export const BLOCK_COMPONENTS: Components = { code: ReplyCode, table: ReplyTable };
+export const BLOCK_COMPONENTS: Components = { code: ReplyCode, table: ReplyTable, img: ReplyImage, p: ReplyParagraph };
