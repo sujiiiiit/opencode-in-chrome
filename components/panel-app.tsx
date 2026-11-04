@@ -38,11 +38,5 @@ export default function PanelApp() {
   if (view.name === 'pair') {
     return <PairScreen notice={view.notice} onPaired={(connection) => setView({ name: 'chat', connection })} />;
   }
-  return (
-    <ChatScreen
-      connection={view.connection}
-      onUnauthorized={() => void leave(SESSION_EXPIRED)}
-      onUnpair={() => void leave()}
-    />
-  );
+  return <ChatScreen connection={view.connection} onUnauthorized={() => void leave(SESSION_EXPIRED)} />;
 }

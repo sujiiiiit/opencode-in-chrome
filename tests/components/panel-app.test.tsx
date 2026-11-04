@@ -2,7 +2,8 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { loadConnection, saveConnection, type Connection } from '@/lib/opencode/connection';
-import { BASE, TOKEN, fakeServer, routeFetch, unauthorized } from '@/tests/support/testkit';
+import { fakeOpencode } from '@/tests/support/queue-server';
+import { BASE, TOKEN, routeFetch, unauthorized } from '@/tests/support/testkit';
 import PanelApp from '@/components/panel-app';
 
 const connection: Connection = {
@@ -27,24 +28,13 @@ describe('PanelApp routing', () => {
     expect(await screen.findByRole('textbox', { name: /message/i })).toBeInTheDocument();
   });
 
-  it('on a 401 clears the connection and returns to the pair screen with a notice', async () => {
+  it('on a 401 (seen as soon as the chat connects) clears the connection and returns to the pair screen', async () => {
     await saveConnection(connection);
-    vi.stubGlobal('fetch', fakeServer({ overrides: { 'GET /api/event': () => unauthorized() } }).fetch);
+    vi.stubGlobal('fetch', fakeOpencode({ overrides: { 'GET /api/event': () => unauthorized() } }).fetch);
     render(<PanelApp />);
-    const user = userEvent.setup();
-    await user.type(await screen.findByRole('textbox', { name: /message/i }), 'hi{Enter}');
     expect(await screen.findByLabelText(/pairing link or code/i)).toBeInTheDocument();
     expect(screen.getByText(/session expired, pair again/i)).toBeInTheDocument();
     expect(await loadConnection()).toBeNull();
-  });
-
-  it('Unpair clears the connection', async () => {
-    await saveConnection(connection);
-    vi.stubGlobal('fetch', routeFetch({}));
-    render(<PanelApp />);
-    await userEvent.setup().click(await screen.findByRole('button', { name: /unpair/i }));
-    await screen.findByLabelText(/pairing link or code/i);
-    await waitFor(async () => expect(await loadConnection()).toBeNull());
   });
 
   it('ignores an expired token and shows the pair screen', async () => {
