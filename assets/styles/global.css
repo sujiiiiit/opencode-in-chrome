@@ -462,11 +462,22 @@ body {
 }
 
 .collapsible-text[data-collapsible] {
-  --collapse-fade: 3.5rem;
+  --collapse-fade: 4.5rem;
   transition:
     height 320ms cubic-bezier(0.32, 0.72, 0, 1),
     --collapse-fade 320ms cubic-bezier(0.32, 0.72, 0, 1);
-  mask-image: linear-gradient(to bottom, #000 calc(100% - var(--collapse-fade)), transparent);
+  /* Eased stops (not a straight two-stop ramp) so the fade has no visible band edge: the text
+   * stays near-solid at first, then thins out gently and is barely there at the bottom. */
+  mask-image: linear-gradient(
+    to bottom,
+    #000 calc(100% - var(--collapse-fade)),
+    #000000e6 calc(100% - var(--collapse-fade) * 0.85),
+    #000000bf calc(100% - var(--collapse-fade) * 0.68),
+    #00000080 calc(100% - var(--collapse-fade) * 0.48),
+    #00000040 calc(100% - var(--collapse-fade) * 0.28),
+    #00000014 calc(100% - var(--collapse-fade) * 0.12),
+    transparent 100%
+  );
 }
 
 .collapsible-text[data-collapsible="open"] {

@@ -2,7 +2,7 @@ import { useLayoutEffect, useRef, useState } from 'react';
 import { cn } from 'cn';
 
 /** Height of the collapsed preview, and how much overflow is worth hiding behind a toggle. */
-const COLLAPSED_PX = 144;
+const COLLAPSED_PX = 240;
 const SLACK_PX = 24;
 
 /**
