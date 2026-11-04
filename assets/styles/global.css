@@ -337,7 +337,18 @@
  * or bottom. Extra stops ease the ramp so there is no visible band edge.
  * Tunable from a parent: --fade-top-max / --fade-bottom-max cap the ramp length, and
  * --fade-bottom-inset ends the bottom fade that far above the viewport edge (for an
- * opaque toolbar overlaid on the bottom, so the fade finishes right where it starts). */
+ * opaque toolbar overlaid on the bottom, so the fade finishes right where it starts).
+ *
+ * The fade lengths below are recomputed on every scroll frame (from Base UI's per-frame
+ * overflow vars). Registered as non-inheriting so a change restyles only the viewport; as
+ * plain custom properties every element in the chat inherited them and restyled each frame
+ * (~60ms a frame in a long chat). The -max/-inset knobs above stay inherited on purpose. */
+@property --fade-top { syntax: '*'; inherits: false; }
+@property --fade-bottom { syntax: '*'; inherits: false; }
+@property --fade-end { syntax: '*'; inherits: false; }
+@property --fade-left { syntax: '*'; inherits: false; }
+@property --fade-right { syntax: '*'; inherits: false; }
+
 @utility scroll-fade-y {
   --fade-top: min(var(--fade-top-max, 3rem), var(--scroll-area-overflow-y-start, 0px));
   --fade-bottom: min(var(--fade-bottom-max, 4rem), var(--scroll-area-overflow-y-end, 0px));
