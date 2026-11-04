@@ -1,7 +1,7 @@
-"use client";
-import React, { useMemo, type JSX } from "react";
-import { motion, useReducedMotion, type HTMLMotionProps } from "framer-motion";
-import { cn } from "@/lib/utils";
+'use client';
+import React, { useMemo, type JSX } from 'react';
+import { motion, useReducedMotion, type HTMLMotionProps } from 'motion/react';
+import { cn } from '@/lib/utils';
 
 export type TextShimmerProps = {
   children: string;
@@ -12,7 +12,7 @@ export type TextShimmerProps = {
 };
 
 /** `motion.create` makes a new component type, so one per tag is kept, not one per render (which would remount and restart the sweep). */
-type MotionTag = React.ComponentType<HTMLMotionProps<"span">>;
+type MotionTag = React.ComponentType<HTMLMotionProps<'span'>>;
 const motionTags = new Map<React.ElementType, MotionTag>();
 
 function motionTag(tag: React.ElementType) {
@@ -24,13 +24,12 @@ function motionTag(tag: React.ElementType) {
   return created;
 }
 
-function TextShimmerComponent({
-  children,
-  as: Component = "p",
-  className,
-  duration = 2,
-  spread = 2,
-}: TextShimmerProps) {
+/**
+ * Two layers clipped to the text: a solid base colour, and over it a band that is transparent
+ * at both sides and the shine colour at its centre, swept right to left across a 250% box.
+ * Colours are the --shimmer-text-* tokens in global.css.
+ */
+function TextShimmerComponent({ children, as: Component = 'p', className, duration = 2, spread = 2 }: TextShimmerProps) {
   const MotionComponent = motionTag(Component);
   const reduced = useReducedMotion();
 
@@ -41,7 +40,7 @@ function TextShimmerComponent({
   // Reduced motion keeps the plain colour: no band, no sweep.
   if (reduced) {
     return (
-      <Component data-slot="text-shimmer" className={cn("text-(--shimmer-text-highlight-color)", className)}>
+      <Component data-slot="text-shimmer" className={cn('text-(--shimmer-text-highlight-color)', className)}>
         {children}
       </Component>
     );
@@ -51,21 +50,21 @@ function TextShimmerComponent({
     <MotionComponent
       data-slot="text-shimmer"
       className={cn(
-        "relative inline-block bg-[length:250%_100%,auto] bg-clip-text",
-        "text-transparent [--base-color:var(--shimmer-text-highlight-color)] [--base-gradient-color:var(--shimmer-text-faded-color)]",
-        "[background-repeat:no-repeat,padding-box] [--bg:linear-gradient(90deg,var(--shimmer-text-highlight-color)_calc(50%-var(--spread)),var(--base-gradient-color),var(--shimmer-text-highlight-color)_calc(50%+var(--spread)))]",
+        'relative inline-block bg-[length:250%_100%,auto] bg-clip-text',
+        'text-transparent [--base-color:var(--shimmer-text-highlight-color)] [--base-gradient-color:var(--shimmer-text-faded-color)]',
+        '[background-repeat:no-repeat,padding-box] [--bg:linear-gradient(90deg,#0000_calc(50%-var(--spread)),var(--base-gradient-color),#0000_calc(50%+var(--spread)))]',
         className,
       )}
-      initial={{ backgroundPosition: "100% center" }}
-      animate={{ backgroundPosition: "0% center" }}
+      initial={{ backgroundPosition: '100% center' }}
+      animate={{ backgroundPosition: '0% center' }}
       transition={{
         repeat: Infinity,
         duration,
-        ease: "linear",
+        ease: 'linear',
       }}
       style={
         {
-          "--spread": `${dynamicSpread}px`,
+          '--spread': `${dynamicSpread}px`,
           backgroundImage: `var(--bg), linear-gradient(var(--base-color), var(--base-color))`,
         } as React.CSSProperties
       }

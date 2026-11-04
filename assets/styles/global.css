@@ -52,8 +52,8 @@
   --foreground: oklch(0.145 0 0);
   --text-primary: #2c2c2b; /* texPri */
   --text-secondary: #7d7a75; /* texSec */
-  --shimmer-text-highlight-color: var(--text-secondary); /* the label's own colour */
-  --shimmer-text-faded-color: var(--border-strong); /* the lighter band that sweeps across it (the component's #d4d3cf) */
+  --shimmer-text-highlight-color: var(--text-secondary); /* the label's own colour, under the band */
+  --shimmer-text-faded-color: var(--border-strong); /* the lighter shine at the band's centre (#d4d3cf); it fades to transparent at its sides */
   --text-tertiary: #ada9a3; /* graTexTer / icoTer: placeholders, quiet icons */
   --link: var(--blue-mid); /* links in a reply's markdown */
 

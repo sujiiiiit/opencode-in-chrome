@@ -55,7 +55,17 @@ const WorkLabel = memo(function WorkLabel({ thinking, stopped, started, ended, a
   const label = active ? activity : { key: 'done', text: completedLabel(thinking, stopped, started, ended) };
   const elapsed = active && started !== undefined ? `${GAP}· ${formatDuration(now - started)}` : '';
   return <>
-    <MorphText id={label.key} text={label.text} shimmer={active} textSlot="work-activity" className={cn(!active && 'shrink-0')} />
+    {/* The shimmer paints the text with background-clip, which only covers the text's line box, so a
+        tight line height clipped ascenders and descenders. A roomier line keeps every glyph inside it. */}
+    <MorphText
+      id={label.key}
+      text={label.text}
+      shimmer={active}
+      textSlot="work-activity"
+      className={cn('leading-[1.6]', !active && 'shrink-0')}
+      textClassName="font-normal"
+      shimmerDuration={1.2}
+    />
     {/* The ticking clock stays out of the button's accessible name. */}
     <MorphText id="elapsed" text={elapsed} slot="elapsed-time" aria-hidden className="shrink-0 tabular-nums text-text-tertiary" />
   </>;
@@ -248,7 +258,17 @@ export const WorkGroup = memo(function WorkGroup({ group, live, active }: Props)
 
   return (
     <Collapsible open={open} onOpenChange={onOpenChange} disabled={empty} data-slot="work-group" data-active={active || undefined}>
-      <CollapsibleTrigger render={<Button variant="quiet" size="disclosure" className="-ml-1.5 w-auto max-w-full gap-0" />}>
+      {/* The label's shimmer takes its colour from this variable, so it follows the button's own
+          colour (secondary, primary on hover or when open), as the finished label's text does. */}
+      <CollapsibleTrigger
+        render={
+          <Button
+            variant="quiet"
+            size="disclosure"
+            className="-ml-1.5 w-auto max-w-full gap-0 [--shimmer-text-highlight-color:var(--text-secondary)] hover:[--shimmer-text-highlight-color:var(--text-primary)] aria-expanded:[--shimmer-text-highlight-color:var(--text-primary)]"
+          />
+        }
+      >
         <WorkSpinner active={active} />
         <WorkLabel thinking={thinking} stopped={stopped} started={started} ended={ended} active={active} activity={activity} />
         {/* Counts (files edited, commands, searches) are hidden for now:

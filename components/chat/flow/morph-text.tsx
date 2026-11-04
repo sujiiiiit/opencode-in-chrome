@@ -46,6 +46,10 @@ type Props = {
   slot?: string;
   /** `data-slot` of the current text, for tests and styles. */
   textSlot?: string;
+  /** Classes for the shimmering text's own box (only while `shimmer` is on). */
+  textClassName?: string;
+  /** Seconds for one shimmer sweep (only while `shimmer` is on). */
+  shimmerDuration?: number;
   'aria-hidden'?: boolean;
 };
 
@@ -134,7 +138,7 @@ function useMeasuredWidth(box: RefObject<HTMLSpanElement | null>, measure: RefOb
  * hidden copy measures the natural width; the box takes that width (capped by its container),
  * and its text truncates with an ellipsis once it settles.
  */
-export function MorphText({ id, text, shimmer = false, className, slot, textSlot, 'aria-hidden': hidden }: Props) {
+export function MorphText({ id, text, shimmer = false, className, slot, textSlot, textClassName, shimmerDuration, 'aria-hidden': hidden }: Props) {
   const box = useRef<HTMLSpanElement>(null);
   const measure = useRef<HTMLSpanElement>(null);
   const line = useRef<HTMLSpanElement>(null);
@@ -162,7 +166,7 @@ export function MorphText({ id, text, shimmer = false, className, slot, textSlot
       >
         <span ref={words} className="block">
           {view.shimmer ? (
-            <TextShimmer as="span" className="block max-w-full truncate">
+            <TextShimmer as="span" duration={shimmerDuration} className={cn('block max-w-full truncate', textClassName)}>
               {view.text}
             </TextShimmer>
           ) : (
