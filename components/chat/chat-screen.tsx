@@ -10,6 +10,7 @@ import type { Connection } from '@/lib/opencode/connection';
 import type { Selection } from '@/lib/opencode/models/selection';
 import { displayTitle, isUntitled } from '@/lib/opencode/sessions';
 import { ShellOutputProvider, useLingering } from './flow/live';
+import { MorphText } from './flow/morph-text';
 import { HistoryView } from './history/history-view';
 import { MessageList } from './message-list';
 import { ModelControls } from './model/model-controls';
@@ -65,21 +66,28 @@ function openSettings() {
 
 function ChatHeader({
   title,
+  activeID,
   connection,
   onError,
   onHistory,
   onNewChat,
 }: {
   title: string;
+  /** The open chat's id, so the title id is stable per chat and changes when a chat is named. */
+  activeID: string | null;
   connection: Connection;
   onError: (message: string) => void;
   onHistory: () => void;
   onNewChat: () => void;
 }) {
+  // Morph from the "New chat" placeholder to the real title once the chat is named, and again
+  // when switching chats (the id changes). Under one id the text just eases its width instead.
+  const id = activeID && title !== 'New chat' ? `title:${activeID}` : 'untitled';
+
   return (
-    <header className="mx-auto flex w-full max-w-chat shrink-0 items-center gap-2 px-3 py-1.5">
+    <header className="mx-auto flex w-full max-w-chat shrink-0 items-center gap-2 px-4 py-1.5">
       <h1 className="min-w-0 flex-1 truncate text-sm text-text-primary" title={title}>
-        {title}
+        <MorphText id={id} text={title} textSlot="chat-title" />
       </h1>
       <div className="flex items-center gap-0.5">
         <WebSearchMenu connection={connection} onError={onError} />
@@ -166,7 +174,7 @@ function ChatPane({ connection, session, models, onHistory, onNewChat }: ChatPan
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <ChatHeader title={title} connection={connection} onError={setSearchError} onHistory={onHistory} onNewChat={onNewChat} />
+      <ChatHeader title={title} activeID={activeID} connection={connection} onError={setSearchError} onHistory={onHistory} onNewChat={onNewChat} />
       <ConnectionBanners connection={connection} />
       {/* Shell tools in the replies read their live output through the open chat. */}
       <ShellOutputProvider value={chat?.shellOutput ?? null}>
