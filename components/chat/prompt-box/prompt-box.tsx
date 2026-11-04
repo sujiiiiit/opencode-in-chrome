@@ -165,7 +165,7 @@ export function PromptBox({ ref, placeholder = PLACEHOLDER, ...props }: Props) {
           </div>
         </div>
       </div>
-      {props.footer && <div className="flex min-w-0 items-center px-1 pt-1.5">{props.footer}</div>}
+      {props.footer && <div className="flex min-w-0 items-center px-1.5 pt-1.5">{props.footer}</div>}
     </div>
   );
 }

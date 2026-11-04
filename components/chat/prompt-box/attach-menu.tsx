@@ -27,7 +27,7 @@ export const AttachMenu = memo(function AttachMenu({ onFiles }: { onFiles: (file
             <Icon name="plus" />
           </DropdownMenuTrigger>
         </Tooltip>
-        <DropdownMenuContent side="top" align="start" className="min-w-48">
+        <DropdownMenuContent side="top" align="start" className="min-w-64">
           <DropdownMenuGroup>
             <DropdownMenuItem icon={<Icon name="attach" />} text={LABEL} onClick={() => picker.current?.click()} />
           </DropdownMenuGroup>
