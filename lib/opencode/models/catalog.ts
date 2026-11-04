@@ -93,7 +93,8 @@ function parseModel(raw: Record<string, unknown>, providerID: string): CatalogMo
     free: isFree(raw, providerID),
     variants: variantIDs(raw.variants),
     context: positive(record(raw.limit).context) || 0,
-    inputs: INPUTS.filter((type) => input.includes(type)),
+    // The server matches by prefix ("image" also covers an "image/png" entry), so the catalog does too.
+    inputs: INPUTS.filter((type) => input.some((item) => typeof item === 'string' && item.startsWith(type))),
     tools: capabilities.tools === true,
   };
 }
