@@ -149,6 +149,17 @@ describe('ChatSession.submit', () => {
     expect(state.timeline?.pending.map((p) => [p.id, p.text])).toEqual([[fake.prompts[0]!.id, 'hello']]);
   });
 
+  it('sends attached images inline with the text, and no files field without any', async () => {
+    const { fake, chat } = setup();
+    await chat.load();
+    const image = { uri: 'data:image/png;base64,iVBORw0KGgo=', name: 'shot.png' };
+    expect(await chat.submit('look', undefined, undefined, [image])).toBe(true);
+    expect(await chat.submit('again')).toBe(true);
+
+    expect(fake.prompts[0]).toMatchObject({ text: 'look', files: [image] });
+    expect(fake.prompts[1]).not.toHaveProperty('files');
+  });
+
   it('shows the prompt as local while the request is in flight and only once after admission', async () => {
     const { fake, chat } = setup();
     let release!: () => void;

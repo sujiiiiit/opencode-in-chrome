@@ -8,6 +8,7 @@ import {
   NO_MODEL_MESSAGE,
   type OpenCodeClient,
 } from './client';
+import type { PromptFile } from './attachments';
 import type { Connection } from './connection';
 import { EventHub, type HubStatus } from './events';
 import { addForm, createdForm, parseForms, removeForm, settledFormID, type FormAnswer, type PendingForm } from './forms';
@@ -122,6 +123,12 @@ function parseAck(ack: unknown, local: LocalPrompt): PendingPrompt {
     delivery,
     created: typeof time.created === 'number' ? time.created : Date.now(),
   };
+}
+
+/** A steer's request: the text, plus its attachments when there are any. */
+function promptBody(sessionID: string, local: LocalPrompt, files: readonly PromptFile[] = []) {
+  const body = { sessionID, id: local.id, text: local.text, delivery: 'steer' as const };
+  return files.length ? { ...body, files } : body;
 }
 
 /**
@@ -538,8 +545,9 @@ export class ChatSession extends Store<ChatState> {
    * Returns false when nothing was sent, so the caller can put the text back in the composer.
    * `id` lets the caller know the message's ID up front (the send animation follows it).
    * `selection` is the agent, model and variant to use; it is applied to the session first.
+   * `files` are attachments sent inline with the text (images, as opencode's `Prompt.files`).
    */
-  async submit(text: string, id: string = createMessageID(), selection?: Selection): Promise<boolean> {
+  async submit(text: string, id: string = createMessageID(), selection?: Selection, files?: readonly PromptFile[]): Promise<boolean> {
     if (this.disposed || this.state.phase !== 'ready' || this.state.submitting) return false;
     const local: LocalPrompt = { id, text };
     this.set((state) => ({ submitting: true, notice: null, local: [...state.local, local] }));
@@ -547,7 +555,7 @@ export class ChatSession extends Store<ChatState> {
       const { sessionID, created } = await this.ensureSession(selection);
       if (selection && !created) await this.applySelection(sessionID, selection);
       const ack: unknown = await this.client.session.prompt(
-        { sessionID, id: local.id, text, delivery: 'steer' } as never,
+        promptBody(sessionID, local, files) as never,
         { signal: this.signal },
       );
       this.admit(ack, local);

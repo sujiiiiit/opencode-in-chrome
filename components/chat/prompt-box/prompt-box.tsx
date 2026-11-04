@@ -22,8 +22,12 @@ type Props = {
   stopping: boolean;
   /** Nothing can be sent right now (Send is disabled unless it is Stop). */
   disabled: boolean;
-  /** Controls at the start of the toolbar (the agent, model and effort chips). */
+  /** Controls at the start of the toolbar (the attach menu). */
   controls?: ReactNode;
+  /** Shown below the box, outside the card (the model and effort chips). */
+  footer?: ReactNode;
+  /** Shown above the text (the attached images). */
+  attachments?: ReactNode;
   onChange: (text: string) => void;
   onSubmit: () => void;
   onStop: () => void;
@@ -109,6 +113,7 @@ export function PromptBox({ ref, placeholder = PLACEHOLDER, ...props }: Props) {
         data-slot="prompt-box"
         className="group/prompt-box relative rounded-surface bg-background shadow-surface-rest transition-shadow duration-150 ease-standard hover:not-focus-within:shadow-surface-hover focus-within:shadow-surface-focus"
       >
+        {props.attachments}
         <ScrollArea
           fade
           className="rounded-surface [--fade-top-max:2rem] [--fade-bottom-max:3rem] [--fade-bottom-inset:2.5rem]"
@@ -158,6 +163,7 @@ export function PromptBox({ ref, placeholder = PLACEHOLDER, ...props }: Props) {
           </div>
         </div>
       </div>
+      {props.footer && <div className="flex min-w-0 items-center px-1 pt-1.5">{props.footer}</div>}
     </div>
   );
 }

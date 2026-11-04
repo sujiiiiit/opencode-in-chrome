@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import { browser } from 'wxt/browser';
 import { Button } from '@/components/ui/button';
 import { Icon } from '@/components/ui/icon';
@@ -21,6 +21,8 @@ import { useModelShortcuts, useModelStore, useModelSync } from './model/use-mode
 import { FormCard } from './form-card';
 import { Notice } from './notice';
 import { WebSearchMenu } from './web-search-menu';
+import { AttachMenu } from './prompt-box/attach-menu';
+import { AttachmentStrip } from './prompt-box/attachment-strip';
 import { PromptBox, type PromptBoxHandle } from './prompt-box/prompt-box';
 import { useChatSession, useComposer, useEventHub, useHistory, useLatest } from './use-chat';
 
@@ -140,6 +142,84 @@ function PaneNotice({ session, models }: { session: ReturnType<typeof useChatSes
   return null;
 }
 
+/** The model and effort chips under the composer, once the store exists. */
+function ComposerFooter({ models, onOpenPicker }: { models: Models; onOpenPicker: () => void }) {
+  const store = models.store;
+  if (!store) return null;
+  return (
+    <ModelControls
+      controls={models.controls}
+      onOpenPicker={onOpenPicker}
+      // onAgent={(name) => store.setAgent(name)}
+      onVariant={(value) => store.setVariant(value)}
+    />
+  );
+}
+
+/** The questions the running turn is asking, over the composer. */
+function PaneForms({ session }: { session: ReturnType<typeof useChatSession> }) {
+  const { chat, state } = session;
+  return state.forms.map((form) => (
+    <FormCard
+      key={form.id}
+      form={form}
+      onAnswer={(id, answer) => chat?.answerForm(id, answer)}
+      onCancel={(id) => chat?.cancelForm(id)}
+    />
+  ));
+}
+
+/** The model picker's open state and its shortcuts (⌘' opens it, ⇧⌘D cycles the effort). */
+function usePicker(models: Models, box: RefObject<PromptBoxHandle | null>) {
+  const [picking, setPicking] = useState(false);
+  const store = models.store;
+  const open = useCallback(() => {
+    if (store && !models.controls.loading) setPicking(true);
+  }, [store, models.controls.loading]);
+  useModelShortcuts(!picking, {
+    openPicker: open,
+    cycleVariant: () => store?.cycleVariant(),
+    // Agent switching is hidden for now (build mode only).
+    // moveAgent: (direction) => store?.moveAgent(direction),
+  });
+  const onOpenChange = useCallback(
+    (next: boolean) => {
+      setPicking(next);
+      // Back to the message after choosing, like opencode's composer.
+      if (!next) requestAnimationFrame(() => box.current?.focus());
+    },
+    [box],
+  );
+  return { picking, open, onOpenChange };
+}
+
+type ChatComposerProps = {
+  box: RefObject<PromptBoxHandle | null>;
+  composer: ReturnType<typeof useComposer>;
+  models: Models;
+  onOpenPicker: () => void;
+};
+
+/** The prompt box with its attach menu, attached images and model chips. */
+function ChatComposer({ box, composer, models, onOpenPicker }: ChatComposerProps) {
+  return (
+    <PromptBox
+      ref={box}
+      controls={<AttachMenu onFiles={composer.addFiles} />}
+      footer={models.store && <ComposerFooter models={models} onOpenPicker={onOpenPicker} />}
+      attachments={<AttachmentStrip images={composer.images} onRemove={composer.removeImage} />}
+      placeholder={composer.placeholder}
+      working={composer.working}
+      held={composer.held}
+      stopping={composer.stopping}
+      disabled={composer.disabled}
+      onChange={composer.onChange}
+      onSubmit={composer.submit}
+      onStop={composer.stop}
+    />
+  );
+}
+
 /** The conversation and the composer. */
 function ChatPane({ connection, session, models, onHistory, onNewChat }: ChatPaneProps) {
   const { chat, state, activeID } = session;
@@ -150,23 +230,9 @@ function ChatPane({ connection, session, models, onHistory, onNewChat }: ChatPan
     box,
     models: { store: models.store, controls: models.controls, phase: models.state.phase },
   });
-  const [picking, setPicking] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
   const store = models.store;
-  const openPicker = useCallback(() => {
-    if (store && !models.controls.loading) setPicking(true);
-  }, [store, models.controls.loading]);
-  useModelShortcuts(!picking, {
-    openPicker,
-    cycleVariant: () => store?.cycleVariant(),
-    // Agent switching is hidden for now (build mode only).
-    // moveAgent: (direction) => store?.moveAgent(direction),
-  });
-  const closePicker = useCallback((open: boolean) => {
-    setPicking(open);
-    // Back to the message after choosing, like opencode's composer.
-    if (!open) requestAnimationFrame(() => box.current?.focus());
-  }, []);
+  const picker = usePicker(models, box);
   const title = useChatTitle(activeID, state.title);
   // Stable props, so typing in the composer (which re-renders this pane) skips the message list.
   const { timeline, local } = state;
@@ -191,39 +257,12 @@ function ChatPane({ connection, session, models, onHistory, onNewChat }: ChatPan
         </ModelCatalogProvider>
       </ShellOutputProvider>
       <div className="mx-auto w-full max-w-chat">
-        {state.forms.map((form) => (
-          <FormCard
-            key={form.id}
-            form={form}
-            onAnswer={(id, answer) => chat?.answerForm(id, answer)}
-            onCancel={(id) => chat?.cancelForm(id)}
-          />
-        ))}
+        <PaneForms session={session} />
         {searchError && <Notice text={`Web search: ${searchError}`} onDismiss={() => setSearchError(null)} />}
         <PaneNotice session={session} models={models} />
-        <PromptBox
-          ref={box}
-          controls={
-            store && (
-              <ModelControls
-                controls={models.controls}
-                onOpenPicker={openPicker}
-                // onAgent={(name) => store.setAgent(name)}
-                onVariant={(value) => store.setVariant(value)}
-              />
-            )
-          }
-          placeholder={composer.placeholder}
-          working={composer.working}
-          held={composer.held}
-          stopping={composer.stopping}
-          disabled={composer.disabled}
-          onChange={composer.onChange}
-          onSubmit={composer.submit}
-          onStop={composer.stop}
-        />
+        <ChatComposer box={box} composer={composer} models={models} onOpenPicker={picker.open} />
       </div>
-      {store && <ModelPicker open={picking} onOpenChange={closePicker} store={store} state={models.state} />}
+      {store && <ModelPicker open={picker.picking} onOpenChange={picker.onOpenChange} store={store} state={models.state} />}
     </div>
   );
 }

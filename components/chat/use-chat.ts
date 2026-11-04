@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type RefObject } from 'react';
 import { loadActiveChat, saveActiveChat } from '@/lib/opencode/active-chat';
+import { promptFiles, releaseImage, type ImageAttachment } from '@/lib/opencode/attachments';
 import { ChatSession, INITIAL_CHAT_STATE, type ChatState } from '@/lib/opencode/chat';
 import type { Connection } from '@/lib/opencode/connection';
 import { EventHub } from '@/lib/opencode/events';
@@ -11,6 +12,7 @@ import type { ModelStore } from '@/lib/opencode/models/model-store';
 import type { Selection } from '@/lib/opencode/models/selection';
 import type { PromptBoxHandle } from './prompt-box/prompt-box';
 import { launchSendFlight } from './send-flight';
+import { useAttachedImages } from './use-attachments';
 
 const noopSubscribe = () => () => undefined;
 
@@ -197,9 +199,49 @@ function missingSelection(models: ComposerModels | undefined): string | null {
   return models.controls.empty ? NO_MODEL_MESSAGE : 'Choose a model and an agent to send.';
 }
 
-/** A failed send's ID when this send repeats it (same text and selection), else a new one. */
+/** Image types xAI rejects with `invalid_image` (opencode's model-request.ts swaps them for an error). */
+const XAI_REJECTED = new Set(['image/gif']);
+
+/**
+ * Why the chosen model cannot take these images, or null (an unknown model is left to the server).
+ * Mirrors the server's `unsupportedMedia`, which would otherwise swap each image for an error note.
+ */
+function unreadableImages(models: ComposerModels | undefined, images: readonly ImageAttachment[]): string | null {
+  const model = models?.controls.model.current;
+  if (images.length === 0 || !model) return null;
+  if (!model.inputs.includes('image')) return `${model.name} can't read images. Choose a model that supports images, or remove them.`;
+  const rejected = model.providerID === 'xai' ? images.find((image) => XAI_REJECTED.has(image.mime)) : undefined;
+  return rejected ? `${model.name} can't read GIF images (${rejected.name}). Remove it or choose another model.` : null;
+}
+
+/** What makes a retry the same prompt: the selection and the attached images. */
+const retryKey = (selection: Selection | undefined, images: readonly ImageAttachment[]) =>
+  [selectionKey(selection), ...images.map((image) => image.id)].join('|');
+
+/** Why this send cannot go out, or null. */
+const sendBlocker = (models: ComposerModels | undefined, images: readonly ImageAttachment[]) =>
+  missingSelection(models) ?? unreadableImages(models, images);
+
+/** A failed send's ID when this send repeats it (same text, images and selection), else a new one. */
 function messageID(retry: Retry | null, text: string, selection: string): string {
   return retry && retry.text === text && retry.selection === selection ? retry.id : createMessageID();
+}
+
+/**
+ * Reads the images (they are read only now, not while attached) and sends them with the text.
+ * False when nothing was sent: an image that can no longer be read fails the whole send.
+ */
+async function submitPrompt(
+  chat: ChatSession,
+  prompt: { text: string; id: string; selection: Selection | undefined; images: readonly ImageAttachment[] },
+  notify: (message: string) => void,
+): Promise<boolean> {
+  const files = await promptFiles(prompt.images).catch(() => null);
+  if (!files) {
+    notify("Couldn't read an attached image. Remove it and attach it again.");
+    return false;
+  }
+  return chat.submit(prompt.text, prompt.id, prompt.selection, files);
 }
 
 /** Tells the store an existing chat is switching selection; returns the cancel for a failed send. */
@@ -230,6 +272,7 @@ export function useComposer(input: {
   // Async handlers read the latest draft, not the render they started in.
   const draftRef = useRef('');
   const setText = useCallback((text: string, focus = false) => box.current?.setText(text, { focus }), [box]);
+  const attachments = useAttachedImages(box, modelStore);
 
   const working = state.timeline?.working ?? false;
   const blank = draft.trim() === '';
@@ -248,20 +291,23 @@ export function useComposer(input: {
   const send = async () => {
     const text = draftRef.current.trim();
     if (!chat || !text) return;
-    const notice = missingSelection(models);
+    const notice = sendBlocker(models, attachments.current.current);
     if (notice) return void modelStore?.notify(notice);
-    const key = selectionKey(selection);
+    const key = retryKey(selection, attachments.current.current);
     const id = messageID(retry.current, text, key);
     retry.current = null;
     // The text flies from where it sits in the box to its bubble, so measure before clearing.
     launchSendFlight({ id, from: box.current?.textOrigin() ?? null });
     setText('');
+    const attached = attachments.take();
     const cancel = trackCommit(modelStore, chat, selection);
-    if (await chat.submit(text, id, selection)) return;
+    const notify = (message: string) => modelStore?.notify(message);
+    if (await submitPrompt(chat, { text, id, selection, images: attached }, notify)) return void attached.forEach(releaseImage);
     cancel();
     retry.current = { id, text, selection: key };
-    // A failed send puts the text back, after anything typed meanwhile.
+    // A failed send puts the text and images back, after anything added meanwhile.
     setText(joinDraft(draftRef.current, text), true);
+    attachments.restore(attached);
   };
 
   // A held send goes out once the chat and the models are loaded, if the draft did not change meanwhile.
@@ -303,6 +349,9 @@ export function useComposer(input: {
     onChange,
     submit,
     stop,
+    images: attachments.images,
+    addFiles: attachments.addFiles,
+    removeImage: attachments.removeImage,
   };
 }
 
