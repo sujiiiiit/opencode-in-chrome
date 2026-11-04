@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "skills": {
+    "shadcn-baseui": {
+      "source": "thunderboltdev/shadcn-baseui",
+      "sourceType": "github",
+      "skillPath": "SKILL.md",
+      "computedHash": "81297bd214fd35b38ebc751aab139ea2fbac4fa4f116fc333d825d5b2a0be1f0"
+    }
+  }
+}

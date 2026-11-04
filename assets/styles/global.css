@@ -1,15 +1,132 @@
-@import 'tailwindcss';
-@import './fonts.css';
+/* ==========================================================================
+ * global.css: the design system's single source of truth.
+ *
+ * 1. Imports & variants
+ * 2. Tokens (:root):  raw values. Components never use these directly.
+ * 3. Theme (@theme):  maps tokens to Tailwind utilities (bg-*, text-*, shadow-*, ...).
+ * 4. Base styles
+ * 5. Browser overrides
+ *
+ * Rule: no raw colours in components. Add a token in section 2, map it in
+ * section 3, then use the utility.
+ * ========================================================================== */
+
+/* 1. Imports & variants ==================================================== */
+
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "streamdown/styles.css";
+@import "./fonts.css";
+
+/* Streamdown (the reply's markdown) styles its elements with utilities from its own bundle. */
+@source "../../node_modules/streamdown/dist/*.js";
 
 @custom-variant dark (&:is(.dark *));
 
+/* 2. Tokens ================================================================ */
+
 :root {
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
+  /* Surfaces ------------------------------------------------------------- */
+  --background: #fff;
+  --background-secondary: #f9f8f7;
+  --background-tertiary: #f0efed;
+  /* Notion light-theme translucent backgrounds (--ca-bac*Tra in Notion's app CSS). */
+  --bacPriTra: #fff0; /* fully transparent */
+  --bacSecTra: #42230308; /* ~3% warm tint */
+  --bacIntTra: #211b170d; /* ~5% warm tint: sits between secondary and tertiary (sent chat message) */
+  --bacTerTra: #2a1c0012; /* ~7% warm tint */
   --card: oklch(1 0 0);
   --card-foreground: oklch(0.145 0 0);
   --popover: oklch(1 0 0);
   --popover-foreground: oklch(0.145 0 0);
+  /* Dims the page behind a modal dialog (30% black). */
+  --scrim: #0000004d;
+  /* Image viewer (components/chat/flow/media): a near-black stage, light text, and controls
+   * that are a white tint of the stage. The shade dims a gallery's "+N" tile. */
+  --viewer-backdrop: #111110f2; /* 95% */
+  --viewer-text: #f7f6f5;
+  --viewer-text-secondary: #ffffff99; /* 60% */
+  --viewer-control: #ffffff1a; /* 10% */
+  --viewer-control-hover: #ffffff2e; /* 18% */
+  --tile-shade: #00000061; /* 38%: under a gallery's "+N", frosted */
+  --tile-hover: #00000014; /* 8%: a picture that opens, under the pointer */
+  /* The drop overlay (components/chat/drop-overlay): the panel fades behind a white veil. */
+  --drop-veil: #ffffffd9; /* 85% */
+  /* Streamdown's code block and table headers (its `bg-sidebar` / `border-sidebar`). */
+  --sidebar: var(--background-secondary);
+  /* Terminal output in a shell tool's details. */
+  --console: var(--background-secondary);
+
+  /* Text ------------------------------------------------------------------
+   * `foreground` is the shadcn default; the text-* scale is Notion's palette
+   * (Notion token names in comments). */
+  --foreground: oklch(0.145 0 0);
+  --text-primary: #2c2c2b; /* texPri */
+  --text-secondary: #7d7a75; /* texSec */
+  --shimmer-text-highlight-color: var(--text-secondary); /* the label's own colour, under the band */
+  --shimmer-text-faded-color: var(--border-strong); /* the lighter shine at the band's centre (#d4d3cf); it fades to transparent at its sides */
+  --text-tertiary: #ada9a3; /* graTexTer / icoTer: placeholders, quiet icons */
+  --link: var(--blue-mid); /* links in a reply's markdown */
+
+  /* Hues ----------------------------------------------------------------------
+   * Notion's light palette (texPri / texSec / bacSec / borPri of each hue): -text is the dark
+   * readable shade, -mid the lively one, -bg a soft tint, -border its edge. */
+  --blue-text: #264a72;
+  --blue-mid: #387dc9;
+  --blue-bg: #e5f2fc;
+  --blue-border: #cee3f7;
+  --green-text: #2a533c;
+  --green-mid: #50946e;
+  --green-bg: #e8f1ec;
+  --green-border: #d7e6dd;
+  --red-text: #6d3531;
+  --red-mid: #cf5148;
+  --red-bg: #fce9e7;
+  --red-border: #f7d9d5;
+  --orange-text: #6a4222;
+  --orange-mid: #d27b2d;
+  --orange-bg: #fbebde;
+  --orange-border: #f3ddcb;
+  --yellow-text: #655121;
+  --yellow-mid: #cb9434;
+  --yellow-bg: #f9f3dc;
+  --yellow-border: #f2e3b7;
+  --purple-text: #553b69;
+  --purple-mid: #9a6bb4;
+  --purple-bg: #f3ebf9;
+  --purple-border: #e8dbf2;
+  --pink-text: #68354e;
+  --pink-mid: #c14c8a;
+  --pink-bg: #fae9f1;
+  --pink-border: #f4d8e4;
+  --brown-text: #584437;
+  --brown-mid: #9f765a;
+  --brown-bg: #f5ede9;
+  --brown-border: #ebdfd7;
+  --gray-text: #494846;
+  --gray-mid: #7d7a75;
+  --gray-bg: #f0efed;
+  --gray-border: #e6e5e3;
+  --teal-text: #18505b;
+  --teal-mid: #2c8b9e;
+  --teal-bg: #e0f3f7;
+  --teal-border: #cae9f0;
+
+  /* Code syntax (the highlighter in a reply's code blocks): one hue per kind of token. */
+  --syntax-text: var(--text-primary);
+  --syntax-comment: var(--text-secondary);
+  --syntax-keyword: var(--purple-mid);
+  --syntax-string: var(--green-mid);
+  --syntax-number: var(--orange-mid);
+  --syntax-function: var(--blue-mid);
+  --syntax-type: var(--teal-mid);
+  --syntax-tag: var(--red-mid);
+  --syntax-attribute: var(--yellow-mid);
+  --syntax-punctuation: var(--text-secondary);
+  --syntax-inserted: var(--green-text);
+  --syntax-deleted: var(--red-text);
+
+  /* Actions & fills (shadcn) --------------------------------------------- */
   --primary: oklch(0.205 0 0);
   --primary-foreground: oklch(0.985 0 0);
   --secondary: oklch(0.97 0 0);
@@ -18,68 +135,122 @@
   --muted-foreground: oklch(0.556 0 0);
   --accent: oklch(0.97 0 0);
   --accent-foreground: oklch(0.205 0 0);
+
+  /* Status --------------------------------------------------------------- */
   --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
+
+  /* Borders & focus ------------------------------------------------------ */
+  /* Notion's border scale (Notion token names in comments). Solid borders sit
+   * on opaque surfaces; the *-transparent ones tint whatever is underneath. */
+  --border-primary: #e6e5e3; /* borPri */
+  --border-secondary: #f0efed; /* borSec */
+  --border-strong: #d4d3cf; /* borStr */
+  --border-primary-transparent: #1c13011c; /* borPriTra */
+  --border-secondary-transparent: #2a1c0012; /* borSecTra: hairlines */
+  --border-strong-transparent: #1b150030; /* borStrTra */
+  --border-inverse: #5f5e59; /* borInvPri */
+  --border-accent: #8e8b86; /* borAccPri */
+  /* shadcn aliases: components use border-border / border-input. */
+  --border: var(--border-primary);
+  --input: var(--border-primary);
   --ring: oklch(0.708 0 0);
-  --chart-1: oklch(0.87 0 0);
-  --chart-2: oklch(0.556 0 0);
-  --chart-3: oklch(0.439 0 0);
-  --chart-4: oklch(0.371 0 0);
-  --chart-5: oklch(0.269 0 0);
+
+  /* Shadows ---------------------------------------------------------------
+   * Shadow colours, then the elevations built from them.
+   * Surface elevation, claude.ai-composer style: a crisp 1px 12% ring for the
+   * edge plus one soft 20px drop below. Focus keeps the rest shadow; hover
+   * (only while unfocused) lightens the drop. */
+  --shadow-ring: #0000001f; /* 12% */
+  --shadow-drop: #00000013; /* 7.5% */
+  --shadow-drop-soft: #00000009; /* 3.5% */
+
+  --elevation-surface-rest: 0 0 0 1px var(--shadow-ring), 0 4px 20px 0 var(--shadow-drop);
+  --elevation-surface-hover: 0 0 0 1px var(--shadow-ring), 0 4px 20px 0 var(--shadow-drop-soft);
+  --elevation-surface-focus: var(--elevation-surface-rest);
+
+  /* Radius --------------------------------------------------------------- */
   --radius: 0.625rem;
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: oklch(0.205 0 0);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.97 0 0);
-  --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.922 0 0);
-  --sidebar-ring: oklch(0.708 0 0);
 }
 
-.dark {
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.922 0 0);
-  --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.704 0.191 22.216);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
-  --chart-1: oklch(0.87 0 0);
-  --chart-2: oklch(0.556 0 0);
-  --chart-3: oklch(0.439 0 0);
-  --chart-4: oklch(0.371 0 0);
-  --chart-5: oklch(0.269 0 0);
-  --sidebar: oklch(0.205 0 0);
-  --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.488 0.243 264.376);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.269 0 0);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.556 0 0);
-}
+/* 3. Theme: tokens -> Tailwind utilities =================================== */
 
 @theme inline {
-  --font-sans: 'Inter Variable', system-ui, sans-serif;
+  /* Typography ----------------------------------------------------------- */
+  --font-sans: "Inter Variable", system-ui, sans-serif;
+  --font-mono: "Cascadia Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+
+  /* Colours: surfaces ---------------------------------------------------- */
   --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --color-card: var(--card);
-  --color-card-foreground: var(--card-foreground);
+  --color-background-secondary: var(--background-secondary);
+  --color-background-tertiary: var(--background-tertiary);
+  --color-scrim: var(--scrim);
+  --color-sidebar: var(--sidebar);
+  --color-console: var(--console);
+  --color-viewer-backdrop: var(--viewer-backdrop);
+  --color-viewer-text: var(--viewer-text);
+  --color-viewer-text-secondary: var(--viewer-text-secondary);
+  --color-viewer-control: var(--viewer-control);
+  --color-viewer-control-hover: var(--viewer-control-hover);
+  --color-tile-shade: var(--tile-shade);
+  --color-tile-hover: var(--tile-hover);
+  --color-drop-veil: var(--drop-veil);
   --color-popover: var(--popover);
   --color-popover-foreground: var(--popover-foreground);
+  --color-background-primary-transparent: var(--bacPriTra);
+  --color-background-secondary-transparent: var(--bacSecTra);
+  --color-background-intermediate-transparent: var(--bacIntTra);
+  --color-background-tertiary-transparent: var(--bacTerTra);
+
+  /* Colours: text -------------------------------------------------------- */
+  --color-foreground: var(--foreground);
+  --color-text-primary: var(--text-primary);
+  --color-text-secondary: var(--text-secondary);
+  --color-text-tertiary: var(--text-tertiary);
+  --color-link: var(--link);
+
+  /* Colours: hues ------------------------------------------------------------ */
+  --color-blue-text: var(--blue-text);
+  --color-blue-mid: var(--blue-mid);
+  --color-blue-bg: var(--blue-bg);
+  --color-blue-border: var(--blue-border);
+  --color-green-text: var(--green-text);
+  --color-green-mid: var(--green-mid);
+  --color-green-bg: var(--green-bg);
+  --color-green-border: var(--green-border);
+  --color-red-text: var(--red-text);
+  --color-red-mid: var(--red-mid);
+  --color-red-bg: var(--red-bg);
+  --color-red-border: var(--red-border);
+  --color-orange-text: var(--orange-text);
+  --color-orange-mid: var(--orange-mid);
+  --color-orange-bg: var(--orange-bg);
+  --color-orange-border: var(--orange-border);
+  --color-yellow-text: var(--yellow-text);
+  --color-yellow-mid: var(--yellow-mid);
+  --color-yellow-bg: var(--yellow-bg);
+  --color-yellow-border: var(--yellow-border);
+  --color-purple-text: var(--purple-text);
+  --color-purple-mid: var(--purple-mid);
+  --color-purple-bg: var(--purple-bg);
+  --color-purple-border: var(--purple-border);
+  --color-pink-text: var(--pink-text);
+  --color-pink-mid: var(--pink-mid);
+  --color-pink-bg: var(--pink-bg);
+  --color-pink-border: var(--pink-border);
+  --color-brown-text: var(--brown-text);
+  --color-brown-mid: var(--brown-mid);
+  --color-brown-bg: var(--brown-bg);
+  --color-brown-border: var(--brown-border);
+  --color-gray-text: var(--gray-text);
+  --color-gray-mid: var(--gray-mid);
+  --color-gray-bg: var(--gray-bg);
+  --color-gray-border: var(--gray-border);
+  --color-teal-text: var(--teal-text);
+  --color-teal-mid: var(--teal-mid);
+  --color-teal-bg: var(--teal-bg);
+  --color-teal-border: var(--teal-border);
+
+  /* Colours: actions & fills --------------------------------------------- */
   --color-primary: var(--primary);
   --color-primary-foreground: var(--primary-foreground);
   --color-secondary: var(--secondary);
@@ -88,31 +259,48 @@
   --color-muted-foreground: var(--muted-foreground);
   --color-accent: var(--accent);
   --color-accent-foreground: var(--accent-foreground);
+
+  /* Colours: status ------------------------------------------------------ */
   --color-destructive: var(--destructive);
+
+  /* Colours: borders & focus --------------------------------------------- */
   --color-border: var(--border);
+  --color-border-primary: var(--border-primary);
+  --color-border-secondary: var(--border-secondary);
+  --color-border-strong: var(--border-strong);
+  --color-border-primary-transparent: var(--border-primary-transparent);
+  --color-border-secondary-transparent: var(--border-secondary-transparent);
+  --color-border-strong-transparent: var(--border-strong-transparent);
+  --color-border-inverse: var(--border-inverse);
+  --color-border-accent: var(--border-accent);
   --color-input: var(--input);
   --color-ring: var(--ring);
-  --color-chart-1: var(--chart-1);
-  --color-chart-2: var(--chart-2);
-  --color-chart-3: var(--chart-3);
-  --color-chart-4: var(--chart-4);
-  --color-chart-5: var(--chart-5);
+
+  /* Shadows -------------------------------------------------------------- */
+  --shadow-surface-rest: var(--elevation-surface-rest);
+  --shadow-surface-hover: var(--elevation-surface-hover);
+  --shadow-surface-focus: var(--elevation-surface-focus);
+
+  /* Layout --------------------------------------------------------------- */
+  /* The reading column (max-w-chat): chat and History stay centred within it. */
+  --container-chat: 48rem;
+
+  /* Radius --------------------------------------------------------------- */
   --radius-sm: calc(var(--radius) * 0.6);
-  --radius-md: calc(var(--radius) * 0.8);
   --radius-lg: var(--radius);
-  --radius-xl: calc(var(--radius) * 1.4);
   --radius-2xl: calc(var(--radius) * 1.8);
   --radius-3xl: calc(var(--radius) * 2.2);
   --radius-4xl: calc(var(--radius) * 2.6);
-  --color-sidebar: var(--sidebar);
-  --color-sidebar-foreground: var(--sidebar-foreground);
-  --color-sidebar-primary: var(--sidebar-primary);
-  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
-  --color-sidebar-accent: var(--sidebar-accent);
-  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
-  --color-sidebar-border: var(--sidebar-border);
-  --color-sidebar-ring: var(--sidebar-ring);
+  --radius-surface: 1.1875rem; /* 19px: Notion floating surfaces (prompt box) */
+  --radius-media: 0.9375rem; /* 15px: a reply's images, between a code block (12px) and the bubble (18px) */
+
+  /* Motion --------------------------------------------------------------- */
+  --ease-standard: ease-in-out; /* CSS keyword curve Notion uses, not Tailwind's ease-in-out */
+  /* A long, soft settle (ease-out-quint): starts moving at once, then glides to rest. */
+  --ease-calm: cubic-bezier(0.22, 1, 0.36, 1);
 }
+
+/* 4. Base styles =========================================================== */
 
 @layer base {
   * {
@@ -120,6 +308,747 @@
   }
 
   body {
-    @apply bg-background font-sans text-foreground antialiased;
+    @apply bg-background text-text-primary antialiased;
   }
+}
+
+/* Type scale, claude.ai's: a reply, the prompt and a work group's header read at body; what is
+ * inside an open work group (thinking, commentary, tool calls) sits one step down. Named
+ * `type-*`, not `text-*`, so class merging (cn) never mistakes a size for a colour. */
+@utility type-body {
+  font-size: 0.9375rem; /* 15px */
+  line-height: 1.4;
+}
+
+@utility type-work {
+  font-size: 0.875rem; /* 14px */
+  line-height: 1.4286; /* 20px */
+}
+
+/* Scrolls without showing a scrollbar (the composer's chip row in a narrow panel). */
+@utility no-scrollbar {
+  scrollbar-width: none;
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+/* Scroll fade (Base UI ScrollArea viewport) ---------------------------------
+ * Content dissolves at the top/bottom edges as it scrolls under the header and
+ * prompt box. Each fade grows with the distance Base UI reports to that edge
+ * (--scroll-area-overflow-y-*), so nothing fades when you are at the very top
+ * or bottom. Extra stops ease the ramp so there is no visible band edge.
+ * Tunable from a parent: --fade-top-max / --fade-bottom-max cap the ramp length, and
+ * --fade-bottom-inset ends the bottom fade that far above the viewport edge (for an
+ * opaque toolbar overlaid on the bottom, so the fade finishes right where it starts).
+ *
+ * The fade lengths below are recomputed on every scroll frame (from Base UI's per-frame
+ * overflow vars). Registered as non-inheriting so a change restyles only the viewport; as
+ * plain custom properties every element in the chat inherited them and restyled each frame
+ * (~60ms a frame in a long chat). The -max/-inset knobs above stay inherited on purpose. */
+@property --fade-top { syntax: '*'; inherits: false; }
+@property --fade-bottom { syntax: '*'; inherits: false; }
+@property --fade-end { syntax: '*'; inherits: false; }
+@property --fade-left { syntax: '*'; inherits: false; }
+@property --fade-right { syntax: '*'; inherits: false; }
+
+@utility scroll-fade-y {
+  --fade-top: min(var(--fade-top-max, 3rem), var(--scroll-area-overflow-y-start, 0px));
+  --fade-bottom: min(var(--fade-bottom-max, 4rem), var(--scroll-area-overflow-y-end, 0px));
+  --fade-end: calc(100% - var(--fade-bottom-inset, 0px));
+  mask-image: linear-gradient(
+    to bottom,
+    transparent 0,
+    #0000004d calc(var(--fade-top) * 0.3),
+    #000000b3 calc(var(--fade-top) * 0.6),
+    #000 var(--fade-top),
+    #000 calc(var(--fade-end) - var(--fade-bottom)),
+    #000000b3 calc(var(--fade-end) - var(--fade-bottom) * 0.6),
+    #0000004d calc(var(--fade-end) - var(--fade-bottom) * 0.3),
+    transparent var(--fade-end),
+    transparent 100%
+  );
+  mask-repeat: no-repeat;
+}
+
+/* Sideways scroll fade (code blocks and tables in a reply) ----------------------------
+ * The same idea turned on its side: a long soft ramp at the left and right edge, as long as
+ * the distance Base UI reports to that edge (--scroll-area-overflow-x-*), up to --fade-x-max.
+ * At the very start only the right edge fades, at the very end only the left, and the ramp
+ * lengthens smoothly as you scroll away from an end. Many stops ease it so there is no band. */
+@utility scroll-fade-x {
+  --fade-left: min(var(--fade-x-max, 5rem), var(--scroll-area-overflow-x-start, 0px));
+  --fade-right: min(var(--fade-x-max, 5rem), var(--scroll-area-overflow-x-end, 0px));
+  mask-image: linear-gradient(
+    to right,
+    transparent 0,
+    #00000014 calc(var(--fade-left) * 0.15),
+    #00000040 calc(var(--fade-left) * 0.3),
+    #00000080 calc(var(--fade-left) * 0.5),
+    #000000bf calc(var(--fade-left) * 0.72),
+    #000000e6 calc(var(--fade-left) * 0.88),
+    #000 var(--fade-left),
+    #000 calc(100% - var(--fade-right)),
+    #000000e6 calc(100% - var(--fade-right) * 0.88),
+    #000000bf calc(100% - var(--fade-right) * 0.72),
+    #00000080 calc(100% - var(--fade-right) * 0.5),
+    #00000040 calc(100% - var(--fade-right) * 0.3),
+    #00000014 calc(100% - var(--fade-right) * 0.15),
+    transparent 100%
+  );
+  mask-repeat: no-repeat;
+}
+
+/* Row actions fade (History rows) ---------------------------------------------
+ * When a row's Rename/Delete buttons show, the title dissolves into the
+ * transparent zone just before them instead of running underneath. The fade
+ * spans the actions' width (two icon buttons) plus a soft ramp. */
+@utility actions-fade {
+  mask-image: linear-gradient(
+    to right,
+    #000 calc(100% - 9rem),
+    #0000 calc(100% - 4.5rem)
+  );
+}
+
+/* Calm entrance (History rows) ------------------------------------------------
+ * The panel itself slides in (Tabs); its list then trails in like a short wave:
+ * each day's label and chats rise a few pixels into place, one quick step after
+ * another. A small distance and an ease-out settle keep it soft;
+ * short steps keep it fast. Set --wave on an element (0, 1, 2, ...) to place it in
+ * the sequence; `wave-children` staggers its own children from there. Reduced
+ * motion gets a short plain fade. */
+@keyframes calm-fade {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes calm-rise {
+  from {
+    opacity: 0;
+    transform: translateY(0.375rem);
+  }
+}
+
+@utility animate-wave-in {
+  animation: calm-rise 460ms var(--ease-calm) both;
+  animation-delay: calc(var(--wave, 0) * 35ms);
+  @media (prefers-reduced-motion: reduce) {
+    animation: calm-fade 150ms ease-out both;
+  }
+}
+
+@utility wave-children {
+  & > * {
+    animation: calm-rise 460ms var(--ease-calm) both;
+    /* Fallback where sibling-index() is unknown: the group's own step. */
+    animation-delay: calc(var(--wave, 0) * 35ms);
+    /* Each child one step later than the last; capped so long lists never wait. */
+    animation-delay: calc((var(--wave, 0) + min(sibling-index(), 6)) * 35ms);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    & > * {
+      animation: calm-fade 150ms ease-out both;
+    }
+  }
+}
+
+/* Reveal (a reply's images, components/chat/flow/reply-image.tsx) ---------------
+ * An image fades in as the words around it do: the same plain opacity fade (Streamdown's
+ * sd-fadeIn, FlowToken's fadeIn at its demo's 0.6s), no blur, no rise, on the panel's calm
+ * curve. An image is larger than a word, so it takes longer. Boxes glide to their height.
+ * Reduced motion shows it at once. */
+@utility animate-reveal {
+  animation: calm-fade 600ms var(--ease-calm) both;
+  @media (prefers-reduced-motion: reduce) {
+    animation: none;
+  }
+}
+
+/* The wave is an entrance: once History has settled (`data-settled`), rows that a
+ * search, a page or a live update adds just appear instead of replaying it, so the
+ * list never blinks while it changes. The settled rows are already at rest, so
+ * dropping their finished animation changes nothing on screen. */
+[data-settled] .animate-wave-in,
+[data-settled] .wave-children > * {
+  animation: none;
+}
+
+/* Send flight (components/chat/send-flight.ts) --------------------------------
+ * The ghost bubble that flies a sent prompt into the conversation draws its text
+ * from an attribute, so the page never holds a second copy of it as text (find in
+ * page, screen readers and text queries only meet the real bubble). */
+[data-ghost-text]::before {
+  content: attr(data-text);
+}
+
+/* 5. Browser overrides =====================================================
+ * Chrome injects an *unlayered* default stylesheet into extension pages:
+ *   body { font-family: "Segoe UI", Tahoma, sans-serif; font-size: 75% }
+ * Unlayered rules outrank Tailwind's @layer base, so the theme font and base
+ * size have to be re-asserted outside a layer or the UI renders in Segoe UI 12px. */
+
+body {
+  font-family: var(--font-sans, "Inter Variable", system-ui, sans-serif);
+  font-size: 100%;
+}
+
+/* Collapsible text (components/chat/collapsible-text.tsx) ------------------------
+ * The preview fades out through a mask, so it blends with any bubble colour. The fade
+ * height is a registered length so it can transition: it eases away as the block opens,
+ * in step with the height. */
+@property --collapse-fade {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+
+.collapsible-text[data-collapsible] {
+  --collapse-fade: 4.5rem;
+  transition:
+    height 320ms cubic-bezier(0.32, 0.72, 0, 1),
+    --collapse-fade 320ms cubic-bezier(0.32, 0.72, 0, 1);
+  /* Eased stops (not a straight two-stop ramp) so the fade has no visible band edge: the text
+   * stays near-solid at first, then thins out gently and is barely there at the bottom. */
+  mask-image: linear-gradient(
+    to bottom,
+    #000 calc(100% - var(--collapse-fade)),
+    #000000e6 calc(100% - var(--collapse-fade) * 0.85),
+    #000000bf calc(100% - var(--collapse-fade) * 0.68),
+    #00000080 calc(100% - var(--collapse-fade) * 0.48),
+    #00000040 calc(100% - var(--collapse-fade) * 0.28),
+    #00000014 calc(100% - var(--collapse-fade) * 0.12),
+    transparent 100%
+  );
+}
+
+.collapsible-text[data-collapsible="open"] {
+  --collapse-fade: 0px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .collapsible-text[data-collapsible] {
+    transition: none;
+  }
+}
+
+/* Reply markdown (components/chat/flow/markdown.tsx) ---------------------------
+ * claude.ai's reading rhythm in a 13px panel. Everything is in em, so it follows the text size.
+ *  - Blocks own only a bottom margin; a heading adds a larger top one. Margins collapse, so the
+ *    gap after a heading is small (it belongs to what follows) and the gap before it is large
+ *    (it opens a new section). Streamdown wraps each block in a display:contents div, which
+ *    does not stop margins from collapsing.
+ *  - Headings stay close in size and differ by weight, as claude.ai's do.
+ *  - Lists indent 1.5em with the marker outside; code blocks and tables lose Streamdown's cards.
+ * These rules are unlayered on purpose: they must outrank Streamdown's utility classes. */
+.reply-md {
+  line-height: 1.625; /* ChatGPT's reading height: 26px on 16px text */
+}
+
+/* Streamdown spaces blocks with `space-y-4`: the margins below replace it. */
+.reply-md > * {
+  margin-block: 0;
+}
+
+.reply-md :is(p, ul, ol) {
+  margin-block: 0 0.75em;
+}
+
+.reply-md blockquote {
+  margin-block: 1em;
+}
+
+.reply-md blockquote blockquote {
+  margin-block: 0.75em;
+}
+
+.reply-md :is([data-streamdown="code-block"], [data-streamdown="table-wrapper"], [data-streamdown="image-wrapper"]) {
+  margin-block: 1em;
+}
+
+.reply-md hr {
+  margin-block: 1.5em;
+  border-color: var(--border-strong-transparent);
+}
+
+/* The reply's first block sits flush with the top, its last with the bottom. */
+.reply-md > :first-child,
+.reply-md > :first-child > :first-child {
+  margin-top: 0;
+}
+
+.reply-md > :last-child,
+.reply-md > :last-child > :last-child {
+  margin-bottom: 0;
+}
+
+/* Headings */
+.reply-md :is(h1, h2, h3, h4, h5, h6) {
+  margin-block: 1.5em 0.5em;
+  font-size: 1em;
+  font-weight: 600;
+  line-height: 1.5;
+}
+
+.reply-md h1 {
+  font-size: 1.3em;
+}
+
+.reply-md h2 {
+  font-size: 1.133em;
+}
+
+.reply-md :is(h4, h5, h6) {
+  margin-top: 1.25em;
+}
+
+.reply-md h6 {
+  color: var(--text-secondary);
+}
+
+/* Inline */
+.reply-md strong {
+  font-weight: 600;
+}
+
+.reply-md :is(a, [data-streamdown="link"]) {
+  cursor: pointer;
+  color: var(--link);
+  font-weight: 400;
+  text-decoration-line: underline;
+  text-decoration-color: color-mix(in srgb, var(--link) 40%, transparent);
+  text-underline-offset: 0.15em;
+}
+
+.reply-md :is(a, [data-streamdown="link"]):hover {
+  text-decoration-color: currentColor;
+}
+
+.reply-md [data-streamdown="inline-code"] {
+  padding: 0.0625em 0.3em;
+  border-radius: 0.3em;
+  background-color: var(--bacIntTra);
+  font-size: 0.9em;
+  font-weight: 400;
+}
+
+/* Lists: marker outside, 1.5em in, items snug. A nested list tucks under its item's text. */
+.reply-md :is(ul, ol) {
+  padding-left: 1.5em;
+  list-style-position: outside;
+}
+
+.reply-md li > :is(ul, ol) {
+  margin-block: 0.25em 0;
+}
+
+.reply-md ul {
+  list-style-type: disc;
+}
+
+.reply-md ul ul {
+  list-style-type: circle;
+}
+
+.reply-md ul ul ul {
+  list-style-type: square;
+}
+
+.reply-md li {
+  padding-block: 0;
+  padding-left: 0.5em;
+}
+
+.reply-md li + li {
+  margin-top: 0.125em;
+}
+
+/* An item holding several blocks (text, then a code block or a second paragraph). */
+.reply-md li > p {
+  margin-block: 0.25em;
+}
+
+.reply-md li > :first-child {
+  margin-top: 0;
+}
+
+.reply-md li > :last-child {
+  margin-bottom: 0;
+}
+
+/* An image in a list item (a numbered gallery) keeps a little air from the next item's image. */
+.reply-md li > [data-streamdown="image-wrapper"] {
+  margin-block: 0.25em 0.5em;
+}
+
+.reply-md li::marker {
+  color: var(--text-secondary);
+}
+
+/* Task lists: the checkbox takes the marker's place; done items are struck and quiet. A list of
+ * tasks has no marker column, so its items sit flush and only a nested list indents. */
+.reply-md ul:has(> li > input[type="checkbox"]) {
+  padding-left: 0;
+}
+
+.reply-md li > ul:has(> li > input[type="checkbox"]) {
+  padding-left: 1.5em;
+}
+
+.reply-md li:has(> input[type="checkbox"]) {
+  padding-left: 0;
+  list-style: none;
+}
+
+.reply-md li > input[type="checkbox"] {
+  margin: 0 0.5em 0 0;
+  vertical-align: -0.1em;
+}
+
+.reply-md li:has(> input[type="checkbox"]:checked) {
+  color: var(--text-secondary);
+  text-decoration-line: line-through;
+}
+
+/* A line-through is inherited by everything inside; an inline-block list is not part of it. */
+.reply-md li:has(> input[type="checkbox"]:checked) > :is(ul, ol) {
+  display: inline-block;
+  width: 100%;
+  color: var(--text-primary);
+  text-decoration-line: none;
+  vertical-align: top;
+}
+
+/* Footnotes: a smaller, quieter note below the text; the reference is a raised, small number. */
+.reply-md sup {
+  font-size: 0.75em;
+  line-height: 0;
+}
+
+.reply-md sup a {
+  text-decoration-line: none;
+}
+
+.reply-md section[data-footnotes] {
+  margin-top: 1.5em;
+  font-size: 0.875em;
+  color: var(--text-secondary);
+}
+
+.reply-md section[data-footnotes] :is(ol, p) {
+  margin-bottom: 0;
+}
+
+/* Quote: a quiet bar and softer text, not italic. */
+.reply-md blockquote {
+  padding-left: 1em;
+  border-left: 3px solid var(--border-strong-transparent);
+  color: var(--text-secondary);
+  font-style: normal;
+}
+
+.reply-md blockquote > :first-child {
+  margin-top: 0;
+}
+
+.reply-md blockquote > :last-child {
+  margin-bottom: 0;
+}
+
+/* Tables: no card. Header and row rules only, text on the page background. */
+.reply-md [data-streamdown="table-wrapper"] {
+  position: relative;
+  gap: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background-color: transparent;
+}
+
+.reply-md table {
+  border-width: 0;
+  border-collapse: collapse;
+}
+
+.reply-md :is(table, thead, tbody, tr, th, td) {
+  border-color: var(--border-primary-transparent);
+}
+
+.reply-md thead {
+  background-color: transparent;
+}
+
+.reply-md :is(th, td) {
+  min-width: 6em; /* a column never squeezes below a word or two: the table scrolls instead */
+  padding: 0.5em 0 0.5em 1.5em;
+  font-size: 1em;
+  line-height: 1.45; /* cells stay tighter than prose, as ChatGPT's do */
+}
+
+.reply-md th {
+  font-weight: 600;
+}
+
+.reply-md :is(th, td):first-child {
+  padding-left: 0;
+}
+
+/* Copy buttons float over the corner and show on hover or focus (touch screens always show them),
+ * so they take no row of their own. */
+.reply-md [data-streamdown="table-wrapper"] > :first-child {
+  position: absolute;
+  top: 0.25rem;
+  right: 0;
+  z-index: 1;
+}
+
+.reply-md [data-streamdown="code-block-actions"] {
+  padding: 0;
+  border: 0;
+  background-color: transparent;
+}
+
+@media (hover: hover) {
+  .reply-md [data-streamdown="table-wrapper"] > :first-child,
+  .reply-md [data-streamdown="code-block-actions"] {
+    opacity: 0;
+    transition: opacity 120ms;
+  }
+
+  .reply-md [data-streamdown="table-wrapper"]:is(:hover, :focus-within) > :first-child,
+  .reply-md [data-streamdown="code-block"]:is(:hover, :focus-within) [data-streamdown="code-block-actions"] {
+    opacity: 1;
+  }
+}
+
+/* Code block: one bordered box. The language label sits on top; the code has no inner card. */
+.reply-md [data-streamdown="code-block"] {
+  gap: 0;
+  padding: 0;
+  border: 1px solid var(--border-strong-transparent);
+  border-radius: 0.75rem;
+  background-color: transparent;
+}
+
+.reply-md [data-streamdown="code-block-header"] {
+  height: auto;
+  min-height: 1.75rem;
+  padding: 0.5rem 0.5rem 0 0.875rem;
+  font-family: var(--font-sans);
+  color: var(--text-secondary);
+}
+
+.reply-md [data-streamdown="code-block-header"] > span {
+  margin-left: 0;
+  font-family: inherit;
+  text-transform: none;
+}
+
+.reply-md [data-streamdown="code-block-body"] {
+  font-size: 0.933em; /* 14px beside 15px text */
+  line-height: 1.667;
+}
+
+/* Reply flow (components/chat/flow) -------------------------------------------
+ * Text shimmer (components/ui/text-shimmer.tsx): a running tool's or the thinking group's
+ * label. A band sweeps across the secondary text colour; its colours are set at :root. */
+/* Morphing text (components/chat/flow/morph-text.tsx): the box eases to the measured width of
+ * its text so siblings slide along; the words that change fade out, then the new ones in. */
+.morph {
+  position: relative;
+  display: block;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.morph[data-ready] {
+  transition: width 320ms var(--ease-calm);
+}
+
+.morph-measure {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: max-content;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.morph-measure::before {
+  content: attr(data-text);
+}
+
+.morph-text {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* An ellipsis would flicker at the moving edge: clip until the width settles. */
+.morph[data-moving] > .morph-text {
+  text-overflow: clip;
+}
+
+/* A swap (morph-text.tsx) fades only the words that change: a mask keeps the shared words
+ * (left of --morph-kept) opaque and takes the rest to --morph-tail. One text at a time, never
+ * two overlaid: out to nothing, swap, back in. */
+@property --morph-tail {
+  syntax: "<number>";
+  inherits: false;
+  initial-value: 1;
+}
+
+.morph-out,
+.morph-in {
+  mask-image: linear-gradient(
+    to right,
+    #000 var(--morph-kept, 0px),
+    rgb(0 0 0 / var(--morph-tail)) var(--morph-kept, 0px)
+  );
+}
+
+.morph-out {
+  animation: morph-tail-out 120ms ease-in both;
+}
+
+.morph-in {
+  animation: morph-tail-in 200ms ease-out both;
+}
+
+@keyframes morph-tail-out {
+  from { --morph-tail: 1; }
+  to { --morph-tail: 0; }
+}
+
+@keyframes morph-tail-in {
+  from { --morph-tail: 0; }
+  to { --morph-tail: 1; }
+}
+
+/* Marquee title (components/chat/marquee-title.tsx): a title that does not fit fades out on the
+ * right instead of cutting, and slides to show the rest while hovered. Only a transform moves
+ * (compositor), the fade widths are the only thing repainted, and only while hovering. */
+@property --marquee-fade-end {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+
+@property --marquee-fade-start {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+
+.marquee {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  outline: none;
+}
+
+.marquee[data-overflow] {
+  --marquee-fade-end: 1.75rem;
+  mask-image: linear-gradient(
+    to right,
+    #0000 0,
+    #000 var(--marquee-fade-start),
+    #000 calc(100% - var(--marquee-fade-end)),
+    #0000 100%
+  );
+}
+
+/* The fade replaces the ellipsis, which would sit under it. */
+.marquee .morph-text { text-overflow: clip; }
+
+.marquee[data-overflow] .morph-text > span {
+  transition: transform 300ms var(--ease-calm);
+  will-change: transform;
+}
+
+@media (hover: hover) and (prefers-reduced-motion: no-preference) {
+  .marquee[data-overflow] {
+    transition:
+      --marquee-fade-start 300ms var(--ease-calm),
+      --marquee-fade-end 300ms var(--ease-calm);
+  }
+
+  .marquee[data-overflow]:hover,
+  .marquee[data-overflow]:focus-visible {
+    --marquee-fade-start: 1.25rem;
+    --marquee-fade-end: 0px;
+    /* The right fade is gone only once the text has arrived at its end. */
+    transition:
+      --marquee-fade-start 300ms var(--ease-calm) 250ms,
+      --marquee-fade-end 200ms linear calc(250ms + var(--marquee-ms));
+  }
+
+  .marquee[data-overflow]:hover .morph-text > span,
+  .marquee[data-overflow]:focus-visible .morph-text > span {
+    transform: translateX(calc(-1 * var(--marquee-distance)));
+    transition: transform var(--marquee-ms) linear 250ms;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .morph[data-ready] { transition: none; }
+  .morph-out, .morph-in { animation: none; mask-image: none; }
+}
+
+/* Collapsible panels (components/ui/collapsible.tsx) grow and shrink to their measured
+ * height (Base UI's --collapsible-panel-height), so opening a group never jumps. */
+[data-slot="collapsible-content"] {
+  height: var(--collapsible-panel-height);
+  overflow: hidden;
+  transition: height 260ms var(--ease-calm);
+}
+
+[data-slot="collapsible-content"][data-starting-style],
+[data-slot="collapsible-content"][data-ending-style] {
+  height: 0;
+}
+
+/* A live work group grows with tool output. Do not animate every measured height update. */
+[data-slot="work-group"][data-active] > [data-slot="collapsible-content"] {
+  transition: none;
+}
+
+/* Streamed words (Streamdown's animate plugin) fade in; reduced motion shows them at once. */
+@media (prefers-reduced-motion: reduce) {
+  [data-slot="collapsible-content"] {
+    transition: none;
+  }
+  [data-sd-animate],
+  [data-sd-animate-marker]::marker {
+    animation: none;
+  }
+}
+
+/* Message footers (Copy, sent time, model, duration, speed), as in opencode's web timeline: with a
+ * mouse they show while their message is hovered or holds focus, at once and without a fade; on
+ * touch screens, which cannot hover, they always show. They keep their space either way, so
+ * revealing one never moves the conversation. */
+@media (hover: hover) {
+  [data-footer-host] [data-slot="message-footer"] {
+    opacity: 0;
+    pointer-events: none;
+  }
+  /* The newest reply keeps its footer showing; older ones reveal it on hover. */
+  [data-footer-host]:hover [data-slot="message-footer"],
+  [data-footer-host]:focus-within [data-slot="message-footer"],
+  [data-footer-host][data-footer-latest] [data-slot="message-footer"] {
+    opacity: 1;
+    pointer-events: auto;
+  }
+}
+
+/* Inside a work group (Markdown size="work") everything is one size, 14px: headings, inline code
+ * and code blocks do not step up or down from the text around them. */
+.reply-md.type-work :is(h1, h2, h3, h4, h5, h6),
+.reply-md.type-work [data-streamdown="inline-code"],
+.reply-md.type-work [data-streamdown="code-block-body"] {
+  font-size: 1em;
 }
