@@ -19,7 +19,9 @@ export default defineConfig({
     action: { default_title: 'Opencode' },
     // Loopback only: the extension talks to the local opencode server and
     // nothing else. Non-loopback servers need optional_host_permissions later.
-    permissions: ['storage', 'sidePanel'],
+    // cookies: adopt the web UI's loopback session cookie after the user opens
+    // an `opencode pair` link (see lib/opencode/browser-session.ts).
+    permissions: ['storage', 'sidePanel', 'cookies'],
     host_permissions: ['http://127.0.0.1/*', 'http://localhost/*'],
   },
 });

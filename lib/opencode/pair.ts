@@ -9,21 +9,17 @@ export type PairResult =
 
 const fail = (kind: PairFailureKind, message: string): PairResult => ({ ok: false, kind, message });
 
-const EXPIRED_MESSAGE =
-  "Link expired or used. Run `opencode pair` again, then copy the link — don't open it in a browser.";
+const EXPIRED_MESSAGE = 'Link expired or used. Run `opencode pair` again and click the new link.';
 
-export type PairOptions = {
-  baseUrl: string;
-  code: string;
-  fetch?: typeof globalThis.fetch;
-  now?: () => number;
-};
+type Options = { baseUrl: string; fetch?: typeof globalThis.fetch; now?: () => number };
+export type PairOptions = Options & { code: string };
+export type TokenOptions = Options & { token: string };
 
 /**
  * Redeems a one-time pairing code (JSON flow, redirects refused), verifies the
  * token against /api/info, stores the connection and bootstraps the workspace.
  */
-export async function pairWithCode({ baseUrl, code, fetch, now = Date.now }: PairOptions): Promise<PairResult> {
+export async function pairWithCode({ baseUrl, code, fetch, now }: PairOptions): Promise<PairResult> {
   const anonymous = createClient({ baseUrl, fetch });
   let token: unknown;
   try {
@@ -35,7 +31,15 @@ export async function pairWithCode({ baseUrl, code, fetch, now = Date.now }: Pai
     return fail('invalid', 'No opencode server at this address.');
   }
   if (!isValidToken(token)) return fail('invalid', 'No opencode server at this address.');
+  return connectWithToken({ baseUrl, token, fetch, now });
+}
 
+/**
+ * Verifies a token (from a redeemed code or the browser's opencode session)
+ * against /api/info, stores the connection and bootstraps the workspace.
+ */
+export async function connectWithToken({ baseUrl, token, fetch, now = Date.now }: TokenOptions): Promise<PairResult> {
+  if (!isValidToken(token)) return fail('invalid', 'No opencode server at this address.');
   const client = createClient({ baseUrl, token, fetch });
   let version: unknown;
   try {
