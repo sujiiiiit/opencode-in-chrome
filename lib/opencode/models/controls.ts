@@ -5,6 +5,7 @@ import {
   compareProviders,
   defaultVisible,
   findModel,
+  findProvider,
   matchesSearch,
   modelKey,
   modelLabels,
@@ -35,6 +36,8 @@ export type ModelControls = {
   model: {
     current: CatalogModel | undefined;
     label: ModelLabel | undefined;
+    /** The current model's provider, for its logo. */
+    provider: { id: string; canonical?: string } | undefined;
   };
   variant: {
     /** "default", then the model's variants. */
@@ -63,6 +66,7 @@ export function buildControls(state: ModelState): ModelControls {
     model: {
       current: model,
       label: model && modelLabels(input.catalog).get(modelKey(model)),
+      provider: model && (findProvider(input.catalog, model.providerID) ?? { id: model.providerID }),
     },
     variant: {
       options: [DEFAULT_VARIANT, ...(model?.variants ?? [])],

@@ -13,6 +13,7 @@ import { Tooltip } from '@/components/ui/tooltip';
 import { shortcutLabel } from '@/lib/keyboard';
 import type { ModelControls as Controls } from '@/lib/opencode/models/controls';
 import { DEFAULT_VARIANT } from '@/lib/opencode/models/variant';
+import { hasLogo, ProviderLogo } from './provider-logo';
 
 export const SHORTCUTS = {
   picker: "⌘'",
@@ -38,10 +39,10 @@ function ChipSelect({ label, shortcut, options, current, disabled, slot, onSelec
         <DropdownMenuTrigger
           disabled={disabled}
           render={
-            <Button variant="ghost" size="sm" className="text-[13px]" data-slot={slot} aria-label={`${label}: ${current}`} />
+            <Button variant="ghost" size="sm" className="max-w-[7rem] shrink-0 text-[13px]" data-slot={slot} aria-label={`${label}: ${current}`} />
           }
         >
-          {current}
+          <span className="min-w-0 truncate">{current}</span>
           <Icon name="chevron-down" />
         </DropdownMenuTrigger>
       </Tooltip>
@@ -67,10 +68,13 @@ type Props = {
   onVariant: (value: string | undefined) => void;
 };
 
-/** The model chip's text: provider and model, a placeholder while loading, or why none. */
+/**
+ * The model chip's text: the model (with its provider's name when no logo stands for it), a
+ * placeholder while loading, or why none.
+ */
 function chipLabel(controls: Controls): string {
-  const { label } = controls.model;
-  if (label) return label.provider ? `${label.provider} / ${label.model}` : label.model;
+  const { label, provider } = controls.model;
+  if (label) return label.provider && !hasLogo(provider) ? `${label.provider} / ${label.model}` : label.model;
   if (controls.loading) return 'Loading models…';
   return controls.empty ? 'No models' : 'Choose model';
 }
@@ -100,14 +104,15 @@ export function ModelControls({ controls, onOpenPicker, onVariant }: Props) {
         <Button
           variant="ghost"
           size="sm"
-          className="text-[13px]"
+          className="min-w-0 max-w-[12rem] shrink justify-start text-[13px]"
           data-slot="model-chip"
           aria-label={controls.model.label ? `Model: ${controls.model.label.model}` : 'Choose model'}
           aria-haspopup="dialog"
           disabled={loading && !controls.preview}
           onClick={() => !loading && onOpenPicker()}
         >
-          {chipLabel(controls)}
+          {controls.model.provider && <ProviderLogo provider={controls.model.provider} />}
+          <span className="min-w-0 truncate">{chipLabel(controls)}</span>
         </Button>
       </Tooltip>
       {variant.options.length > 1 && (

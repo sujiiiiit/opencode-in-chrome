@@ -124,7 +124,7 @@ function parseProvider(raw: unknown): CatalogProvider | null {
 export const allModels = (catalog: Catalog | null): CatalogModel[] =>
   catalog?.providers.flatMap((provider) => provider.models) ?? [];
 
-function findProvider(catalog: Catalog | null, providerID: string): CatalogProvider | undefined {
+export function findProvider(catalog: Catalog | null, providerID: string): CatalogProvider | undefined {
   return catalog?.providers.find((provider) => provider.id === providerID);
 }
 
