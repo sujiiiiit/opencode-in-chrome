@@ -436,7 +436,7 @@
  * The ghost bubble that flies a sent prompt into the conversation draws its text
  * from an attribute, so the page never holds a second copy of it as text (find in
  * page, screen readers and text queries only meet the real bubble). */
-[data-send-ghost]::before {
+[data-ghost-text]::before {
   content: attr(data-text);
 }
 

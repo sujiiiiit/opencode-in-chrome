@@ -63,16 +63,38 @@ function contentOffset(el: HTMLElement): { x: number; y: number } {
   return { x: parseFloat(style.paddingLeft) || 0, y: parseFloat(style.paddingTop) || 0 };
 }
 
-function createGhost(target: HTMLElement, text: string): HTMLElement {
-  const ghost = document.createElement('div');
-  ghost.setAttribute('aria-hidden', 'true');
+/**
+ * A copy of the bubble's element tree: same classes, inline styles (the collapsed preview's
+ * height) and collapse state, so a long prompt flies in already clamped, faded and showing its
+ * "Show more" line instead of snapping to that look on landing. Every element becomes an inert
+ * div (the toggle is no button), and each leaf's text is drawn by CSS from `data-text`
+ * (global.css): never parsed as HTML and never a second text node on the page.
+ */
+function mirror(source: Element): HTMLElement {
+  const copy = document.createElement('div');
+  copy.className = source.getAttribute('class') ?? '';
+  const style = source.getAttribute('style');
+  if (style) copy.setAttribute('style', style);
+  const collapsible = source.getAttribute('data-collapsible');
+  if (collapsible) copy.dataset.collapsible = collapsible;
+  if (source.children.length === 0) {
+    copy.dataset.ghostText = '';
+    copy.dataset.text = source.textContent ?? '';
+  } else {
+    for (const child of source.children) copy.append(mirror(child));
+  }
+  return copy;
+}
+
+function createGhost(target: HTMLElement): HTMLElement {
   // Same look as the bubble (copied, so the two never drift apart), sized to the bubble so the
-  // text wraps exactly as it will once landed. The text is drawn by CSS from `data-text`
-  // (global.css), never parsed as HTML and never a second text node on the page.
-  ghost.className = target.className;
+  // text wraps exactly as it will once landed.
+  const ghost = mirror(target);
+  ghost.setAttribute('aria-hidden', 'true');
   ghost.classList.remove('invisible'); // the bubble's in-flight state, not its look
   ghost.dataset.sendGhost = '';
-  ghost.dataset.text = text;
+  // Drawn mid-transition otherwise: the preview's height and fade must not animate in.
+  ghost.querySelectorAll<HTMLElement>('[data-collapsible]').forEach((el) => (el.style.transition = 'none'));
   const { width } = target.getBoundingClientRect();
   Object.assign(ghost.style, {
     position: 'fixed',
@@ -92,10 +114,10 @@ function createGhost(target: HTMLElement, text: string): HTMLElement {
 }
 
 /**
- * Flies `text` from `from` (the prompt box) to the bubble of message `id`. Call it just before
+ * Flies the text of message `id` from `from` (the prompt box) to its bubble. Call it just before
  * the message is added, so the bubble's first frame is already hidden.
  */
-export function launchSendFlight({ id, text, from }: { id: string; text: string; from: FlightOrigin | null }) {
+export function launchSendFlight({ id, from }: { id: string; from: FlightOrigin | null }) {
   if (!from || !motionAllowed()) return;
   flying.add(id);
   notify();
@@ -111,7 +133,7 @@ export function launchSendFlight({ id, text, from }: { id: string; text: string;
     }
     const pad = contentOffset(target);
     const start = { x: from.left - pad.x, y: from.top - pad.y };
-    const ghost = createGhost(target, text);
+    const ghost = createGhost(target);
     ghost.style.transform = `translate(${start.x}px, ${start.y}px)`;
     document.body.append(ghost);
     // Next frame: drop the inline transparent fill so the bubble's own colour transitions in.

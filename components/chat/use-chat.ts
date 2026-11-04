@@ -254,7 +254,7 @@ export function useComposer(input: {
     const id = messageID(retry.current, text, key);
     retry.current = null;
     // The text flies from where it sits in the box to its bubble, so measure before clearing.
-    launchSendFlight({ id, text, from: box.current?.textOrigin() ?? null });
+    launchSendFlight({ id, from: box.current?.textOrigin() ?? null });
     setText('');
     const cancel = trackCommit(modelStore, chat, selection);
     if (await chat.submit(text, id, selection)) return;
