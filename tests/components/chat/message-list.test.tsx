@@ -192,47 +192,47 @@ describe('MessageList: scrolling', () => {
     expect(viewport.scrollTop).toBe(1040);
   });
 
-  it('waits for a new delta after 90 percent, then holds still until the next turn', () => {
+  it('waits for a new delta after 95 percent, then holds still until the next turn', () => {
     const frame = frames();
     const { rerender } = render(<MessageList turns={streaming('a')} pending={[]} />);
     const content = { height: 1000 };
     const viewport = sized(content);
     scrollTo(viewport, 800);
-    content.height = 1100;
+    content.height = 1130;
     rerender(<MessageList turns={streaming('a b')} pending={[]} />);
     frame(performance.now() + 240);
     expect(viewport.scrollTop).toBe(800);
-    content.height = 1130;
+    content.height = 1140;
     rerender(<MessageList turns={streaming('a b c')} pending={[]} />);
     frame(performance.now() + 480);
     expect(viewport.scrollTop).toBe(800);
-    content.height = 1140;
+    content.height = 1145;
     rerender(<MessageList turns={streaming('a b c d')} pending={[]} />);
     frame(performance.now() + 1440);
-    expect(viewport.scrollTop).toBe(940);
-    content.height = 1240;
+    expect(viewport.scrollTop).toBe(945);
+    content.height = 1275;
     rerender(<MessageList turns={streaming('a b c d e')} pending={[]} />);
     frame(performance.now() + 1680);
-    expect(viewport.scrollTop).toBe(940);
-    content.height = 1270;
+    expect(viewport.scrollTop).toBe(945);
+    content.height = 1285;
     rerender(<MessageList turns={streaming('a b c d e f')} pending={[]} />);
     frame(performance.now() + 1920);
-    expect(viewport.scrollTop).toBe(940);
-    content.height = 1280;
+    expect(viewport.scrollTop).toBe(945);
+    content.height = 1290;
     rerender(<MessageList turns={streaming('a b c d e f g')} pending={[]} />);
     frame(performance.now() + 2640);
-    expect(viewport.scrollTop).toBe(1080);
+    expect(viewport.scrollTop).toBe(1090);
   });
 
-  it('leaves a nearly complete reply in place when it finishes after 90 percent', () => {
+  it('leaves a nearly complete reply in place when it finishes after 95 percent', () => {
     const frame = frames();
     const { rerender } = render(<MessageList turns={streaming('a')} pending={[]} />);
     const content = { height: 1000 };
     const viewport = sized(content);
     scrollTo(viewport, 800);
-    content.height = 1100;
-    rerender(<MessageList turns={streaming('a b')} pending={[]} />);
     content.height = 1130;
+    rerender(<MessageList turns={streaming('a b')} pending={[]} />);
+    content.height = 1140;
     rerender(<MessageList turns={streaming('a b c')} pending={[]} />);
     content.height = 1150;
     rerender(<MessageList turns={[first, turn('m2', 'two', reply('succeeded', 'a b c d'))]} pending={[]} />);

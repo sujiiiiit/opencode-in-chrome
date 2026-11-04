@@ -51,6 +51,9 @@ function PendingBubble({ message }: { message: PendingMessage }) {
  */
 const TurnView = memo(function TurnView({ turn, latest }: { turn: Turn; latest: boolean }) {
   const stats = useMemo(() => turnStats(turn), [turn]);
+  // A follow-up is admitted (and its reply starts "Thinking") before its text has flown into the
+  // bubble; the reply waits for the landing, as a first message's does behind session creation.
+  const inFlight = useInFlight(turn.id);
   return (
     // claude.ai's rhythm: bubble, its 24px action row and the reply sit 8px apart.
     <div className="flex flex-col gap-2">
@@ -58,15 +61,15 @@ const TurnView = memo(function TurnView({ turn, latest }: { turn: Turn; latest: 
         <UserBubble id={turn.id} text={turn.text} />
         <UserMessageFooter text={turn.text} created={turn.created} />
       </div>
-      <AssistantReply reply={turn.reply} stats={stats} latest={latest} />
+      {!inFlight && <AssistantReply reply={turn.reply} stats={stats} latest={latest} />}
     </div>
   );
 });
 
-/** Arm at 75%, confirm continuation past 90%, and reset the growing tail to 25%. */
+/** Arm at 90%, confirm continuation past 95%, and reset the growing tail to 25%. */
 const STICK_PX = 48;
-const ARM_AT = 0.75;
-const CONFIRM_AT = 0.9;
+const ARM_AT = 0.9;
+const CONFIRM_AT = 0.95;
 const EDGE_AT = 0.98;
 const RESET_TO = 0.25;
 const FOLLOW_SPACE = 1 - RESET_TO;
