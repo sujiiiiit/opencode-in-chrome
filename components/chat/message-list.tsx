@@ -1,4 +1,4 @@
-import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { memo, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { cn } from 'cn';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -141,12 +141,21 @@ function usePageTurn(turns: Turn[], pending: PendingMessage[]) {
   const gate = useRef<Gate | null>(null);
   const stream = useRef<{ id: string; length: number } | null>(null);
   const activeTurn = turns.at(-1);
-  stream.current = activeTurn?.reply.status === 'running'
-    ? {
-        id: activeTurn.id,
-        length: replyParts(activeTurn.reply).reduce((length, part) => length + (part.kind === 'tool' ? part.inputText.length : part.text.length), 0),
-      }
-    : null;
+  const streaming = useMemo(
+    () =>
+      activeTurn?.reply.status === 'running'
+        ? {
+            id: activeTurn.id,
+            length: replyParts(activeTurn.reply).reduce((length, part) => length + (part.kind === 'tool' ? part.inputText.length : part.text.length), 0),
+          }
+        : null,
+    [activeTurn],
+  );
+  // Published on commit, not during render: a background render React drops must not leave its
+  // reply behind for the scroll and resize handlers to read.
+  useLayoutEffect(() => {
+    stream.current = streaming;
+  }, [streaming]);
   const empty = turns.length === 0 && pending.length === 0;
 
   // The element that scrolls is the ScrollArea's viewport.
@@ -303,13 +312,36 @@ function usePageTurn(turns: Turn[], pending: PendingMessage[]) {
   return { ref, space };
 }
 
-export const MessageList = memo(function MessageList({
-  turns,
-  pending,
-  hasEarlier = false,
-  loadingEarlier = false,
-  onLoadEarlier,
-}: Props) {
+/** Which chat, from which oldest turn, a list shows. A new key is a chat opened or older turns loaded. */
+const listKey = (turns: Turn[]) => turns[0]?.id ?? '';
+
+/**
+ * The props to render: the latest while the same chat updates (a streamed delta renders at once),
+ * but a newly opened chat or a loaded older page renders in the background, in slices, while the
+ * current list stays on screen. Rendering a whole chat parses every reply's markdown, which would
+ * otherwise freeze the panel for a long chat. The incoming list is pinned at its first snapshot,
+ * so deltas streaming into it cannot restart (and starve) that background render; once it lands,
+ * the latest props take over, and only the turns that changed meanwhile render again.
+ */
+function useStagedList(props: Props): Props {
+  const key = listKey(props.turns);
+  const [pinned, setPinned] = useState(props);
+  if (listKey(pinned.turns) !== key) setPinned(props);
+  const target = useDeferredValue(pinned);
+  /** What is on screen now: it stays, unchanged, until the incoming list lands. */
+  const committed = useRef(props);
+  const shown = listKey(target.turns) === key ? props : committed.current;
+  useLayoutEffect(() => {
+    committed.current = shown;
+  });
+  return shown;
+}
+
+export const MessageList = memo(function MessageList(props: Props) {
+  return <TurnList {...useStagedList(props)} />;
+});
+
+const TurnList = memo(function TurnList({ turns, pending, hasEarlier = false, loadingEarlier = false, onLoadEarlier }: Props) {
   const { ref, space } = usePageTurn(turns, pending);
   const empty = turns.length === 0 && pending.length === 0;
 
