@@ -11,6 +11,7 @@ import type { Selection } from '@/lib/opencode/models/selection';
 import { displayTitle, isUntitled } from '@/lib/opencode/sessions';
 import { ShellOutputProvider, useLingering } from './flow/live';
 import { MorphText } from './flow/morph-text';
+import { MarqueeTitle } from './marquee-title';
 import { HistoryView } from './history/history-view';
 import { MessageList } from './message-list';
 import { ModelControls } from './model/model-controls';
@@ -86,9 +87,9 @@ function ChatHeader({
 
   return (
     <header className="mx-auto flex w-full max-w-chat shrink-0 items-center gap-2 px-4 py-1.5">
-      <h1 className="min-w-0 flex-1 truncate text-sm text-text-primary" title={title}>
+      <MarqueeTitle title={title} className="flex-1 text-sm text-text-primary">
         <MorphText id={id} text={title} textSlot="chat-title" />
-      </h1>
+      </MarqueeTitle>
       <div className="flex items-center gap-0.5">
         <WebSearchMenu connection={connection} onError={onError} />
         <Button variant="ghost" size="icon-lg" aria-label="Settings" title="Settings" onClick={openSettings}>

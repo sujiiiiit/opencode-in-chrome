@@ -914,6 +914,71 @@ body {
   to { --morph-tail: 1; }
 }
 
+/* Marquee title (components/chat/marquee-title.tsx): a title that does not fit fades out on the
+ * right instead of cutting, and slides to show the rest while hovered. Only a transform moves
+ * (compositor), the fade widths are the only thing repainted, and only while hovering. */
+@property --marquee-fade-end {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+
+@property --marquee-fade-start {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+
+.marquee {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  outline: none;
+}
+
+.marquee[data-overflow] {
+  --marquee-fade-end: 1.75rem;
+  mask-image: linear-gradient(
+    to right,
+    #0000 0,
+    #000 var(--marquee-fade-start),
+    #000 calc(100% - var(--marquee-fade-end)),
+    #0000 100%
+  );
+}
+
+/* The fade replaces the ellipsis, which would sit under it. */
+.marquee .morph-text { text-overflow: clip; }
+
+.marquee[data-overflow] .morph-text > span {
+  transition: transform 300ms var(--ease-calm);
+  will-change: transform;
+}
+
+@media (hover: hover) and (prefers-reduced-motion: no-preference) {
+  .marquee[data-overflow] {
+    transition:
+      --marquee-fade-start 300ms var(--ease-calm),
+      --marquee-fade-end 300ms var(--ease-calm);
+  }
+
+  .marquee[data-overflow]:hover,
+  .marquee[data-overflow]:focus-visible {
+    --marquee-fade-start: 1.25rem;
+    --marquee-fade-end: 0px;
+    /* The right fade is gone only once the text has arrived at its end. */
+    transition:
+      --marquee-fade-start 300ms var(--ease-calm) 250ms,
+      --marquee-fade-end 200ms linear calc(250ms + var(--marquee-ms));
+  }
+
+  .marquee[data-overflow]:hover .morph-text > span,
+  .marquee[data-overflow]:focus-visible .morph-text > span {
+    transform: translateX(calc(-1 * var(--marquee-distance)));
+    transition: transform var(--marquee-ms) linear 250ms;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .morph[data-ready] { transition: none; }
   .morph-out, .morph-in { animation: none; mask-image: none; }
