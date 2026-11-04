@@ -43,7 +43,10 @@ function fetchImage(src: string, onSize?: (width: number, height: number) => voi
       () => cancelAnimationFrame(frame),
     );
   }
-  return loaded.then(() => (typeof image.decode === 'function' ? image.decode().then(() => image, () => image) : image));
+  // A local picture is scaled from its bytes (see `scaled`), so only its size is needed: decoding
+  // it here as well would hold a second full-size copy for nothing.
+  const local = /^(blob|data):/.test(src);
+  return loaded.then(() => (!local && typeof image.decode === 'function' ? image.decode().then(() => image, () => image) : image));
 }
 
 /** How much to shrink a `width` x `height` image to fill a box at the screen's density. */
@@ -64,15 +67,29 @@ async function scaled(image: HTMLImageElement, box: DOMRect, fit: Fit): Promise<
   if (typeof createImageBitmap !== 'function' || box.width <= 0 || width <= 0 || height <= 0) return null;
   const scale = scaleFor(width, height, box, fit);
   if (scale > WORTH_SCALING) return null;
+  const size = {
+    resizeWidth: Math.max(1, Math.round(width * scale)),
+    resizeHeight: Math.max(1, Math.round(height * scale)),
+    resizeQuality: 'high' as const,
+  };
   try {
-    return await createImageBitmap(image, {
-      resizeWidth: Math.max(1, Math.round(width * scale)),
-      resizeHeight: Math.max(1, Math.round(height * scale)),
-      resizeQuality: 'high',
-    });
+    // From the encoded bytes, Chrome decodes and scales off the main thread; from the <img> it
+    // decodes the whole picture again on it (~100ms for a 12 MP photo, per image).
+    const bytes = await localBytes(image.src);
+    return await createImageBitmap(bytes ?? image, size);
   } catch {
     return null;
   }
+}
+
+/**
+ * The bytes of a picture this panel already holds (an attachment's object URL, a sent image's
+ * data URL), or null for a remote picture, which is read from the <img> instead: fetching it
+ * again could be refused (CORS) or cost a second download.
+ */
+async function localBytes(src: string): Promise<Blob | null> {
+  if (!/^(blob|data):/.test(src)) return null;
+  return (await fetch(src)).blob();
 }
 
 /** Calls `onNear` once `element` comes within reach of the screen (at once without an observer). */

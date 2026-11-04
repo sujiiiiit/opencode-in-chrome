@@ -17,8 +17,7 @@ const EXTENSIONS: Record<string, (typeof IMAGE_MIMES)[number]> = {
 };
 
 /**
- * An image attached to the draft. Only the File is held (the browser keeps its bytes on disk);
- * they are read once, when the prompt is sent.
+ * An image attached to the draft. Keep only the File until the prompt is sent.
  */
 export type ImageAttachment = {
   id: string;
@@ -53,7 +52,7 @@ export function releaseImage(image: ImageAttachment): void {
   URL.revokeObjectURL(image.url);
 }
 
-/** The image as a base64 `data:` URL under its detected type (a typeless file reads as octet-stream). */
+/** Read only at send time, without a second byte array and binary string in the panel. */
 function dataURL(image: ImageAttachment): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -66,7 +65,11 @@ function dataURL(image: ImageAttachment): Promise<string> {
   });
 }
 
-/** The prompt's `files` for these images, read from disk now. Rejects if one can no longer be read. */
-export function promptFiles(images: readonly ImageAttachment[]): Promise<PromptFile[]> {
-  return Promise.all(images.map(async (image) => ({ uri: await dataURL(image), name: image.name })));
+/** Read images one at a time; attaching must not decode or copy them. */
+export async function promptFiles(images: readonly ImageAttachment[]): Promise<PromptFile[]> {
+  const files: PromptFile[] = [];
+  for (const image of images) {
+    files.push({ uri: await dataURL(image), name: image.name });
+  }
+  return files;
 }

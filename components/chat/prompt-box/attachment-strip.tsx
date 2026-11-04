@@ -1,10 +1,9 @@
-import { memo, useMemo, useRef, useState } from 'react';
+import { memo, useMemo, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Icon } from '@/components/ui/icon';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { ImageViewer, type ImageItem } from '../flow/media/image-viewer';
-import { HoverShade, PictureView } from '../flow/media/picture-view';
-import { usePicture } from '../flow/media/use-picture';
+import { PictureTile } from '../flow/media/picture-tile';
 import type { ImageAttachment } from '@/lib/opencode/attachments';
 
 type Props = {
@@ -14,29 +13,11 @@ type Props = {
 
 type ThumbProps = { image: ImageAttachment; at: number; onOpen: (at: number) => void; onRemove: (id: string) => void };
 
-/**
- * One attached image. Like a gallery tile it holds a copy scaled to the tile (`usePicture`), so
- * a large photo never sits decoded at full size behind a 56px thumbnail.
- */
+/** One attached image: its tile, with an x (on hover or focus) that removes it. */
 const Thumb = memo(function Thumb({ image, at, onOpen, onRemove }: ThumbProps) {
-  const box = useRef<HTMLDivElement>(null);
-  const picture = usePicture(image.url, box, 'cover');
   return (
     <li className="group/thumb relative size-14 shrink-0">
-      {/* The radius lives on this wrapper: Button's `fill` size is square. */}
-      <div ref={box} className="size-full overflow-hidden rounded-xl bg-background-tertiary-transparent">
-        <Button variant="ghost" size="fill" aria-label={`Preview ${image.name}`} onClick={() => onOpen(at)}>
-          {picture.status === 'ready' && (
-            <PictureView src={image.url} alt="" picture={picture} className="absolute inset-0 size-full object-cover" />
-          )}
-          {picture.status === 'failed' && (
-            <span className="absolute inset-0 flex items-center justify-center text-text-tertiary">
-              <Icon name="image-off" className="size-5" />
-            </span>
-          )}
-          <HoverShade />
-        </Button>
-      </div>
+      <PictureTile src={image.url} name={image.name} at={at} onOpen={onOpen} className="size-full" />
       <Button
         variant="viewer"
         size="icon-xs"

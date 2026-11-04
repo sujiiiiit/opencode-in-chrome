@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { attachImage, promptFiles } from '@/lib/opencode/attachments';
 
 const png = (name: string, type = 'image/png', bytes = [0x89, 0x50, 0x4e, 0x47]) =>
@@ -7,10 +7,13 @@ const png = (name: string, type = 'image/png', bytes = [0x89, 0x50, 0x4e, 0x47])
 describe('attachImage', () => {
   it('keeps the file with an object URL for the preview, without reading it', () => {
     const file = png('shot.png');
+    const read = vi.spyOn(FileReader.prototype, 'readAsDataURL');
     const result = attachImage(file);
     if (!('image' in result)) throw new Error(result.error);
     expect(result.image).toMatchObject({ name: 'shot.png', mime: 'image/png', file });
     expect(result.image.url).toMatch(/^blob:/);
+    expect(read).not.toHaveBeenCalled();
+    read.mockRestore();
   });
 
   it('takes the type from the extension when the browser gives none', () => {
