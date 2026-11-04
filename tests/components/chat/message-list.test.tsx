@@ -137,7 +137,14 @@ describe('MessageList: scrolling', () => {
     Object.defineProperty(viewport, 'clientHeight', { configurable: true, get: () => 200 });
     return viewport;
   }
+  /** The reader scrolls (a wheel turn, then the scroll it causes). */
   const scrollTo = (viewport: HTMLElement, top: number) => {
+    fireEvent.wheel(viewport);
+    viewport.scrollTop = top;
+    fireEvent.scroll(viewport);
+  };
+  /** The browser scrolls on its own (scroll anchoring, clamping), with no reader input. */
+  const browserScroll = (viewport: HTMLElement, top: number) => {
     viewport.scrollTop = top;
     fireEvent.scroll(viewport);
   };
@@ -250,6 +257,37 @@ describe('MessageList: scrolling', () => {
     expect(viewport.scrollTop).toBe(100);
   });
 
+  it('stops following after even a small scroll up while the text is still on screen', () => {
+    const frame = frames();
+    const { rerender } = render(<MessageList turns={streaming('a')} pending={[]} />);
+    const content = { height: 1000 };
+    const viewport = sized(content);
+    scrollTo(viewport, 800);
+    scrollTo(viewport, 780);
+    content.height = 1200;
+    rerender(<MessageList turns={streaming('a b')} pending={[]} />);
+    frame(performance.now() + 720);
+    expect(viewport.scrollTop).toBe(780);
+  });
+
+  it('keeps following when the browser moves the scroll on its own', () => {
+    const frame = frames();
+    const { rerender } = render(<MessageList turns={streaming('a')} pending={[]} />);
+    const content = { height: 1000 };
+    const viewport = sized(content);
+    scrollTo(viewport, 800);
+    // A second later, scroll anchoring nudges the list while the text is already past the fold.
+    const later = performance.now() + 1000;
+    vi.spyOn(performance, 'now').mockReturnValue(later);
+    content.height = 1180;
+    browserScroll(viewport, 790);
+    content.height = 1200;
+    rerender(<MessageList turns={streaming('a b')} pending={[]} />);
+    frame(later + 720);
+    vi.restoreAllMocks();
+    expect(viewport.scrollTop).toBe(1000);
+  });
+
   it('stops a running follow animation when the reader scrolls up', () => {
     const frame = frames();
     const { rerender } = render(<MessageList turns={streaming('a')} pending={[]} />);
@@ -302,6 +340,10 @@ describe('MessageList: scrolling', () => {
     height = 400;
     act(() => callbacks.forEach((callback) => callback([], {} as ResizeObserver)));
     expect(document.querySelector('[data-slot="stream-space"]')).toHaveStyle({ height: '288px' });
+    // A tall viewport keeps a fixed 400px of room (less the 12px the list padding supplies).
+    height = 900;
+    act(() => callbacks.forEach((callback) => callback([], {} as ResizeObserver)));
+    expect(document.querySelector('[data-slot="stream-space"]')).toHaveStyle({ height: '388px' });
   });
 
   it('preserves the reader’s place when older turns are added above', () => {
@@ -327,6 +369,31 @@ describe('MessageList: scrolling', () => {
     rerender(<MessageList turns={turns} pending={[steer('p1', 'next', 'steering')]} />);
     frame(performance.now() + 240);
     expect(viewport.scrollTop).toBe(900);
+  });
+
+  it('raises a new message until the whole follow space shows below it', () => {
+    const frame = frames();
+    const turns = streaming('a');
+    const { rerender } = render(<MessageList turns={turns} pending={[]} />);
+    const content = { height: 1000 };
+    const viewport = sized(content);
+    // The content ends 150px down a 200px viewport, so only part of the follow space shows.
+    scrollTo(viewport, 700);
+    content.height = 1020;
+    rerender(<MessageList turns={turns} pending={[steer('p1', 'next', 'steering')]} />);
+    frame(performance.now() + 240);
+    expect(viewport.scrollTop).toBe(820);
+  });
+
+  it('leaves a chat that fits with its follow space in place', () => {
+    const frame = frames();
+    const turns = streaming('a');
+    const { rerender } = render(<MessageList turns={turns} pending={[]} />);
+    const content = { height: 190 };
+    const viewport = sized(content);
+    rerender(<MessageList turns={turns} pending={[steer('p1', 'next', 'steering')]} />);
+    frame(performance.now() + 240);
+    expect(viewport.scrollTop).toBe(0);
   });
 
   it('does not scroll when it re-renders with the same messages', () => {

@@ -66,13 +66,16 @@ const TurnView = memo(function TurnView({ turn, latest }: { turn: Turn; latest: 
   );
 });
 
-/** Arm at 90%, confirm continuation past 95%, and reset the growing tail to 25%. */
+/** Arm at 90%, confirm continuation past 95%, and turn the page so 400px of room shows below the text. */
 const STICK_PX = 48;
+/** A scroll this soon after a wheel, key or released drag is the reader's (smooth wheel scrolling runs on). */
+const INTENT_MS = 600;
 const ARM_AT = 0.9;
 const CONFIRM_AT = 0.95;
 const EDGE_AT = 0.98;
-const RESET_TO = 0.25;
-const FOLLOW_SPACE = 1 - RESET_TO;
+/** Room kept below the content for page turns; a short viewport keeps at least 25% of it for text. */
+const FOLLOW_SPACE_PX = 400;
+const MAX_FOLLOW_SHARE = 0.75;
 const SCROLL_MS = 200;
 const PAGE_TURN_MS = 650;
 
@@ -150,7 +153,7 @@ function usePageTurn(turns: Turn[], pending: PendingMessage[]) {
   const viewport = () => ref.current?.closest<HTMLElement>('[data-slot="scroll-area-viewport"]') ?? null;
 
   const syncSpace = (element: HTMLElement) => {
-    const next = Math.round(element.clientHeight * FOLLOW_SPACE);
+    const next = Math.round(Math.min(FOLLOW_SPACE_PX, element.clientHeight * MAX_FOLLOW_SHARE));
     if (spaceRef.current === next) return;
     spaceRef.current = next;
     setSpace(next);
@@ -188,6 +191,9 @@ function usePageTurn(turns: Turn[], pending: PendingMessage[]) {
     motion.current = moving;
   };
 
+  /** Where the content ends, in px from the viewport's top (the follow space below is excluded). */
+  const contentEnd = (element: HTMLElement) => element.scrollHeight - spaceRef.current - element.scrollTop;
+
   const considerTurn = (element: HTMLElement) => {
     const current = stream.current;
     if (motion.current && stick.current) {
@@ -198,7 +204,7 @@ function usePageTurn(turns: Turn[], pending: PendingMessage[]) {
       if (!current || !stick.current) gate.current = null;
       return;
     }
-    const position = (element.scrollHeight - spaceRef.current - element.scrollTop) / element.clientHeight;
+    const position = contentEnd(element) / element.clientHeight;
     const next = advanceGate(gate.current, current, position);
     gate.current = next.gate;
     if (next.turn) follow(element, PAGE_TURN_MS);
@@ -208,22 +214,46 @@ function usePageTurn(turns: Turn[], pending: PendingMessage[]) {
   useEffect(() => {
     const element = viewport();
     if (!element) return;
+    // Wheel, touch, keys and the scrollbar thumb (a sibling of the viewport) all live under the root.
+    const root = element.closest<HTMLElement>('[data-slot="scroll-area"]') ?? element;
+    let lastTop = element.scrollTop;
+    let intentAt = -Infinity;
+    let holding = false;
     const onScroll = () => {
+      const moved = element.scrollTop - lastTop;
+      lastTop = element.scrollTop;
       if (motion.current && lastSet.current !== null && Math.abs(element.scrollTop - lastSet.current) < 1) return;
+      // Only the reader's own scrolling changes following. Scrolls the browser makes itself (scroll
+      // anchoring, clamping when content shrinks) must not switch it off mid-reply.
+      if (!holding && performance.now() - intentAt > INTENT_MS) return;
       cancelMotion();
-      stick.current = bottom(element) - element.scrollTop <= STICK_PX;
+      // Scrolling up stops following; scrolling down to the end of the text resumes it.
+      stick.current = moved >= 0 && contentEnd(element) <= element.clientHeight + STICK_PX;
     };
     const onIntent = () => {
+      intentAt = performance.now();
       cancelMotion();
+    };
+    const onHold = () => {
+      holding = true;
+      onIntent();
+    };
+    const onRelease = () => {
+      if (!holding) return;
+      holding = false;
+      intentAt = performance.now();
     };
     const onKeyDown = (event: KeyboardEvent) => {
       if (['ArrowUp', 'PageUp', 'Home', 'ArrowDown', 'PageDown', 'End', ' '].includes(event.key)) onIntent();
     };
     element.addEventListener('scroll', onScroll, { passive: true });
-    element.addEventListener('wheel', onIntent, { passive: true });
-    element.addEventListener('touchstart', onIntent, { passive: true });
-    element.addEventListener('pointerdown', onIntent, { passive: true });
-    element.addEventListener('keydown', onKeyDown);
+    root.addEventListener('wheel', onIntent, { passive: true });
+    root.addEventListener('touchstart', onHold, { passive: true });
+    root.addEventListener('pointerdown', onHold, { passive: true });
+    window.addEventListener('touchend', onRelease, { passive: true });
+    window.addEventListener('pointerup', onRelease, { passive: true });
+    window.addEventListener('pointercancel', onRelease, { passive: true });
+    root.addEventListener('keydown', onKeyDown);
 
     // Content and viewport resizing can cross the turn threshold without a new timeline event.
     const content = ref.current;
@@ -237,10 +267,13 @@ function usePageTurn(turns: Turn[], pending: PendingMessage[]) {
     return () => {
       cancelMotion();
       element.removeEventListener('scroll', onScroll);
-      element.removeEventListener('wheel', onIntent);
-      element.removeEventListener('touchstart', onIntent);
-      element.removeEventListener('pointerdown', onIntent);
-      element.removeEventListener('keydown', onKeyDown);
+      root.removeEventListener('wheel', onIntent);
+      root.removeEventListener('touchstart', onHold);
+      root.removeEventListener('pointerdown', onHold);
+      window.removeEventListener('touchend', onRelease);
+      window.removeEventListener('pointerup', onRelease);
+      window.removeEventListener('pointercancel', onRelease);
+      root.removeEventListener('keydown', onKeyDown);
       observer?.disconnect();
     };
   }, [empty]);
@@ -256,6 +289,8 @@ function usePageTurn(turns: Turn[], pending: PendingMessage[]) {
       cancelMotion();
       element.scrollTop += element.scrollHeight - previous.current.height;
     } else if (edges.last !== previous.current.last) {
+      // A new message rises until the whole follow space shows below it. A chat short enough
+      // to fit with that space has nothing to scroll, so it stays put.
       gate.current = null;
       follow(element);
       stick.current = true;
