@@ -37,14 +37,26 @@ function asRecord(value: unknown): Record<string, unknown> | null {
   return typeof value === 'object' && value !== null ? (value as Record<string, unknown>) : null;
 }
 
-/** A declared 401 is thrown as the parsed body `{_tag: "UnauthorizedError", message}`. */
-export function isUnauthorized(error: unknown): boolean {
+/** A declared error is thrown as its parsed body `{_tag, message}`; an undeclared one as an UnexpectedStatus. */
+function isHttpError(error: unknown, tag: string, status: number): boolean {
   const e = asRecord(error);
   if (!e) return false;
-  if (e._tag === 'UnauthorizedError' || e.status === 401) return true;
+  if (e._tag === tag || e.status === status) return true;
   const cause = asRecord(e.cause);
-  return e.reason === 'UnexpectedStatus' && cause?.status === 401;
+  return e.reason === 'UnexpectedStatus' && cause?.status === status;
 }
+
+export const isUnauthorized = (error: unknown) => isHttpError(error, 'UnauthorizedError', 401);
+
+/** The session was deleted (from another client, or before this panel reopened it). */
+export const isSessionNotFound = (error: unknown) => isHttpError(error, 'SessionNotFoundError', 404);
+
+/** The server no longer keeps that shell (it drops exited shells past its retention limit). */
+/** The form was already answered or cancelled, or no longer exists. */
+export const isFormGone = (error: unknown) =>
+  isHttpError(error, 'FormNotFoundError', 404) || isHttpError(error, 'FormAlreadySettledError', 409);
+
+export const isShellNotFound = (error: unknown) => isHttpError(error, 'ShellNotFoundError', 404);
 
 export function isTransportError(error: unknown): boolean {
   const e = asRecord(error);

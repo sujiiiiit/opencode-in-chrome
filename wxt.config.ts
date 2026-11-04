@@ -4,6 +4,10 @@ import { defineConfig } from 'wxt';
 // See https://wxt.dev/api/reference/wxt/interfaces/inlineconfig.html
 export default defineConfig({
   modules: ['@wxt-dev/module-react'],
+  webExt: {
+    chromiumPort: process.env.WXT_CDP_PORT ? Number(process.env.WXT_CDP_PORT) : undefined,
+    chromiumArgs: process.env.WXT_CDP_PORT ? [`--remote-debugging-port=${process.env.WXT_CDP_PORT}`] : [],
+  },
   vite: () => ({
     plugins: [tailwindcss()],
   }),

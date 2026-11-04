@@ -1,23 +1,18 @@
-import { describe, expect, it } from 'vitest';
-import { ChatSession, replyErrorText } from '@/lib/opencode/chat';
-import { isUnauthorized, NO_MODEL_MESSAGE } from '@/lib/opencode/client';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { ChatSession, pendingMessages, replyErrorText, type ChatSessionOptions } from '@/lib/opencode/chat';
+import { NO_MODEL_MESSAGE, OFFLINE_MESSAGE } from '@/lib/opencode/client';
 import type { Connection } from '@/lib/opencode/connection';
-import { initialReply, replyText, type ReplyState } from '@/lib/opencode/reply';
+import { EventHub } from '@/lib/opencode/events';
+import { replyText } from '@/lib/opencode/reply';
+import { fakeOpencode, type FakeOpencodeOptions } from '@/tests/support/queue-server';
 import {
   BASE,
   PROVIDER_ERROR,
   SESSION_ID,
   TOKEN,
-  USER_MSG_ID,
   WORKSPACE_WIN,
-  failureEvents,
   jsonResponse,
-  routeFetch,
-  successEvents,
   unauthorized,
-  MODEL_DEFAULT,
-  fakeServer,
-  pushEvents,
 } from '@/tests/support/testkit';
 
 const connection: Connection = {
@@ -28,166 +23,600 @@ const connection: Connection = {
   pairedAt: 1,
 };
 
-function setup(options: Parameters<typeof fakeServer>[0] = {}) {
-  const server = fakeServer(options);
-  const chat = new ChatSession({ connection, fetch: server.fetch, idleMs: 50 });
-  return { ...server, chat };
+const sessions: ChatSession[] = [];
+afterEach(() => {
+  for (const chat of sessions.splice(0)) chat.dispose();
+});
+
+function setup(server: FakeOpencodeOptions = {}, options: Partial<ChatSessionOptions> = {}) {
+  const fake = fakeOpencode(server);
+  const chat = new ChatSession({ connection, fetch: fake.fetch, idleMs: 200, retryMs: 0, ...options });
+  sessions.push(chat);
+  return { fake, chat };
 }
 
-const pushAll = pushEvents;
-const body = (fetch: ReturnType<typeof routeFetch>, path: string) =>
-  JSON.parse(fetch.calls.find((c) => c.url.pathname === path)!.init.body as string);
+/** A chat attached to an existing session. */
+async function attached(server: FakeOpencodeOptions = {}, options: Partial<ChatSessionOptions> = {}) {
+  const result = setup(server, { sessionID: SESSION_ID, ...options });
+  await result.chat.load();
+  return result;
+}
 
-describe('ChatSession.send', () => {
-  it('subscribes first, creates the session with the explicit default model, prompts, and streams the reply', async () => {
-    const { fetch, chat, order } = setup({ onPrompt: (s) => pushAll(s[0], successEvents()) });
-    const states: ReplyState[] = [];
-    const final = await chat.send('hello', { onUpdate: (s) => states.push(s) });
+const waiting = (chat: ChatSession) => pendingMessages(chat.getState()).map((m) => [m.text, m.status]);
+const body = (fake: ReturnType<typeof fakeOpencode>, path: string) =>
+  JSON.parse(fake.fetch.calls.find((c) => c.url.pathname === path)!.init.body as string);
 
-    expect(order).toEqual(['event', 'create', 'prompt']);
-    expect(body(fetch, '/api/session')).toMatchObject({
+describe('ChatSession.load', () => {
+  it('connects the event stream and prepares the workspace without creating a session', async () => {
+    const { fake, chat } = setup();
+    const phases: string[] = [];
+    chat.subscribe(() => phases.push(chat.getState().phase));
+    await chat.load();
+
+    expect(chat.getState()).toMatchObject({ phase: 'ready', connected: true, error: null, timeline: null });
+    expect(phases).toContain('loading');
+    expect(fake.streams).toHaveLength(1);
+    expect(fake.log).not.toContain('create');
+    // The model is chosen by the ModelStore; the default is asked for only by a send that names none.
+    expect(fake.fetch.calls.some((c) => c.url.pathname === '/api/model/default')).toBe(false);
+  });
+
+  it('shares one load between concurrent callers', async () => {
+    const { fake, chat } = setup();
+    await Promise.all([chat.load(), chat.load()]);
+    expect(fake.streams).toHaveLength(1);
+  });
+
+  it('fails with the offline message when the server is unreachable', async () => {
+    const { chat } = setup({ overrides: { 'GET /api/event': () => Promise.reject(new TypeError('Failed to fetch')) } });
+    await chat.load();
+    expect(chat.getState()).toMatchObject({ phase: 'failed', error: OFFLINE_MESSAGE, connected: false });
+  });
+
+  it('a send that names no model, with no default model configured, fails with the no-model notice', async () => {
+    const { fake, chat } = setup({ overrides: { 'GET /api/model/default': () => jsonResponse({ data: null }) } });
+    await chat.load();
+    expect(await chat.submit('hello')).toBe(false);
+    expect(chat.getState().notice).toBe(NO_MODEL_MESSAGE);
+    expect(fake.log).not.toContain('create');
+    expect(
+      fake.fetch.calls.find((c) => c.url.pathname === '/api/model/default')!.url.searchParams.get('location[directory]'),
+    ).toBe(WORKSPACE_WIN);
+  });
+
+  it('reports a rejected token', async () => {
+    const onUnauthorized = vi.fn();
+    const { chat } = setup({ overrides: { 'GET /api/location': () => unauthorized() } }, { onUnauthorized });
+    await chat.load();
+    expect(onUnauthorized).toHaveBeenCalledOnce();
+  });
+
+  it('retries after a failure', async () => {
+    let down = true;
+    const fake = fakeOpencode();
+    const fetch = Object.assign(
+      (input: RequestInfo | URL, init?: RequestInit) =>
+        down ? Promise.reject(new TypeError('Failed to fetch')) : fake.fetch(input, init),
+      { calls: fake.fetch.calls },
+    );
+    const chat = new ChatSession({ connection, fetch, retryMs: 0 });
+    sessions.push(chat);
+    await chat.load();
+    expect(chat.getState().phase).toBe('failed');
+    down = false;
+    await chat.load();
+    expect(chat.getState()).toMatchObject({ phase: 'ready', error: null });
+  });
+
+  it('rebuilds an existing session from its snapshot, inbox and active state', async () => {
+    const { chat } = await attached({
+      running: true,
+      messages: [{ id: 'msg_u1', type: 'user', text: 'first', time: { created: 1 } }],
+      rows: [{ text: 'steer me', delivery: 'steer' }, 'queued one'],
+    });
+    const state = chat.getState();
+    expect(state.timeline?.working).toBe(true);
+    expect(state.timeline?.turns.map((t) => t.text)).toEqual(['first']);
+    // A prompt queued from another client still shows as waiting, after the steers.
+    expect(waiting(chat)).toEqual([
+      ['steer me', 'steering'],
+      ['queued one', 'queued'],
+    ]);
+  });
+});
+
+describe('ChatSession.submit', () => {
+  it('refuses to send before load', async () => {
+    const { fake, chat } = setup();
+    expect(await chat.submit('hi')).toBe(false);
+    expect(fake.prompts).toEqual([]);
+  });
+
+  it('creates the session with the default model, then prompts with a client-minted ID', async () => {
+    const { fake, chat } = setup();
+    await chat.load();
+    expect(await chat.submit('hello')).toBe(true);
+
+    expect(fake.log).toEqual(['create', 'prompt:steer']);
+    expect(body(fake, '/api/session')).toMatchObject({
       location: { directory: WORKSPACE_WIN },
       model: { providerID: 'opencode', id: 'flint-40b-free' },
     });
-    expect(fetch.calls.find((c) => c.url.pathname === '/api/model/default')!.url.searchParams.get('location[directory]')).toBe(
-      WORKSPACE_WIN,
-    );
-    expect(body(fetch, `/api/session/${SESSION_ID}/prompt`)).toMatchObject({ text: 'hello' });
-    expect(final.status).toBe('succeeded');
-    expect(replyText(final)).toBe('pong');
-    expect(states.some((s) => replyText(s) === 'po')).toBe(true);
+    expect(fake.prompts[0]).toMatchObject({ text: 'hello', delivery: 'steer' });
+    expect(fake.prompts[0]!.id).toMatch(/^msg_/);
+    const state = chat.getState();
+    expect(state.local).toEqual([]);
+    expect(state.timeline?.pending.map((p) => [p.id, p.text])).toEqual([[fake.prompts[0]!.id, 'hello']]);
+  });
+
+  it('shows the prompt as local while the request is in flight and only once after admission', async () => {
+    const { fake, chat } = setup();
+    let release!: () => void;
+    fake.hooks.beforePrompt = () => new Promise<void>((resolve) => (release = resolve));
+    await chat.load();
+    const sending = chat.submit('hello');
+    await vi.waitFor(() => expect(release).toBeTypeOf('function'));
+
+    expect(chat.getState().submitting).toBe(true);
+    expect(pendingMessages(chat.getState()).map((s) => [s.text, s.local])).toEqual([['hello', true]]);
+    release();
+    await sending;
+    expect(chat.getState().submitting).toBe(false);
+    expect(pendingMessages(chat.getState()).map((s) => [s.text, s.local])).toEqual([['hello', false]]);
+  });
+
+  it('ignores a second submit while one is in flight', async () => {
+    const { fake, chat } = setup();
+    await chat.load();
+    const first = chat.submit('one');
+    expect(await chat.submit('two')).toBe(false);
+    await first;
+    expect(fake.prompts.map((p) => p.text)).toEqual(['one']);
+  });
+
+  it('creates the session only once and steers every prompt, even while a turn runs', async () => {
+    const { fake, chat } = setup();
+    await chat.load();
+    await chat.submit('one');
+    fake.start();
+    fake.deliver(fake.prompts[0]!.id);
+    await vi.waitFor(() => expect(chat.getState().timeline?.working).toBe(true));
+    await chat.submit('two');
+    expect(fake.log.filter((entry) => entry === 'create')).toHaveLength(1);
+    expect(fake.prompts.map((p) => [p.text, p.delivery])).toEqual([
+      ['one', 'steer'],
+      ['two', 'steer'],
+    ]);
+    expect(waiting(chat)).toEqual([['two', 'steering']]);
+  });
+
+  it('delivers a waiting prompt into the conversation as its own turn', async () => {
+    const { fake, chat } = setup();
+    await chat.load();
+    await chat.submit('one');
+    fake.start();
+    fake.deliver(fake.prompts[0]!.id);
+    await chat.submit('two');
+    fake.deliver(fake.prompts[1]!.id);
+    await vi.waitFor(() => expect(chat.getState().timeline?.turns.map((t) => t.text)).toEqual(['one', 'two']));
+    expect(pendingMessages(chat.getState())).toEqual([]);
+  });
+
+  it('streams turns from the event stream', async () => {
+    const { fake, chat } = setup();
+    await chat.load();
+    await chat.submit('hello');
+    fake.start();
+    fake.deliver(fake.prompts[0]!.id);
+    fake.say('pong');
+    fake.finish();
+
+    await vi.waitFor(() => expect(chat.getState().timeline?.turns[0]?.reply.status).toBe('succeeded'));
+    expect(chat.getState().timeline?.working).toBe(false);
+    const turn = chat.getState().timeline!.turns[0]!;
+    expect(turn.text).toBe('hello');
+    expect(turn.reply.status).toBe('succeeded');
+    expect(replyText(turn.reply)).toBe('pong');
+  });
+
+  it('surfaces a model failure on the turn', async () => {
+    const { fake, chat } = setup();
+    await chat.load();
+    await chat.submit('hello');
+    fake.start();
+    fake.deliver(fake.prompts[0]!.id);
+    fake.finish('failed', { error: PROVIDER_ERROR });
+    await vi.waitFor(() => expect(chat.getState().timeline?.turns[0]!.reply.status).toBe('failed'));
+    expect(replyErrorText(chat.getState().timeline!.turns[0]!.reply)).toBe(`Model error: ${PROVIDER_ERROR.message}`);
+  });
+
+  it('returns false with a notice and drops the local prompt when the request fails', async () => {
+    const { fake, chat } = setup();
+    fake.hooks.beforePrompt = () => Promise.reject(new TypeError('Failed to fetch'));
+    await chat.load();
+    expect(await chat.submit('hello')).toBe(false);
+    expect(chat.getState()).toMatchObject({ notice: OFFLINE_MESSAGE, local: [], submitting: false });
+    chat.dismissNotice();
+    expect(chat.getState().notice).toBeNull();
+  });
+
+  it('reports a rejected token while sending', async () => {
+    const onUnauthorized = vi.fn();
+    const { chat } = setup({ overrides: { [`POST /api/session/${SESSION_ID}/prompt`]: () => unauthorized() } }, { onUnauthorized });
+    await chat.load();
+    expect(await chat.submit('hello')).toBe(false);
+    expect(onUnauthorized).toHaveBeenCalledOnce();
   });
 
   it('never puts the token in a URL', async () => {
-    const { fetch, chat } = setup({ onPrompt: (s) => pushAll(s[0], successEvents()) });
-    await chat.send('hello', { onUpdate: () => undefined });
-    for (const call of fetch.calls) {
+    const { fake, chat } = setup();
+    await chat.load();
+    await chat.submit('hello');
+    for (const call of fake.fetch.calls) {
       expect(call.url.toString()).not.toContain(TOKEN);
-      expect(call.url.search).not.toContain('auth_token');
       expect(call.url.origin).toBe(BASE);
     }
   });
+});
 
-  it('ends in a failed state with the provider error on the real failure sequence', async () => {
-    const { chat } = setup({ onPrompt: (s) => pushAll(s[0], failureEvents()) });
-    const final = await chat.send('hello', { onUpdate: () => undefined });
-    expect(final.status).toBe('failed');
-    expect(replyErrorText(final)).toBe(`Model error: ${PROVIDER_ERROR.message}`);
-  });
-
-  it('ignores events from other sessions', async () => {
-    const { chat } = setup({
-      onPrompt: (s) => pushAll(s[0], [...successEvents('ses_other', ['x'], 'WRONG'), ...successEvents()]),
-    });
-    const final = await chat.send('hello', { onUpdate: () => undefined });
-    expect(replyText(final)).toBe('pong');
-  });
-
-  it('reuses the session for a second message', async () => {
-    const { fetch, chat } = setup({ onPrompt: (s) => pushAll(s.at(-1), successEvents()) });
-    await chat.send('one', { onUpdate: () => undefined });
-    await chat.send('two', { onUpdate: () => undefined });
-    expect(fetch.calls.filter((c) => c.method === 'POST' && c.url.pathname === '/api/session')).toHaveLength(1);
-    expect(fetch.calls.filter((c) => c.url.pathname.endsWith('/prompt'))).toHaveLength(2);
-  });
-
-  it('throws an unauthorized error when the event stream returns 401', async () => {
-    const { chat } = setup({ overrides: { 'GET /api/event': () => unauthorized() } });
-    const error = await chat.send('hi', { onUpdate: () => undefined }).catch((e: unknown) => e);
-    expect(isUnauthorized(error)).toBe(true);
-  });
-
-  it('throws an unauthorized error when session creation returns 401', async () => {
-    const { chat } = setup({ overrides: { 'POST /api/session': () => unauthorized() } });
-    const error = await chat.send('hi', { onUpdate: () => undefined }).catch((e: unknown) => e);
-    expect(isUnauthorized(error)).toBe(true);
-  });
-
-  it('reports no model configured when the server has no default model', async () => {
-    const { chat } = setup({ overrides: { 'GET /api/model/default': () => jsonResponse({ ...MODEL_DEFAULT, data: null }) } });
-    const error = await chat.send('hi', { onUpdate: () => undefined }).catch((e: unknown) => e);
-    expect(error).toMatchObject({ _tag: 'ModelNotSelectedError' });
-  });
-
-  it('rejects when the server is offline', async () => {
-    const fetch = routeFetch({});
-    const chat = new ChatSession({ connection, fetch });
-    await expect(chat.send('hi', { onUpdate: () => undefined })).rejects.toBeTruthy();
-  });
-
-  it('aborts the event stream when the caller aborts', async () => {
-    const abort = new AbortController();
-    const { chat } = setup({ onPrompt: () => abort.abort() });
-    await expect(chat.send('hi', { onUpdate: () => undefined, signal: abort.signal })).rejects.toMatchObject({
-      name: 'AbortError',
-    });
-  });
-
-  it('recovers from a dropped stream: reconnects, then reads the message snapshot', async () => {
-    const { chat, fetch } = setup({
-      onPrompt: (s) => s[0]!.close(),
+describe('ChatSession.shellOutput', () => {
+  it('reads a page of a background shell from a cursor, in the workspace', async () => {
+    const { fake, chat } = await attached({
       overrides: {
-        [`GET /api/session/${SESSION_ID}/message`]: () =>
-          jsonResponse({
-            data: [
-              { id: 'msg_195d43ea3999', type: 'idle', outcome: 'succeeded' },
-              { id: 'msg_195d43ea3001', type: 'assistant', content: [{ type: 'text', text: 'pong' }] },
-              { id: USER_MSG_ID, type: 'user', text: 'hello' },
-            ],
-            cursor: {},
-          }),
+        'GET /api/shell/sh_1/output': () =>
+          jsonResponse({ location: {}, data: { output: 'PASS', cursor: 4, size: 4, truncated: false } }),
       },
     });
-    const final = await chat.send('hello', { onUpdate: () => undefined });
-    expect(replyText(final)).toBe('pong');
-    expect(final.status).toBe('succeeded');
-    expect(fetch.calls.filter((c) => c.url.pathname === '/api/event')).toHaveLength(2);
+    expect(await chat.shellOutput('sh_1', 2)).toEqual({ output: 'PASS', cursor: 4, size: 4 });
+    const call = fake.fetch.calls.find((c) => c.url.pathname === '/api/shell/sh_1/output')!;
+    expect(call.url.searchParams.get('cursor')).toBe('2');
+    expect(call.url.searchParams.get('directory') ?? call.url.searchParams.get('location[directory]')).toBe(WORKSPACE_WIN);
   });
 
-  it('reconnects when the snapshot is not finished, then completes from the new stream', async () => {
-    let prompted = false;
-    const { chat, streams, fetch } = setup({
-      onPrompt: (s) => {
-        prompted = true;
-        s[0]!.close();
-      },
+  it('reports a shell the server no longer keeps as missing, and throws other failures', async () => {
+    const { chat } = await attached({
       overrides: {
-        [`GET /api/session/${SESSION_ID}/message`]: () => {
-          // After the reconnect, the new stream delivers the rest of the reply.
-          queueMicrotask(() => pushAll(streams[1], successEvents()));
-          return jsonResponse({ data: [{ id: USER_MSG_ID, type: 'user', text: 'hello' }], cursor: {} });
+        'GET /api/shell/gone/output': () => jsonResponse({ _tag: 'ShellNotFoundError', message: 'gone' }, 404),
+        'GET /api/shell/broken/output': () => jsonResponse({ message: 'boom' }, 500),
+      },
+    });
+    expect(await chat.shellOutput('gone', 0)).toBe('missing');
+    await expect(chat.shellOutput('broken', 0)).rejects.toBeDefined();
+  });
+});
+
+describe('ChatSession.stop', () => {
+  it('does nothing without a session', async () => {
+    const { fake, chat } = setup();
+    await chat.load();
+    await chat.stop();
+    expect(fake.interrupts).toEqual([]);
+  });
+
+  it('interrupts with resume so pending steers continue, once at a time', async () => {
+    const { fake, chat } = await attached({ running: true });
+    let release!: () => void;
+    fake.hooks.onInterrupt = () => new Promise<void>((resolve) => (release = resolve));
+    const stopping = chat.stop();
+    await vi.waitFor(() => expect(release).toBeTypeOf('function'));
+    expect(chat.getState().interrupting).toBe(true);
+    await chat.stop();
+    release();
+    await stopping;
+    expect(fake.interrupts).toEqual([{ resume: 'true' }]);
+    expect(chat.getState().interrupting).toBe(false);
+  });
+
+  it('swallows interrupt failures', async () => {
+    const { fake, chat } = await attached({ running: true });
+    fake.hooks.onInterrupt = () => Promise.reject(new TypeError('Failed to fetch'));
+    await expect(chat.stop()).resolves.toBeUndefined();
+    expect(chat.getState().notice).toBeNull();
+  });
+
+  it('ends the turn as interrupted when the server confirms', async () => {
+    const { fake, chat } = await attached({ running: true, messages: [{ id: 'msg_u1', type: 'user', text: 'go', time: { created: 1 } }] });
+    await chat.stop();
+    fake.finish('interrupted', { reason: 'user' });
+    await vi.waitFor(() => expect(chat.getState().timeline?.working).toBe(false));
+    expect(replyErrorText(chat.getState().timeline!.turns[0]!.reply)).toBe('Stopped before the reply finished.');
+  });
+});
+
+describe('event stream recovery', () => {
+  it('reconnects after a drop and resyncs the session from the server', async () => {
+    const { fake, chat } = await attached({ rows: [{ text: 'old', delivery: 'steer' }] });
+    fake.rows.splice(0, 1);
+    fake.rows.push({ id: 'msg_new', sessionID: SESSION_ID, type: 'user', payload: { text: 'from elsewhere' }, delivery: 'steer', time: { created: 9 } });
+    fake.streams[0]!.close();
+
+    await vi.waitFor(() => expect(fake.streams).toHaveLength(2));
+    await vi.waitFor(() => expect(waiting(chat).map(([text]) => text)).toEqual(['from elsewhere']));
+    expect(chat.getState().connected).toBe(true);
+    fake.start();
+    await vi.waitFor(() => expect(chat.getState().timeline?.working).toBe(true));
+  });
+
+  it('reconnects when the stream goes silent', async () => {
+    const { fake } = await attached({}, { idleMs: 30 });
+    await vi.waitFor(() => expect(fake.streams.length).toBeGreaterThan(1));
+  });
+
+  it('gives up after repeated failures and fails with the offline message', async () => {
+    const fake = fakeOpencode();
+    let down = false;
+    const fetch = Object.assign(
+      (input: RequestInfo | URL, init?: RequestInit) =>
+        down ? Promise.reject(new TypeError('Failed to fetch')) : fake.fetch(input, init),
+      { calls: fake.fetch.calls },
+    );
+    const chat = new ChatSession({ connection, fetch, retryMs: 0, idleMs: 200 });
+    sessions.push(chat);
+    await chat.load();
+    down = true;
+    fake.streams[0]!.close();
+    await vi.waitFor(() => expect(chat.getState()).toMatchObject({ phase: 'failed', connected: false, error: OFFLINE_MESSAGE }));
+  });
+
+  it('reports a rejected token on reconnect', async () => {
+    const onUnauthorized = vi.fn();
+    const { fake, chat } = await attached({}, { onUnauthorized });
+    fake.hooks.onEvent = () => unauthorized();
+    fake.streams[0]!.close();
+    await vi.waitFor(() => expect(onUnauthorized).toHaveBeenCalledOnce());
+    expect(chat.getState().connected).toBe(false);
+  });
+
+  it('stops everything on dispose', async () => {
+    const { fake, chat } = await attached();
+    chat.dispose();
+    fake.streams[0]!.close();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(fake.streams).toHaveLength(1);
+  });
+});
+
+describe('ChatSession history support', () => {
+  it('creates the session untitled and tagged as the extension, and reports its id', async () => {
+    const onCreated = vi.fn();
+    const { fake, chat } = setup({}, { onCreated });
+    await chat.load();
+    await chat.submit('hello');
+    const created = body(fake, '/api/session');
+    expect(created).not.toHaveProperty('title');
+    expect(created.metadata).toEqual({ source: 'chrome-extension' });
+    expect(onCreated).toHaveBeenCalledWith(SESSION_ID, undefined);
+    expect(chat.getState().title).toBeNull();
+  });
+
+  it('loads the title of an attached session and follows renames', async () => {
+    const { fake, chat } = await attached({
+      sessions: [{ id: SESSION_ID, title: 'Fix login', time: { created: 1, updated: 1 }, location: { directory: WORKSPACE_WIN } }],
+    });
+    expect(chat.getState().title).toBe('Fix login');
+    fake.emit('session.renamed', { title: 'Fix the login redirect' });
+    await vi.waitFor(() => expect(chat.getState().title).toBe('Fix the login redirect'));
+  });
+
+  it('reports a stored session that no longer exists', async () => {
+    const onMissing = vi.fn();
+    const { chat } = setup(
+      { overrides: { [`GET /api/session/${SESSION_ID}/message`]: () => jsonResponse({ _tag: 'SessionNotFoundError', message: 'gone' }, 404) } },
+      { sessionID: SESSION_ID, onMissing },
+    );
+    await chat.load();
+    expect(onMissing).toHaveBeenCalledOnce();
+    expect(chat.getState()).toMatchObject({ phase: 'failed', error: 'This chat no longer exists.' });
+  });
+
+  it('reports the open session being deleted elsewhere, but not other sessions', async () => {
+    const onMissing = vi.fn();
+    const { fake } = await attached({}, { onMissing });
+    fake.emit('session.deleted', { sessionID: 'ses_someone_else' });
+    fake.emit('session.deleted', {});
+    await vi.waitFor(() => expect(onMissing).toHaveBeenCalledOnce());
+  });
+
+  it('loads earlier messages a page at a time, keeping turns split across pages whole', async () => {
+    // 60 turns of user + assistant + idle: 180 messages, 50 per page.
+    const messages = Array.from({ length: 60 }, (_, i) => [
+      { id: `msg_u${i}`, type: 'user', text: `q${i}`, time: { created: i * 3 } },
+      { id: `msg_a${i}`, type: 'assistant', content: [{ type: 'text', text: `a${i}` }], time: { created: i * 3 + 1 } },
+      { id: `msg_i${i}`, type: 'idle', outcome: 'succeeded', time: { created: i * 3 + 2 } },
+    ]).flat();
+    const { chat } = await attached({ messages });
+    const texts = () => chat.getState().timeline!.turns.map((t) => [t.text, replyText(t.reply)]);
+    expect(chat.getState().hasEarlier).toBe(true);
+    expect(texts()[0]).toEqual(['q44', 'a44']);
+
+    while (chat.getState().hasEarlier) await chat.loadEarlier();
+    expect(texts()).toHaveLength(60);
+    expect(texts()[0]).toEqual(['q0', 'a0']);
+    // The turn whose user message and reply landed on different pages.
+    expect(texts()[43]).toEqual(['q43', 'a43']);
+    expect(new Set(texts().map(([q]) => q)).size).toBe(60);
+  });
+
+  it('keeps earlier pages after a reconnect resync', async () => {
+    const messages = Array.from({ length: 30 }, (_, i) => [
+      { id: `msg_u${i}`, type: 'user', text: `q${i}`, time: { created: i * 2 } },
+      { id: `msg_i${i}`, type: 'idle', outcome: 'succeeded', time: { created: i * 2 + 1 } },
+    ]).flat();
+    const { fake, chat } = await attached({ messages });
+    await chat.loadEarlier();
+    expect(chat.getState().timeline!.turns).toHaveLength(30);
+    fake.streams[0]!.close();
+    await vi.waitFor(() => expect(fake.streams).toHaveLength(2));
+    await vi.waitFor(() => expect(chat.getState().connected).toBe(true));
+    expect(chat.getState().timeline!.turns).toHaveLength(30);
+  });
+
+  it('shares one event stream between chats and only applies its own session', async () => {
+    const fake = fakeOpencode();
+    const events = new EventHub({ connection, fetch: fake.fetch, retryMs: 0, idleMs: 500 });
+    const ours = new ChatSession({ connection, events, fetch: fake.fetch, sessionID: SESSION_ID });
+    const other = new ChatSession({ connection, events, fetch: fake.fetch, sessionID: 'ses_other' });
+    sessions.push(ours, other);
+    await ours.load();
+    expect(fake.streams).toHaveLength(1);
+    fake.start();
+    await vi.waitFor(() => expect(ours.getState().timeline?.working).toBe(true));
+    other.dispose();
+    // Disposing a chat leaves the shared stream open for the rest of the panel.
+    expect(events.getStatus().state).toBe('connected');
+    events.dispose();
+  });
+});
+
+describe('ChatSession: agent, model and variant', () => {
+  const OPUS = { providerID: 'anthropic', modelID: 'claude-opus-5-5' };
+  const build = { agent: 'build', model: OPUS, variant: 'high' };
+
+  it('creates the session with the chosen agent, model and variant', async () => {
+    const onCreated = vi.fn();
+    const { fake, chat } = setup({}, { onCreated });
+    await chat.load();
+    await chat.submit('hello', undefined, build);
+    expect(body(fake, '/api/session')).toMatchObject({
+      agent: 'build',
+      model: { providerID: 'anthropic', id: 'claude-opus-5-5', variant: 'high' },
+    });
+    expect(onCreated).toHaveBeenCalledWith(SESSION_ID, build);
+    expect(chat.getState().durable).toEqual({ agent: 'build', model: { ...OPUS, variant: 'high' } });
+    // The selection went out with the session: no switch before the first prompt.
+    expect(fake.switches).toEqual([]);
+    expect(fake.fetch.calls.some((c) => c.url.pathname === '/api/model/default')).toBe(false);
+  });
+
+  it('sends no variant for the model default', async () => {
+    const { fake, chat } = setup();
+    await chat.load();
+    await chat.submit('hello', undefined, { agent: 'build', model: OPUS });
+    expect(body(fake, '/api/session').model).toEqual({ providerID: 'anthropic', id: 'claude-opus-5-5' });
+  });
+
+  it('switches the agent, then the model, before a prompt, and skips what did not change', async () => {
+    const { fake, chat } = await attached({
+      sessions: [
+        {
+          id: SESSION_ID,
+          time: { created: 1, updated: 1 },
+          location: { directory: WORKSPACE_WIN },
+          agent: 'build',
+          model: { providerID: 'opencode', id: 'flint-40b-free' },
         },
+      ],
+    });
+    expect(chat.getState().durable).toEqual({ agent: 'build', model: { providerID: 'opencode', modelID: 'flint-40b-free' } });
+
+    await chat.submit('same', undefined, { agent: 'build', model: { providerID: 'opencode', modelID: 'flint-40b-free' } });
+    expect(fake.switches).toEqual([]);
+
+    await chat.submit('effort', undefined, build);
+    expect(fake.switches).toEqual(['model:anthropic/claude-opus-5-5/high']);
+    expect(fake.log.slice(-2)).toEqual(['model:anthropic/claude-opus-5-5/high', 'prompt:steer']);
+    await vi.waitFor(() => expect(chat.getState().durable?.model).toEqual({ ...OPUS, variant: 'high' }));
+
+    await chat.submit('plan it', undefined, { ...build, agent: 'plan' });
+    expect(fake.switches.slice(1)).toEqual(['agent:plan', 'model:anthropic/claude-opus-5-5/high']);
+  });
+
+  it('switches again when the reported model lags a switch this panel made', async () => {
+    const { fake, chat } = await attached({
+      sessions: [
+        {
+          id: SESSION_ID,
+          time: { created: 1, updated: 1 },
+          location: { directory: WORKSPACE_WIN },
+          agent: 'build',
+          model: { providerID: 'anthropic', id: 'claude-opus-5-5', variant: 'high' },
+        },
+      ],
+    });
+    fake.flags.quiet = true;
+    await chat.submit('low', undefined, { ...build, variant: 'low' });
+    // The server's echo has not arrived: the read model still says "high".
+    await chat.submit('back to high', undefined, build);
+    expect(fake.switches).toEqual(['model:anthropic/claude-opus-5-5/low', 'model:anthropic/claude-opus-5-5/high']);
+  });
+
+  it('does not send the prompt when the switch fails', async () => {
+    const { fake, chat } = await attached({
+      overrides: { [`POST /api/session/${SESSION_ID}/model`]: () => jsonResponse({ message: 'nope' }, 400) },
+    });
+    expect(await chat.submit('hello', undefined, build)).toBe(false);
+    expect(fake.prompts).toEqual([]);
+    expect(chat.getState().notice).toBeTruthy();
+  });
+
+  it('follows agent and model changes made elsewhere', async () => {
+    const { fake, chat } = await attached();
+    fake.emit('session.agent.selected', { agent: 'plan' });
+    fake.emit('session.model.selected', { model: { providerID: 'anthropic', id: 'claude-opus-5-5', variant: 'low' } });
+    await vi.waitFor(() =>
+      expect(chat.getState().durable).toEqual({ agent: 'plan', model: { ...OPUS, variant: 'low' } }),
+    );
+  });
+
+  it('restores the model of the last reply for a session that records none', async () => {
+    const { chat } = await attached({
+      messages: [
+        { id: 'msg_u', type: 'user', text: 'hi', time: { created: 1 } },
+        { id: 'msg_a', type: 'assistant', agent: 'plan', model: { providerID: 'anthropic', id: 'claude-opus-5-5' }, content: [], time: { created: 2 } },
+      ],
+    });
+    expect(chat.getState().durable).toEqual({ agent: 'plan', model: OPUS });
+  });
+});
+
+describe('ChatSession forms', () => {
+  const form = {
+    id: 'frm_1',
+    sessionID: SESSION_ID,
+    title: 'Web Search',
+    fields: [{ key: 'choice', type: 'string', required: true, options: [{ value: 'allow', label: 'Allow' }] }],
+  };
+
+  it('loads pending forms and answers one, which removes it', async () => {
+    const { fake, chat } = await attached({
+      overrides: {
+        [`GET /api/session/${SESSION_ID}/form`]: () => jsonResponse({ data: [form] }),
+        [`POST /api/session/${SESSION_ID}/form/frm_1/reply`]: () => new Response(null, { status: 204 }),
       },
     });
-    const final = await chat.send('hello', { onUpdate: () => undefined });
-    expect(prompted).toBe(true);
-    expect(final.status).toBe('succeeded');
-    expect(fetch.calls.filter((c) => c.url.pathname === '/api/event')).toHaveLength(2);
+    expect(chat.getState().forms.map((f) => f.id)).toEqual(['frm_1']);
+    expect(await chat.answerForm('frm_1', { choice: 'allow' })).toBe(true);
+    expect(chat.getState().forms).toEqual([]);
+    const reply = fake.fetch.calls.find((c) => c.url.pathname.endsWith('/form/frm_1/reply'))!;
+    expect(JSON.parse(reply.init.body as string)).toEqual({ answer: { choice: 'allow' } });
   });
 
-  it('starts from an empty reply', () => {
-    expect(initialReply(SESSION_ID).steps).toEqual([]);
+  it('cancels a pending form', async () => {
+    const { fake, chat } = await attached({
+      overrides: {
+        [`GET /api/session/${SESSION_ID}/form`]: () => jsonResponse({ data: [form] }),
+        [`DELETE /api/session/${SESSION_ID}/form/frm_1`]: () => new Response(null, { status: 204 }),
+      },
+    });
+    expect(await chat.cancelForm('frm_1')).toBe(true);
+    expect(chat.getState().forms).toEqual([]);
+    expect(fake.fetch.calls.some((c) => c.method === 'DELETE')).toBe(true);
+  });
+
+  it('keeps loading when the form list is unavailable', async () => {
+    const { chat } = await attached();
+    expect(chat.getState()).toMatchObject({ phase: 'ready', forms: [] });
+  });
+
+  it('drops a form that was already settled elsewhere', async () => {
+    const { chat } = await attached({
+      overrides: {
+        [`GET /api/session/${SESSION_ID}/form`]: () => jsonResponse({ data: [form] }),
+        [`POST /api/session/${SESSION_ID}/form/frm_1/reply`]: () =>
+          jsonResponse({ _tag: 'FormAlreadySettledError', message: 'settled' }, 409),
+      },
+    });
+    expect(await chat.answerForm('frm_1', { choice: 'allow' })).toBe(false);
+    expect(chat.getState()).toMatchObject({ forms: [], notice: null });
   });
 });
-
-describe('replyErrorText', () => {
-  const failed = (type: string, message: string): ReplyState => ({
-    ...initialReply(SESSION_ID),
-    status: 'failed',
-    error: { type, message },
-  });
-
-  it('prefixes model errors', () => {
-    expect(replyErrorText(failed('provider.invalid-request', 'bad'))).toBe('Model error: bad');
-  });
-
-  it('maps a missing model to the setup hint', () => {
-    expect(replyErrorText(failed('model.not-selected', 'x'))).toBe(NO_MODEL_MESSAGE);
-  });
-
-  it('describes interruptions and returns null otherwise', () => {
-    expect(replyErrorText({ ...initialReply(SESSION_ID), status: 'interrupted', interruptReason: 'user' })).toMatch(/stopped/i);
-    expect(replyErrorText({ ...initialReply(SESSION_ID), status: 'succeeded' })).toBeNull();
-  });
-});
-

@@ -1,11 +1,14 @@
 // Minimal SSE reader for GET /api/event. It uses fetch (not EventSource) so the
 // Authorization header can be sent, and enforces the official client's 45s idle rule.
+import { isRecord } from './reply';
 
 const IDLE_TIMEOUT_MS = 45_000;
 
 export type ServerEvent = {
   id?: string;
   type: string;
+  /** Server time (ms) the event was created; orders pending prompts against idle boundaries. */
+  created?: number;
   data: Record<string, unknown>;
   location?: unknown;
 };
@@ -24,12 +27,18 @@ class HttpStatusError extends Error {
   }
 }
 
+const optional = <T>(value: unknown, type: 'string' | 'number'): T | undefined =>
+  typeof value === type ? (value as T) : undefined;
+
 function toEvent(raw: unknown): ServerEvent | null {
-  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return null;
-  const r = raw as Record<string, unknown>;
-  if (typeof r.type !== 'string') return null;
-  const data = typeof r.data === 'object' && r.data !== null && !Array.isArray(r.data) ? (r.data as Record<string, unknown>) : {};
-  return { id: typeof r.id === 'string' ? r.id : undefined, type: r.type, data, location: r.location };
+  if (!isRecord(raw) || typeof raw.type !== 'string') return null;
+  return {
+    id: optional<string>(raw.id, 'string'),
+    type: raw.type,
+    created: optional<number>(raw.created, 'number'),
+    data: isRecord(raw.data) ? raw.data : {},
+    location: raw.location,
+  };
 }
 
 /** Incremental parser: feed text chunks, get complete events back. */

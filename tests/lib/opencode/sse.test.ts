@@ -8,6 +8,13 @@ describe('SseParser', () => {
     expect(p.feed(connectedFrame())).toEqual([{ id: 'evt_connected', type: 'server.connected', data: {} }]);
   });
 
+  it('keeps the event creation time when it is a number', () => {
+    const p = new SseParser();
+    const [event] = p.feed(frame({ id: 'e', type: 'session.execution.started', created: 1234, data: {} }));
+    expect(event!.created).toBe(1234);
+    expect(p.feed(frame({ id: 'e', type: 'x', created: 'soon', data: {} }))[0]!.created).toBeUndefined();
+  });
+
   it('ignores heartbeat comments', () => {
     const p = new SseParser();
     expect(p.feed(HEARTBEAT)).toEqual([]);

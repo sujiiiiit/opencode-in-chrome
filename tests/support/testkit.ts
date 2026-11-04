@@ -6,7 +6,7 @@ export const BASE = 'http://127.0.0.1:28894';
 export const CODE = 'AbCdEfGh1234567890_-xY';
 export const TOKEN = '1796106971.abc_DEF-123';
 export const SESSION_ID = 'ses_e6a2bc180ffe8nqJMVk63T7cKj';
-export const USER_MSG_ID = 'msg_195d43e8f001Z6vg6iCE1qI7by';
+const USER_MSG_ID = 'msg_195d43e8f001Z6vg6iCE1qI7by';
 export const ASSISTANT_MSG_ID = 'msg_195d43ea3001AAAAAAAAAAAAAA';
 export const HOME_WIN = 'C:\\Users\\sujit';
 export const WORKSPACE_WIN = 'C:\\Users\\sujit\\.opencode-chrome\\workspace';
@@ -131,55 +131,61 @@ export const MODEL_DEFAULT = {
   location: { directory: WORKSPACE_WIN },
   data: { id: 'flint-40b-free', providerID: 'opencode', name: 'Flint 40B Free' },
 };
-const SESSION_INFO = {
-  data: {
-    id: SESSION_ID,
-    model: { id: 'flint-40b-free', providerID: 'opencode', variant: 'default' },
-    title: 'Chrome chat',
-    location: { directory: WORKSPACE_WIN },
-  },
-};
-const PROMPT_ACK = {
-  data: {
-    id: USER_MSG_ID,
-    sessionID: SESSION_ID,
-    type: 'user',
-    payload: { text: 'hello' },
-    delivery: 'steer',
-  },
-};
-
 export type Stream = ReturnType<typeof sseStream>;
 
-/** A complete fake opencode server for chat flows; `streams` holds each opened event stream. */
-export function fakeServer(options: { onPrompt?: (streams: Stream[]) => void; overrides?: Record<string, Handler> } = {}) {
-  const streams: Stream[] = [];
-  const order: string[] = [];
-  const fetch = routeFetch({
-    'GET /api/event': (call) => {
-      order.push('event');
-      const stream = sseStream(call.init.signal);
-      stream.push(connectedFrame());
-      streams.push(stream);
-      return stream.response;
-    },
-    'GET /api/location': () => jsonResponse({ directory: HOME_WIN, project: { id: 'global' } }),
-    'POST /api/experimental/fs/write': () => jsonResponse({ data: {} }),
-    'GET /api/model/default': () => jsonResponse(MODEL_DEFAULT),
-    'POST /api/session': () => {
-      order.push('create');
-      return jsonResponse(SESSION_INFO);
-    },
-    [`POST /api/session/${SESSION_ID}/prompt`]: () => {
-      order.push('prompt');
-      options.onPrompt?.(streams);
-      return jsonResponse(PROMPT_ACK);
-    },
-    ...options.overrides,
-  });
-  return { fetch, streams, order };
+/** GET /api/provider: OpenCode (native) first, then a direct provider. */
+export const PROVIDERS = {
+  location: { directory: WORKSPACE_WIN },
+  data: [
+    { id: 'opencode', name: 'OpenCode', activation: 'auto', package: 'opencode' },
+    { id: 'anthropic', name: 'Anthropic', activation: 'enabled', package: '@ai-sdk/anthropic' },
+  ],
+};
+
+const RECENTLY = Date.now() - 30 * 86_400_000;
+
+/** A model as GET /api/model returns it (the fields the extension reads). */
+export function modelInfo(
+  providerID: string,
+  id: string,
+  name: string,
+  extra: { variants?: string[]; family?: string; released?: number; free?: boolean } = {},
+) {
+  return {
+    id,
+    modelID: id,
+    providerID,
+    name,
+    family: extra.family ?? id,
+    status: 'active',
+    enabled: true,
+    capabilities: { input: ['text', 'image'], output: ['text'], tools: true },
+    variants: (extra.variants ?? []).map((variant) => ({ id: variant })),
+    time: { released: extra.released ?? RECENTLY },
+    cost: [{ input: extra.free ? 0 : 3, output: extra.free ? 0 : 15, cache: { read: 0, write: 0 } }],
+    limit: { context: 200_000, output: 32_000 },
+  };
 }
 
-export const pushEvents = (stream: Stream | undefined, events: unknown[]) => {
-  for (const e of events) stream?.push(frame(e));
+/** GET /api/model: the default free model (no variants) and two models with effort variants. */
+export const MODELS = {
+  location: { directory: WORKSPACE_WIN },
+  data: [
+    modelInfo('opencode', 'flint-40b-free', 'Flint 40B Free', { free: true }),
+    modelInfo('anthropic', 'claude-opus-5-5', 'Claude Opus 5.5', { variants: ['low', 'medium', 'high'] }),
+    modelInfo('anthropic', 'claude-sonnet-5-5', 'Claude Sonnet 5.5', { variants: ['low', 'high'] }),
+  ],
 };
+
+/** GET /api/agent: two primary agents and a subagent (never offered). */
+export const AGENTS = {
+  location: { directory: WORKSPACE_WIN },
+  data: [
+    { id: 'build', name: 'build', mode: 'primary', hidden: false, request: { settings: {} }, permissions: [] },
+    { id: 'plan', name: 'plan', mode: 'primary', hidden: false, request: { settings: {} }, permissions: [] },
+    { id: 'explore', name: 'explore', mode: 'subagent', hidden: false, request: { settings: {} }, permissions: [] },
+  ],
+};
+
+/** GET /api/config: no model configured. */
+export const CONFIG: unknown[] = [];
