@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type RefObject } from 'react';
 import { loadActiveChat, saveActiveChat } from '@/lib/opencode/active-chat';
-import { promptFiles, releaseImage, type ImageAttachment } from '@/lib/opencode/attachments';
+import { promptFiles, type ImageAttachment } from '@/lib/opencode/attachments';
 import { ChatSession, INITIAL_CHAT_STATE, type ChatState } from '@/lib/opencode/chat';
 import type { Connection } from '@/lib/opencode/connection';
 import { EventHub } from '@/lib/opencode/events';
@@ -228,7 +228,7 @@ function messageID(retry: Retry | null, text: string, selection: string): string
 }
 
 /**
- * Reads the images (they are read only now, not while attached) and sends them with the text.
+ * Reads the images after the local bubble is added and its flight has begun.
  * False when nothing was sent: an image that can no longer be read fails the whole send.
  */
 async function submitPrompt(
@@ -297,12 +297,19 @@ export function useComposer(input: {
     const id = messageID(retry.current, text, key);
     retry.current = null;
     // The text flies from where it sits in the box to its bubble, so measure before clearing.
-    launchSendFlight({ id, from: box.current?.textOrigin() ?? null });
+    const from = box.current?.textOrigin() ?? null;
     setText('');
     const attached = attachments.take();
+    if (!chat.stagePrompt(id, text, attached)) {
+      setText(joinDraft(draftRef.current, text), true);
+      attachments.restore(attached);
+      return;
+    }
+    launchSendFlight({ id, from });
     const cancel = trackCommit(modelStore, chat, selection);
     const notify = (message: string) => modelStore?.notify(message);
-    if (await submitPrompt(chat, { text, id, selection, images: attached }, notify)) return void attached.forEach(releaseImage);
+    if (await submitPrompt(chat, { text, id, selection, images: attached }, notify)) return;
+    chat.cancelStagedPrompt(id);
     cancel();
     retry.current = { id, text, selection: key };
     // A failed send puts the text and images back, after anything added meanwhile.

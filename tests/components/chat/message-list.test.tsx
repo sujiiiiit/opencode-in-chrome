@@ -24,6 +24,13 @@ const steer = (id: string, text: string, status: PendingMessage['status'], local
 const bubble = (text: string) => screen.getByText(text).closest<HTMLElement>('[data-slot="user-message"]')!;
 
 describe('MessageList', () => {
+  it('renders model and variant switches in the conversation', () => {
+    const model = { providerID: 'p', modelID: 'new' };
+    setup({ turns: [{ ...turn('m1', 'hello', reply('succeeded')), switches: [{ id: 's1', model }] }],
+      switches: [{ id: 's2', model: { ...model, variant: 'high' }, previous: model }] });
+    expect(screen.getByText('Switched to new')).toBeInTheDocument();
+    expect(screen.getByText('Switched variant to high')).toBeInTheDocument();
+  });
   it('renders a turn: prompt, its folded work, then the answer', () => {
     const r = reply('succeeded');
     r.steps = [
@@ -100,6 +107,15 @@ describe('MessageList', () => {
     setup({ pending: [steer('l1', 'sending', 'steering', true)] });
     expect(bubble('sending')).toHaveAttribute('data-pending', 'true');
     expect(within(bubble('sending')).queryByRole('button')).toBeNull();
+  });
+
+  it('keeps image tiles mounted as a pending prompt becomes a running turn', () => {
+    const files = [{ kind: 'image' as const, name: 'shot.png', mime: 'image/png', src: 'blob:preview' }];
+    const pending = [{ ...steer('p1', 'look', 'starting', true), files }];
+    const { rerender } = render(<MessageList turns={[]} pending={pending} />);
+    const tile = screen.getByRole('button', { name: 'Preview shot.png' });
+    rerender(<MessageList turns={[{ ...turn('p1', 'look', reply('running')), files }]} pending={[]} />);
+    expect(screen.getByRole('button', { name: 'Preview shot.png' })).toBe(tile);
   });
 
   it('renders a reply as markdown but never parses its HTML', () => {

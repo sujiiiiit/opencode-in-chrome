@@ -176,6 +176,34 @@ describe('ChatSession.submit', () => {
     expect(pendingMessages(chat.getState()).map((s) => [s.text, s.local])).toEqual([['hello', false]]);
   });
 
+  it('shows the attached images with the prompt, both while it is in flight and once admitted', async () => {
+    const { fake, chat } = setup();
+    let release!: () => void;
+    fake.hooks.beforePrompt = () => new Promise<void>((resolve) => (release = resolve));
+    await chat.load();
+    const shown = [{ kind: 'image', name: 'shot.png', mime: 'image/png', src: 'data:image/png;base64,iVBORw0KGgo=' }];
+    const sending = chat.submit('look', undefined, undefined, [{ uri: 'data:image/png;base64,iVBORw0KGgo=', name: 'shot.png' }]);
+    await vi.waitFor(() => expect(release).toBeTypeOf('function'));
+
+    expect(pendingMessages(chat.getState()).map((s) => [s.local, s.files])).toEqual([[true, shown]]);
+    release();
+    await sending;
+    expect(pendingMessages(chat.getState()).map((s) => [s.local, s.files])).toEqual([[false, shown]]);
+  });
+
+  it('stages image previews before encoding and keeps their URLs through admission', async () => {
+    const { fake, chat } = setup();
+    await chat.load();
+    const file = new File(['image'], 'shot.png', { type: 'image/png' });
+    const image = { id: 'image-1', name: file.name, mime: file.type, file, url: 'blob:preview' };
+    expect(chat.stagePrompt('p1', 'look', [image])).toBe(true);
+    expect(pendingMessages(chat.getState())[0]?.files?.[0]?.src).toBe('blob:preview');
+    expect(chat.previewFiles('p1')?.[0]?.src).toBe('blob:preview');
+    expect(await chat.submit('look', 'p1', undefined, [{ uri: 'data:image/png;base64,aW1hZ2U=', name: 'shot.png' }])).toBe(true);
+    expect(fake.prompts[0]?.files).toHaveLength(1);
+    expect(pendingMessages(chat.getState(), chat.previewFiles)[0]?.files?.[0]?.src).toBe('blob:preview');
+  });
+
   it('ignores a second submit while one is in flight', async () => {
     const { fake, chat } = setup();
     await chat.load();
@@ -527,6 +555,8 @@ describe('ChatSession: agent, model and variant', () => {
     expect(fake.switches).toEqual(['model:anthropic/claude-opus-5-5/high']);
     expect(fake.log.slice(-2)).toEqual(['model:anthropic/claude-opus-5-5/high', 'prompt:steer']);
     await vi.waitFor(() => expect(chat.getState().durable?.model).toEqual({ ...OPUS, variant: 'high' }));
+    await vi.waitFor(() => expect(chat.getState().timeline?.switches.some((notice) => notice.model.modelID === OPUS.modelID)
+      || chat.getState().timeline?.turns.some((turn) => turn.switches?.some((notice) => notice.model.modelID === OPUS.modelID))).toBe(true));
 
     await chat.submit('plan it', undefined, { ...build, agent: 'plan' });
     expect(fake.switches.slice(1)).toEqual(['agent:plan', 'model:anthropic/claude-opus-5-5/high']);
@@ -567,6 +597,7 @@ describe('ChatSession: agent, model and variant', () => {
     await vi.waitFor(() =>
       expect(chat.getState().durable).toEqual({ agent: 'plan', model: { ...OPUS, variant: 'low' } }),
     );
+    expect(chat.getState().timeline?.switches).toEqual([expect.objectContaining({ model: { ...OPUS, variant: 'low' } })]);
   });
 
   it('restores the model of the last reply for a session that records none', async () => {

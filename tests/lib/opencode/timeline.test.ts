@@ -32,6 +32,13 @@ const say = (text: string, assistantMessageID: string) => [
 const run = (events: ServerEvent[], start: Timeline = emptyTimeline(SESSION_ID)) => events.reduce(reduceTimeline, start);
 
 describe('reduceTimeline', () => {
+  it('keeps a live model switch before the next delivered prompt', () => {
+    const switched = run([ev('session.model.selected', { model: { id: 'new', providerID: 'p' } })]);
+    expect(switched.switches[0]?.model.modelID).toBe('new');
+    const deliveredTurn = run([enqueued('m1', 'hello'), delivered('m1')], switched);
+    expect(deliveredTurn.switches).toEqual([]);
+    expect(deliveredTurn.turns[0]?.switches).toEqual(switched.switches);
+  });
   it('tracks a prompt from the inbox into a turn and streams its reply', () => {
     const t = run([
       enqueued('m1', 'hello'),
@@ -273,6 +280,15 @@ describe('timelineFromSnapshot', () => {
     time: { created },
   });
 
+  it('restores model switches between turns and at the end', () => {
+    const model = { id: 'new', providerID: 'p' };
+    const t = timelineFromSnapshot(SESSION_ID, { messages: [user('m1', 'one', 1),
+      { id: 's1', type: 'model-switched', model }, user('m2', 'two', 2),
+      { id: 's2', type: 'model-switched', model }], inbox: [], running: false });
+    expect(t.turns[1]?.switches?.[0]?.id).toBe('s1');
+    expect(t.switches[0]?.id).toBe('s2');
+  });
+
   it('rebuilds finished turns, their replies and outcomes in chronological order', () => {
     const t = timelineFromSnapshot(SESSION_ID, {
       messages: [
@@ -367,5 +383,32 @@ describe('prependHistory', () => {
     const current = timelineFromSnapshot(SESSION_ID, { messages: [user('u1', 'one')], inbox: [], running: false });
     const { timeline } = prependHistory(current, [user('u0', 'zero'), user('u1', 'one')], []);
     expect(timeline.turns.map((t) => t.id)).toEqual(['u0', 'u1']);
+  });
+});
+
+describe('attachments on user prompts', () => {
+  const png = { data: 'iVBORw==', mime: 'image/png', source: { type: 'inline' }, name: 'shot.png' };
+  const shown = { kind: 'image', name: 'shot.png', mime: 'image/png', src: 'data:image/png;base64,iVBORw==' };
+
+  it('carries an enqueued prompt’s files into the pending prompt and on into its turn', () => {
+    const queued = run([ev('session.inbox.enqueued', { inboxID: 'm1', item: { type: 'user', payload: { text: 'look', files: [png] }, delivery: 'steer' } })]);
+    expect(queued.pending[0]!.files).toEqual([shown]);
+    const t = run([delivered('m1')], queued);
+    expect(t.turns[0]).toMatchObject({ id: 'm1', text: 'look', files: [shown] });
+  });
+
+  it('reads a stored message’s files when the chat is opened', () => {
+    const t = timelineFromSnapshot(SESSION_ID, {
+      messages: [{ id: 'u1', type: 'user', text: 'what is this?', files: [png], time: { created: 1 } }],
+      inbox: [{ id: 'm2', type: 'user', payload: { text: 'and this', files: [png] }, delivery: 'queue', time: { created: 2 } }],
+      running: false,
+    });
+    expect(t.turns[0]!.files).toEqual([shown]);
+    expect(t.pending[0]!.files).toEqual([shown]);
+  });
+
+  it('adds no files key to a text-only prompt', () => {
+    const t = run([enqueued('m1', 'hi'), delivered('m1')]);
+    expect(t.turns[0]).not.toHaveProperty('files');
   });
 });

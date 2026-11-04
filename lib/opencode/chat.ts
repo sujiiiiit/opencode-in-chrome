@@ -8,7 +8,8 @@ import {
   NO_MODEL_MESSAGE,
   type OpenCodeClient,
 } from './client';
-import type { PromptFile } from './attachments';
+import { releaseImage, type ImageAttachment, type PromptFile } from './attachments';
+import { parseSentFiles, withFiles, type SentFile } from './sent-files';
 import type { Connection } from './connection';
 import { EventHub, type HubStatus } from './events';
 import { addForm, createdForm, parseForms, removeForm, settledFormID, type FormAnswer, type PendingForm } from './forms';
@@ -48,7 +49,8 @@ export function replyErrorText(state: ReplyState): string | null {
 }
 
 /** A prompt sent by this panel that the server has not admitted yet (the optimistic bubble). */
-export type LocalPrompt = { id: string; text: string };
+/** A prompt this panel sent that the server has not admitted yet; `files` show above its bubble. */
+export type LocalPrompt = { id: string; text: string; files?: SentFile[] };
 
 export type ChatPhase = 'idle' | 'loading' | 'ready' | 'failed';
 
@@ -122,8 +124,12 @@ function parseAck(ack: unknown, local: LocalPrompt): PendingPrompt {
     text: typeof payload.text === 'string' ? payload.text : local.text,
     delivery,
     created: typeof time.created === 'number' ? time.created : Date.now(),
+    ...withFiles(ackFiles(local, payload)),
   };
 }
+
+/** The panel's own copy of the files, else the echo's: it carries the same bytes again. */
+const ackFiles = (local: LocalPrompt, payload: Record<string, unknown>) => local.files ?? parseSentFiles(payload.files);
 
 /** A steer's request: the text, plus its attachments when there are any. */
 function promptBody(sessionID: string, local: LocalPrompt, files: readonly PromptFile[] = []) {
@@ -191,6 +197,25 @@ function durablePatch(event: ServerEvent): DurableSelection | null {
  * through older messages.
  */
 export class ChatSession extends Store<ChatState> {
+  private readonly previews = new Map<string, { files: SentFile[]; images: readonly ImageAttachment[] }>();
+
+  /** Keep the original object URLs for this session, so admission and delivery do not reload thumbnails. */
+  previewFiles = (id: string): SentFile[] | undefined => this.previews.get(id)?.files;
+
+  /** Show a prompt immediately, before its images have been encoded for the request. */
+  stagePrompt(id: string, text: string, images: readonly ImageAttachment[]): boolean {
+    if (this.disposed || this.state.phase !== 'ready' || this.state.submitting) return false;
+    const files = images.map((image) => ({ kind: 'image' as const, name: image.name, mime: image.mime, src: image.url }));
+    if (files.length) this.previews.set(id, { files, images });
+    this.set((state) => ({ submitting: true, notice: null, local: [...state.local, { id, text, ...withFiles(files.length ? files : undefined) }] }));
+    return true;
+  }
+
+  /** A failed preparation returns ownership of the files to the composer. */
+  cancelStagedPrompt(id: string): void {
+    this.previews.delete(id);
+    this.set((state) => ({ submitting: false, local: state.local.filter((prompt) => prompt.id !== id) }));
+  }
   private readonly client: OpenCodeClient;
   private readonly events: EventHub;
   private readonly ownsEvents: boolean;
@@ -306,7 +331,7 @@ export class ChatSession extends Store<ChatState> {
     if (this.applyForm(event) || !this.sessionID || event.data.sessionID !== this.sessionID) return;
     if (this.applyLifecycle(event)) return;
     const durable = durablePatch(event);
-    if (durable) return this.set((state) => ({ durable: { ...state.durable, ...durable } }));
+    if (durable) this.set((state) => ({ durable: { ...state.durable, ...durable } }));
     const timeline = this.state.timeline;
     if (!timeline) return;
     const next = reduceTimeline(timeline, event);
@@ -547,10 +572,17 @@ export class ChatSession extends Store<ChatState> {
    * `selection` is the agent, model and variant to use; it is applied to the session first.
    * `files` are attachments sent inline with the text (images, as opencode's `Prompt.files`).
    */
+  private localForSubmit(id: string, text: string, files?: readonly PromptFile[]): LocalPrompt | null {
+    const staged = this.state.local.find((prompt) => prompt.id === id);
+    if (this.disposed || this.state.phase !== 'ready' || (this.state.submitting && !staged)) return null;
+    const local = staged ?? { id, text, ...withFiles(parseSentFiles(files)) };
+    if (!staged) this.set((state) => ({ submitting: true, notice: null, local: [...state.local, local] }));
+    return local;
+  }
+
   async submit(text: string, id: string = createMessageID(), selection?: Selection, files?: readonly PromptFile[]): Promise<boolean> {
-    if (this.disposed || this.state.phase !== 'ready' || this.state.submitting) return false;
-    const local: LocalPrompt = { id, text };
-    this.set((state) => ({ submitting: true, notice: null, local: [...state.local, local] }));
+    const local = this.localForSubmit(id, text, files);
+    if (!local) return false;
     try {
       const { sessionID, created } = await this.ensureSession(selection);
       if (selection && !created) await this.applySelection(sessionID, selection);
@@ -566,6 +598,13 @@ export class ChatSession extends Store<ChatState> {
     } finally {
       this.set((state) => ({ submitting: false, local: state.local.filter((p) => p.id !== local.id) }));
     }
+  }
+
+  override dispose(): void {
+    if (this.disposed) return;
+    for (const preview of this.previews.values()) preview.images.forEach(releaseImage);
+    this.previews.clear();
+    super.dispose();
   }
 
   private admit(ack: unknown, local: LocalPrompt): void {
@@ -587,13 +626,13 @@ export class ChatSession extends Store<ChatState> {
   }
 }
 
-export type PendingMessage = { id: string; text: string; status: PendingStatus; local: boolean };
+export type PendingMessage = { id: string; text: string; status: PendingStatus; local: boolean; files?: SentFile[] };
 
 /**
  * Prompts waiting for delivery, shown after the conversation: the ones the server holds (in its
  * order), then the ones this panel sent that it has not admitted yet.
  */
-export function pendingMessages(state: Pick<ChatState, 'timeline' | 'local'>): PendingMessage[] {
+export function pendingMessages(state: Pick<ChatState, 'timeline' | 'local'>, previewFiles?: (id: string) => SentFile[] | undefined): PendingMessage[] {
   const t = state.timeline;
   const items = t?.pending ?? [];
   const admitted = items.map((item) => ({
@@ -601,6 +640,7 @@ export function pendingMessages(state: Pick<ChatState, 'timeline' | 'local'>): P
     text: item.text,
     status: t ? pendingStatus(t, item) : ('starting' as PendingStatus),
     local: false,
+    files: previewFiles?.(item.id) ?? item.files,
   }));
   // Runs on every streamed update: skip the id set when this panel has nothing unadmitted.
   if (state.local.length === 0) return admitted;
@@ -608,6 +648,6 @@ export function pendingMessages(state: Pick<ChatState, 'timeline' | 'local'>): P
   const waiting: PendingStatus = t?.working && t.deliveredSinceIdle ? 'steering' : 'starting';
   const local = state.local
     .filter((prompt) => !known.has(prompt.id))
-    .map((prompt) => ({ id: prompt.id, text: prompt.text, status: waiting, local: true }));
+    .map((prompt) => ({ id: prompt.id, text: prompt.text, status: waiting, local: true, files: prompt.files }));
   return [...admitted, ...local];
 }

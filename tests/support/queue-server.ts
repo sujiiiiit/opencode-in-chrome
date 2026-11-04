@@ -25,7 +25,7 @@ export type InboxRow = {
   id: string;
   sessionID: string;
   type: 'user' | 'compaction';
-  payload: { text?: string };
+  payload: { text?: string; files?: unknown[] };
   delivery: Delivery;
   time: { created: number };
 };
@@ -52,7 +52,7 @@ export function extensionSession(id: string, title: string | undefined, updated:
     metadata: { source: 'chrome-extension' },
   };
 }
-type PromptBody = { id?: string; text: string; delivery?: Delivery; resume?: boolean };
+type PromptBody = { id?: string; text: string; delivery?: Delivery; resume?: boolean; files?: unknown[] };
 
 let clock = 1_700_000_000_000;
 const tick = () => (clock += 10);
@@ -212,7 +212,8 @@ export function fakeOpencode(options: FakeOpencodeOptions = {}) {
         id,
         sessionID: SESSION_ID,
         type: 'user',
-        payload: { text: body.text },
+        // Like the server, the admitted item carries the prompt's files.
+        payload: { text: body.text, ...(body.files ? { files: body.files } : {}) },
         delivery,
         time: { created: tick() },
       };

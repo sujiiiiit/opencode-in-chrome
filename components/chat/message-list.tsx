@@ -4,12 +4,15 @@ import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import type { PendingMessage } from '@/lib/opencode/chat';
 import { replyParts } from '@/lib/opencode/reply';
-import type { Turn } from '@/lib/opencode/timeline';
+import type { ModelSwitch, Turn } from '@/lib/opencode/timeline';
 import { turnStats } from '@/lib/opencode/turn-stats';
 import { CollapsibleText } from './collapsible-text';
 import { AssistantReply } from './flow/assistant-reply';
 import { UserMessageFooter } from './message-footer';
+import { SentAttachments } from './sent-attachments';
+import { useModelName } from './model/model-names';
 import { useInFlight } from './send-flight';
+import type { SentFile } from '@/lib/opencode/sent-files';
 
 // User prompts render as plain text. Replies render as markdown (flow/markdown.tsx), where no
 // HTML from the server is ever parsed as markup.
@@ -33,35 +36,57 @@ function UserBubble({ id, text, pending }: { id: string; text: string; pending?:
 }
 
 /**
- * A prompt the server has not delivered yet. It reads as waiting (dimmed) while it sits behind
- * delivered work (`steering`), was left by an execution that ended (`stranded`) or is queued.
+ * A sent prompt's attachments (above) and its text bubble. The attachments wait out the text's
+ * flight with it. A message sent with files and no text (another opencode client can send one)
+ * shows just the files.
  */
-function PendingBubble({ message }: { message: PendingMessage }) {
-  const waiting = message.status !== 'starting';
+function UserContent({ id, text, files, pending }: { id: string; text: string; files?: SentFile[]; pending?: boolean }) {
+  const inFlight = useInFlight(id);
   return (
-    <div data-slot="user-message" data-pending={waiting || undefined} className="flex flex-col items-end">
-      <UserBubble id={message.id} text={message.text} pending={waiting} />
-    </div>
+    <>
+      {files && <div className={cn('w-full', text && '-mb-2')}><SentAttachments files={files} hidden={inFlight} /></div>}
+      {(text || !files) && <UserBubble id={id} text={text} pending={pending} />}
+    </>
   );
 }
 
-/**
- * One prompt and its reply. Memoized: the timeline keeps every finished turn as the same object,
- * so a streamed update re-renders only the turn it changes, however long the chat is.
- */
-const TurnView = memo(function TurnView({ turn, latest }: { turn: Turn; latest: boolean }) {
-  const stats = useMemo(() => turnStats(turn), [turn]);
+function SwitchNotice({ notice }: { notice: ModelSwitch }) {
+  const name = useModelName(notice.model);
+  const variantOnly = notice.previous?.providerID === notice.model.providerID && notice.previous.modelID === notice.model.modelID;
+  const label = variantOnly ? `Switched variant to ${notice.model.variant ?? 'Default'}` : `Switched to ${name}`;
+  return <div data-slot="model-switch" className="flex items-center gap-3 text-xs text-text-secondary">
+    <div className="h-px flex-1 bg-border-strong" aria-hidden="true" />
+    <span className="min-w-0 max-w-[70%] truncate" title={label}>{label}</span>
+    <div className="h-px flex-1 bg-border-strong" aria-hidden="true" />
+  </div>;
+}
+
+/** One stable component per message ID, from local send through admission and delivery. */
+const MessageEntry = memo(function MessageEntry({ turn, pending, latest, files }: {
+  turn?: Turn;
+  pending?: PendingMessage;
+  latest: boolean;
+  files?: SentFile[];
+}) {
+  const message = turn ?? pending!;
+  const id = message.id;
+  const waiting = pending ? pending.status !== 'starting' : false;
+  const stats = useMemo(() => turn && turnStats(turn), [turn]);
   // A follow-up is admitted (and its reply starts "Thinking") before its text has flown into the
   // bubble; the reply waits for the landing, as a first message's does behind session creation.
-  const inFlight = useInFlight(turn.id);
+  const inFlight = useInFlight(id);
   return (
-    // claude.ai's rhythm: bubble, its 24px action row and the reply sit 8px apart.
     <div className="flex flex-col gap-2">
-      <div data-slot="user-message" data-footer-host className="flex flex-col items-end gap-2">
-        <UserBubble id={turn.id} text={turn.text} />
-        <UserMessageFooter text={turn.text} created={turn.created} />
+      {!!turn?.switches?.length && (
+        <div className="mb-4 flex flex-col gap-2">
+          {turn.switches.map((notice) => <SwitchNotice key={notice.id} notice={notice} />)}
+        </div>
+      )}
+      <div data-slot="user-message" data-footer-host={turn ? '' : undefined} data-pending={waiting || undefined} className="flex flex-col items-end gap-2">
+        <UserContent id={id} text={message.text} files={files} pending={waiting} />
+        {turn && <UserMessageFooter text={turn.text} created={turn.created} />}
       </div>
-      {!inFlight && <AssistantReply reply={turn.reply} stats={stats} latest={latest} />}
+      {turn && !inFlight && <AssistantReply reply={turn.reply} stats={stats!} latest={latest} />}
     </div>
   );
 });
@@ -122,7 +147,9 @@ function prepended(before: Edges, now: Edges, turns: Turn[]): boolean {
 
 type Props = {
   turns: Turn[];
+  switches?: ModelSwitch[];
   pending: PendingMessage[];
+  previewFiles?: (id: string) => SentFile[] | undefined;
   /** Older messages exist beyond the loaded ones. */
   hasEarlier?: boolean;
   loadingEarlier?: boolean;
@@ -341,9 +368,9 @@ export const MessageList = memo(function MessageList(props: Props) {
   return <TurnList {...useStagedList(props)} />;
 });
 
-const TurnList = memo(function TurnList({ turns, pending, hasEarlier = false, loadingEarlier = false, onLoadEarlier }: Props) {
+const TurnList = memo(function TurnList({ turns, switches = [], pending, previewFiles, hasEarlier = false, loadingEarlier = false, onLoadEarlier }: Props) {
   const { ref, space } = usePageTurn(turns, pending);
-  const empty = turns.length === 0 && pending.length === 0;
+  const empty = turns.length === 0 && pending.length === 0 && switches.length === 0;
 
   if (empty) {
     return <div className="flex min-h-0 flex-1"></div>;
@@ -357,13 +384,13 @@ const TurnList = memo(function TurnList({ turns, pending, hasEarlier = false, lo
             {loadingEarlier ? 'Loading…' : 'Load earlier messages'}
           </Button>
         )}
-        {turns.map((turn, index) => (
-          // A queued prompt sits below the last turn, so that turn is no longer the newest reply.
-          <TurnView key={turn.id} turn={turn} latest={index === turns.length - 1 && pending.length === 0} />
-        ))}
-        {pending.map((message) => (
-          <PendingBubble key={message.id} message={message} />
-        ))}
+        {[
+          ...turns.map((turn, index) => <MessageEntry key={turn.id} turn={turn} files={previewFiles?.(turn.id) ?? turn.files}
+            latest={index === turns.length - 1 && pending.length === 0} />),
+          ...switches.map((notice) => <SwitchNotice key={`switch-${notice.id}`} notice={notice} />),
+          ...pending.map((message) => <MessageEntry key={message.id} pending={message}
+            files={previewFiles?.(message.id) ?? message.files} latest={false} />),
+        ]}
         {/* Cancel the list gap; p-3 already supplies 12px below this spacer. */}
         <div data-slot="stream-space" aria-hidden="true" className="-mt-6" style={{ height: Math.max(0, space - 12) }} />
       </div>

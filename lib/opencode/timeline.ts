@@ -2,16 +2,18 @@
 // yet delivered). One server execution can run several turns: a steer is delivered at the next
 // step boundary and starts a new turn mid-execution, and a queued prompt is delivered (one at a
 // time) once every steer has drained. Assistant output always belongs to the latest delivered turn.
-import { initialReply, isRecord, parseError, reduceReply, snapshotStep, type ReplyState } from './reply';
+import { initialReply, isRecord, parseError, reduceReply, snapshotStep, type ReplyState, type StepModel } from './reply';
+import { parseSentFiles, withFiles, type SentFile } from './sent-files';
 import type { ServerEvent } from './sse';
 
 export type Delivery = 'steer' | 'queue';
-/** A user prompt in the inbox, in the server's admission order. */
-export type PendingPrompt = { id: string; text: string; delivery: Delivery; created: number };
+/** A user prompt in the inbox, in the server's admission order. `files`: its attachments. */
+export type PendingPrompt = { id: string; text: string; delivery: Delivery; created: number; files?: SentFile[] };
 /** A non-prompt inbox item (compaction, move). A queued one blocks reordering the queue. */
 export type ControlItem = { id: string; delivery: Delivery };
-/** `created`: server time (ms) the prompt was sent, when known. */
-export type Turn = { id: string; text: string; reply: ReplyState; created?: number };
+/** `created`: server time (ms) the prompt was sent, when known. `files`: its attachments. */
+export type ModelSwitch = { id: string; model: StepModel; previous?: StepModel };
+export type Turn = { id: string; text: string; reply: ReplyState; created?: number; files?: SentFile[]; switches?: ModelSwitch[] };
 /**
  * Where a pending prompt stands, as in opencode's data layer: `starting` is promoted at the next
  * idle boundary, `steering` waits for the next step boundary of an execution that already
@@ -24,6 +26,7 @@ export type Timeline = {
   sessionID: string;
   working: boolean;
   turns: Turn[];
+  switches: ModelSwitch[];
   pending: PendingPrompt[];
   controls: ControlItem[];
   /** Server time of the last idle boundary (an execution ending). */
@@ -38,6 +41,7 @@ export const emptyTimeline = (sessionID: string): Timeline => ({
   sessionID,
   working: false,
   turns: [],
+  switches: [],
   pending: [],
   controls: [],
   idleAt: null,
@@ -46,6 +50,15 @@ export const emptyTimeline = (sessionID: string): Timeline => ({
 });
 
 const str = (v: unknown): string | undefined => (typeof v === 'string' ? v : undefined);
+function switchModel(value: unknown): StepModel | undefined {
+  if (!isRecord(value) || typeof value.id !== 'string' || typeof value.providerID !== 'string') return undefined;
+  return { modelID: value.id, providerID: value.providerID, ...(typeof value.variant === 'string' ? { variant: value.variant } : {}) };
+}
+function modelSwitch(id: string, data: Record<string, unknown>): ModelSwitch | undefined {
+  const model = switchModel(data.model);
+  const previous = switchModel(data.previous);
+  return model ? { id, model, ...(previous ? { previous } : {}) } : undefined;
+}
 const delivery = (v: unknown): Delivery | undefined => (v === 'steer' || v === 'queue' ? v : undefined);
 const hasTurn = (t: Timeline, id: string) => t.turns.some((turn) => turn.id === id);
 
@@ -72,7 +85,7 @@ function parseInboxItem(
   if (!mode) return null;
   if (item.type !== 'user') return { control: { id, delivery: mode } };
   const payload = isRecord(item.payload) ? item.payload : {};
-  return { prompt: { id, text: str(payload.text) ?? '', delivery: mode, created } };
+  return { prompt: { id, text: str(payload.text) ?? '', delivery: mode, created, ...withFiles(parseSentFiles(payload.files)) } };
 }
 
 function enqueue(t: Timeline, d: Record<string, unknown>, created: number): Timeline {
@@ -100,14 +113,19 @@ function deliver(t: Timeline, id: string, at: number | undefined): Timeline {
   const closed = replaceLastTurn(rest, (turn) =>
     turn.reply.status === 'running' ? { ...turn, reply: { ...turn.reply, status: 'succeeded' } } : turn,
   );
-  const reply: ReplyState = { ...initialReply(t.sessionID), status: t.working ? 'running' : 'idle' };
-  const created = prompt?.created ?? at;
-  const turn: Turn = { id, text: prompt?.text ?? '', reply, ...(created !== undefined ? { created } : {}) };
   return {
     ...closed,
-    turns: [...closed.turns, turn],
+    turns: [...closed.turns, deliveredTurn(t, id, prompt, at)],
+    switches: [],
     deliveredSinceIdle: true,
   };
+}
+
+/** The turn a delivered prompt starts: its text and files, from when it was sent (else delivered). */
+function deliveredTurn(t: Timeline, id: string, prompt: PendingPrompt | undefined, at: number | undefined): Turn {
+  const reply: ReplyState = { ...initialReply(t.sessionID), status: t.working ? 'running' : 'idle' };
+  const created = prompt?.created ?? at;
+  return { id, text: prompt?.text ?? '', reply, ...(created !== undefined ? { created } : {}), ...withFiles(prompt?.files), ...(t.switches.length ? { switches: t.switches } : {}) };
 }
 
 function changeDelivery(t: Timeline, id: string, mode: Delivery): Timeline {
@@ -133,9 +151,18 @@ function settle(t: Timeline, event: ServerEvent, d: Record<string, unknown>): Ti
   return { ...ended, working: false, idleAt: event.created ?? Date.now(), deliveredSinceIdle: false };
 }
 
+function addModelSwitch(t: Timeline, event: ServerEvent): Timeline {
+  const id = (event.id ?? `model-${event.created ?? Date.now()}`).replace(/^evt_/, 'msg_');
+  const notice = modelSwitch(id, event.data);
+  if (!notice || t.switches.some((item) => item.id === id) || t.turns.some((turn) => turn.switches?.some((item) => item.id === id))) return t;
+  return { ...t, switches: [...t.switches, notice] };
+}
+
 export function reduceTimeline(t: Timeline, event: ServerEvent): Timeline {
   const d = event.data ?? {};
   if (d.sessionID !== t.sessionID) return t;
+  if (event.type === 'session.model.selected') return addModelSwitch(t, event);
+  if (Object.hasOwn(OUTCOMES, event.type)) return settle(t, event, d);
   const inboxID = str(d.inboxID);
   switch (event.type) {
     case 'session.inbox.enqueued':
@@ -150,10 +177,6 @@ export function reduceTimeline(t: Timeline, event: ServerEvent): Timeline {
     }
     case 'session.execution.started':
       return { ...t, working: true, deliveredSinceIdle: false };
-    case 'session.execution.succeeded':
-    case 'session.execution.failed':
-    case 'session.execution.interrupted':
-      return settle(t, event, d);
     case 'session.revert.staged':
       return { ...t, reverted: true };
     case 'session.revert.cleared':
@@ -215,19 +238,19 @@ export function timelineFromSnapshot(
   snapshot: { messages: unknown; inbox: unknown; running: boolean },
 ): Timeline {
   const messages = Array.isArray(snapshot.messages) ? snapshot.messages : [];
-  const { turns, idleAt, sinceIdle } = messages.reduce(
+  const { turns, idleAt, sinceIdle, switches } = messages.reduce(
     (acc: SnapshotAcc, m: unknown) => readSnapshotMessage(acc, m, sessionID),
-    { turns: [], idleAt: null, sinceIdle: false },
+    { turns: [], switches: [], idleAt: null, sinceIdle: false },
   );
   const last = turns.at(-1);
   const running = snapshot.running && sinceIdle;
   if (running && last) turns[turns.length - 1] = { ...last, reply: { ...last.reply, status: 'running' } };
 
-  const base: Timeline = { ...emptyTimeline(sessionID), working: snapshot.running, turns, idleAt, deliveredSinceIdle: running };
+  const base: Timeline = { ...emptyTimeline(sessionID), working: snapshot.running, turns, switches, idleAt, deliveredSinceIdle: running };
   return syncInbox(base, snapshot.inbox);
 }
 
-type SnapshotAcc = { turns: Turn[]; idleAt: number | null; sinceIdle: boolean };
+type SnapshotAcc = { turns: Turn[]; switches: ModelSwitch[]; idleAt: number | null; sinceIdle: boolean };
 
 type SnapshotMessage = Record<string, unknown> & { id: string; type: string };
 
@@ -240,8 +263,14 @@ const SNAPSHOT_READERS: Record<string, (acc: SnapshotAcc, m: SnapshotMessage, se
       text: str(m.text) ?? '',
       reply: { ...initialReply(sessionID), status: 'succeeded' },
       ...(created !== undefined ? { created } : {}),
+      ...withFiles(parseSentFiles(m.files)),
+      ...(acc.switches.length ? { switches: acc.switches } : {}),
     });
-    return { ...acc, sinceIdle: true };
+    return { ...acc, switches: [], sinceIdle: true };
+  },
+  'model-switched': (acc, m) => {
+    const notice = modelSwitch(m.id, m);
+    return notice ? { ...acc, switches: [...acc.switches, notice] } : acc;
   },
   assistant: (acc, m) => {
     const last = acc.turns.at(-1);
@@ -284,14 +313,18 @@ export function prependHistory(
   orphans: unknown[],
 ): { timeline: Timeline; orphans: unknown[] } {
   const messages = [...older, ...orphans];
-  const { turns } = messages.reduce(
+  const { turns, switches } = messages.reduce(
     (acc: SnapshotAcc, m: unknown) => readSnapshotMessage(acc, m, t.sessionID),
-    { turns: [], idleAt: null, sinceIdle: false },
+    { turns: [], switches: [], idleAt: null, sinceIdle: false },
   );
   const known = new Set(t.turns.map((turn) => turn.id));
   const earlier = turns.filter((turn) => !known.has(turn.id));
+  const first = t.turns[0];
+  const remaining = switches.length && first
+    ? [{ ...first, switches: [...switches, ...(first.switches ?? []).filter((item) => !switches.some((notice) => notice.id === item.id))] }, ...t.turns.slice(1)]
+    : t.turns;
   return {
-    timeline: earlier.length ? { ...t, turns: [...earlier, ...t.turns] } : t,
+    timeline: earlier.length ? { ...t, turns: [...earlier, ...remaining] } : t,
     // A page with no user message is all tail: keep it with the orphans it extends.
     orphans: leadingOrphans(messages),
   };

@@ -1,10 +1,11 @@
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { ChatScreen } from '@/components/chat/chat-screen';
 import type { Connection } from '@/lib/opencode/connection';
 import { fakeOpencode, type FakeOpencode } from '@/tests/support/queue-server';
 import { BASE, MODELS, PROVIDER_ERROR, TOKEN, jsonResponse, routeFetch, sseStream, unauthorized } from '@/tests/support/testkit';
+import { transfer } from '@/tests/support/transfer';
 
 const connection: Connection = {
   baseUrl: BASE,
@@ -50,6 +51,25 @@ describe('ChatScreen: sending and the submit button', () => {
     fake.finish();
     await waitFor(() => expect(submitButton()).toHaveAccessibleName('Send'));
     expect(submitButton()).toBeDisabled();
+  });
+
+  it('shows a 20-image prompt before reading its files for upload', async () => {
+    const { fake, user } = mount();
+    const read = vi.spyOn(FileReader.prototype, 'readAsDataURL').mockImplementation(() => undefined);
+    try {
+      await user.type(box(), 'look');
+      await waitFor(() => expect(submitButton()).toBeEnabled());
+      const files = Array.from({ length: 20 }, (_, at) => new File(['image'], `${at}.png`, { type: 'image/png' }));
+      fireEvent.paste(box(), { clipboardData: transfer({ files }) });
+      await user.keyboard('{Enter}');
+      expect(box()).toBeEmptyDOMElement();
+      expect(screen.getByText('look')).toBeInTheDocument();
+      expect(screen.getAllByRole('button', { name: /^Preview .*\.png$/ })).toHaveLength(20);
+      expect(read).toHaveBeenCalledTimes(1);
+      expect(fake.prompts).toHaveLength(0);
+    } finally {
+      read.mockRestore();
+    }
   });
 
   it('holds a send while the models load, then sends the unchanged draft', async () => {

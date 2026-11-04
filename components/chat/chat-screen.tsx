@@ -251,7 +251,7 @@ function ChatPane({ connection, session, models, active, onHistory, onNewChat }:
   const title = useChatTitle(activeID, state.title);
   // Stable props, so typing in the composer (which re-renders this pane) skips the message list.
   const { timeline, local } = state;
-  const pending = useMemo(() => pendingMessages({ timeline, local }), [timeline, local]);
+  const pending = useMemo(() => pendingMessages({ timeline, local }, chat?.previewFiles), [timeline, local, chat]);
   const loadEarlier = useCallback(() => void chat?.loadEarlier(), [chat]);
 
   return (
@@ -264,7 +264,9 @@ function ChatPane({ connection, session, models, active, onHistory, onNewChat }:
         <ModelCatalogProvider catalog={models.state.catalog ?? models.state.cached}>
           <MessageList
             turns={timeline?.turns ?? NO_TURNS}
+            switches={timeline?.switches}
             pending={pending}
+            previewFiles={chat?.previewFiles}
             hasEarlier={state.hasEarlier}
             loadingEarlier={state.loadingEarlier}
             onLoadEarlier={loadEarlier}

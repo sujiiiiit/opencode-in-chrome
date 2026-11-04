@@ -16,7 +16,7 @@ export type FlightOrigin = { left: number; top: number };
 
 const DURATION_MS = 240;
 /** Frames to wait for the bubble to appear before giving up on the flight. */
-const FIND_FRAMES = 3;
+const FIND_FRAMES = 12;
 
 const easeOutCubic = (t: number) => 1 - (1 - t) ** 3;
 const easeOutQuint = (t: number) => 1 - (1 - t) ** 5;
