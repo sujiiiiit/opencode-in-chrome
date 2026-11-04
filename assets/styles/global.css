@@ -41,6 +41,15 @@
   --popover-foreground: oklch(0.145 0 0);
   /* Dims the page behind a modal dialog (30% black). */
   --scrim: #0000004d;
+  /* Image viewer (components/chat/flow/media): a near-black stage, light text, and controls
+   * that are a white tint of the stage. The shade dims a gallery's "+N" tile. */
+  --viewer-backdrop: #111110f2; /* 95% */
+  --viewer-text: #f7f6f5;
+  --viewer-text-secondary: #ffffff99; /* 60% */
+  --viewer-control: #ffffff1a; /* 10% */
+  --viewer-control-hover: #ffffff2e; /* 18% */
+  --tile-shade: #00000061; /* 38%: under a gallery's "+N", frosted */
+  --tile-hover: #00000014; /* 8%: a picture that opens, under the pointer */
   /* Streamdown's code block and table headers (its `bg-sidebar` / `border-sidebar`). */
   --sidebar: var(--background-secondary);
   /* Terminal output in a shell tool's details. */
@@ -175,6 +184,13 @@
   --color-scrim: var(--scrim);
   --color-sidebar: var(--sidebar);
   --color-console: var(--console);
+  --color-viewer-backdrop: var(--viewer-backdrop);
+  --color-viewer-text: var(--viewer-text);
+  --color-viewer-text-secondary: var(--viewer-text-secondary);
+  --color-viewer-control: var(--viewer-control);
+  --color-viewer-control-hover: var(--viewer-control-hover);
+  --color-tile-shade: var(--tile-shade);
+  --color-tile-hover: var(--tile-hover);
   --color-popover: var(--popover);
   --color-popover-foreground: var(--popover-foreground);
   --color-background-primary-transparent: var(--bacPriTra);
@@ -273,6 +289,7 @@
   --radius-3xl: calc(var(--radius) * 2.2);
   --radius-4xl: calc(var(--radius) * 2.6);
   --radius-surface: 1.1875rem; /* 19px: Notion floating surfaces (prompt box) */
+  --radius-media: 0.9375rem; /* 15px: a reply's images, between a code block (12px) and the bubble (18px) */
 
   /* Motion --------------------------------------------------------------- */
   --ease-standard: ease-in-out; /* CSS keyword curve Notion uses, not Tailwind's ease-in-out */
@@ -420,6 +437,18 @@
     & > * {
       animation: calm-fade 150ms ease-out both;
     }
+  }
+}
+
+/* Reveal (a reply's images, components/chat/flow/reply-image.tsx) ---------------
+ * An image fades in as the words around it do: the same plain opacity fade (Streamdown's
+ * sd-fadeIn, FlowToken's fadeIn at its demo's 0.6s), no blur, no rise, on the panel's calm
+ * curve. An image is larger than a word, so it takes longer. Boxes glide to their height.
+ * Reduced motion shows it at once. */
+@utility animate-reveal {
+  animation: calm-fade 600ms var(--ease-calm) both;
+  @media (prefers-reduced-motion: reduce) {
+    animation: none;
   }
 }
 

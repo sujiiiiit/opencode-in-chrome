@@ -24,6 +24,8 @@ const buttonVariants = cva(
           'hover:bg-background-secondary-transparent hover:text-text-primary',
           'aria-expanded:text-text-primary',
         ].join(' '),
+        // Controls on the image viewer's dark stage: a white tint that firms up on hover.
+        viewer: 'bg-viewer-control text-viewer-text hover:bg-viewer-control-hover focus-visible:ring-viewer-text/40',
         destructive:
           "bg-destructive/10 text-destructive hover:bg-destructive/20 focus-visible:border-destructive/40 focus-visible:ring-destructive/20 dark:bg-destructive/20 dark:hover:bg-destructive/30 dark:focus-visible:ring-destructive/40",
         link: "text-primary underline-offset-4 hover:underline",
@@ -48,6 +50,8 @@ const buttonVariants = cva(
         // up with a 40px input in a toolbar row, where icon-xl's 28px glyph
         "icon-field":
           "size-10 [&_svg:not([class*='size-'])]:size-4.5 [&_svg]:stroke-icon-secondary hover:[&_svg]:stroke-icon-primary focus-visible:[&_svg]:stroke-icon-primary [&_svg]:transition-colors",
+        // Fills its cell edge to edge with no rounding: a picture that opens (a gallery tile).
+        fill: "relative block size-full overflow-hidden rounded-none border-0 p-0 focus-visible:ring-inset",
         "icon-xl": "size-10 [&_svg:not([class*='size-'])]:size-7",
         "icon-lg": "size-8.5 [&_svg:not([class*='size-'])]:size-4.5",
         icon: "size-8 [&_svg:not([class*='size-'])]:size-3.5",

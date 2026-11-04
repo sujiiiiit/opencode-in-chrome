@@ -31,6 +31,32 @@ function DialogContent({ className, children, ...props }: DialogPrimitive.Popup.
   );
 }
 
+/**
+ * A full-panel stage for media (the image viewer): edge to edge on a near-black backdrop, its
+ * content fading in and out with it. Focus is trapped inside and returns to the trigger on close.
+ */
+function DialogStage({ className, children, ...props }: DialogPrimitive.Popup.Props) {
+  return (
+    <DialogPrimitive.Portal>
+      <DialogPrimitive.Backdrop
+        data-slot="dialog-stage-backdrop"
+        className="fixed inset-0 z-50 bg-viewer-backdrop data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0"
+      />
+      <DialogPrimitive.Popup
+        data-slot="dialog-stage"
+        className={cn(
+          'fixed inset-0 z-50 flex flex-col text-viewer-text outline-none',
+          'data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0',
+          className,
+        )}
+        {...props}
+      >
+        {children}
+      </DialogPrimitive.Popup>
+    </DialogPrimitive.Portal>
+  );
+}
+
 function DialogTitle({ className, ...props }: DialogPrimitive.Title.Props) {
   return (
     <DialogPrimitive.Title
@@ -45,4 +71,4 @@ function DialogDescription({ className, ...props }: React.ComponentProps<typeof 
   return <DialogPrimitive.Description data-slot="dialog-description" className={cn('sr-only', className)} {...props} />;
 }
 
-export { Dialog, DialogClose, DialogContent, DialogDescription, DialogTitle };
+export { Dialog, DialogClose, DialogContent, DialogDescription, DialogStage, DialogTitle };
