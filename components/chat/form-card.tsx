@@ -111,7 +111,7 @@ export function FormCard({ form, onAnswer, onCancel }: Props) {
   const [busy, setBusy] = useState(false);
   const fields = askedFields(form, answer);
 
-  const settle = async (run: () => Promise<unknown>) => {
+  const settle = async (run: () => unknown) => {
     setBusy(true);
     try {
       await run();

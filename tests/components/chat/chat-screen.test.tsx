@@ -255,7 +255,7 @@ describe('ChatScreen: follow-ups', () => {
     await user.type(box(), 'sent{Enter}');
     await waitFor(() => expect(bubble('sent')).toBeTruthy());
     expect(within(bubble('sent')).queryByRole('button')).toBeNull();
-    expect(screen.queryByRole('button', { name: /settings|steer|queue|delete|undo|remove/i })).toBeNull();
+    expect(screen.queryByRole('button', { name: /edit|steer|queue|delete|undo|remove/i })).toBeNull();
   });
 
   it('delivers a waiting prompt into the conversation as its own turn', async () => {
