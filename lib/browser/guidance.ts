@@ -36,6 +36,7 @@ You can control the user's Chrome through the browser tools. The only callable t
 - Prefer one clear step at a time on a page that changes. Several reads can go in one code block; stop the block after an action that changes the page.
 - \`read_page\` shows the part of the page around the viewport and says how many elements are above and below; scroll, use \`find\`, or pass window: "page" to see more.
 - Keep going until the task is done: never end a reply only to say what you will do next. Make the call.
+- When you need information from the user, call \`ask_user({kind:"input",message:"..."})\` through \`execute\`. For sign-in, CAPTCHA or another step only the user can do, call \`ask_user({kind:"takeover",message:"..."})\`. Its schema has just kind and message; do not call OpenCode's built-in \`question\` for browser handoffs.
 
 ## Finishing
 - When the task needed page actions, finish with \`done\`: outcome "success" only when you have seen the result of every action you took (the <browser-state> block lists the ones you have not), otherwise "partial" or "failed". Then give the summary as your final reply.

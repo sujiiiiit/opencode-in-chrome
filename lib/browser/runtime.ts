@@ -14,6 +14,7 @@ import { attachGuide } from './guidance';
 import { browserStateHooks, TabWatch, trackRevisions } from './state';
 import { Completion } from './completion';
 import { doneTool } from './tools/done';
+import { askUserTool } from './tools/ask-user';
 import type { ComputerDeps } from './tools/computer';
 import { chromeDebuggerApi, DebuggerSessions } from './debugger';
 import { ConsoleLog, NetworkLog } from './diagnostics';
@@ -187,7 +188,7 @@ export function createBrowserRuntime() {
   defs.push(...diagnosticsTools({ scope, debuggers, dialogs, console: consoleLog, network: networkLog, guard }), gifTool(scope, recorder));
   // batch runs the guarded tools, so every item passes the same checks as a single call.
   // One loop guard and one completion tracker for every tool, so batch items and single calls count alike.
-  defs.push(doneTool({ completion, loop }));
+  defs.push(askUserTool(server, 500, undefined, (cb) => policy.onStop(cb)), doneTool({ completion, loop }));
   const safety = { policy, scope, loop, completion };
   const guarded: ToolDef[] = withSafety(defs, safety);
   guarded.push(...withSafety([batchTool(() => guarded, () => policy.isStopped)], safety));
