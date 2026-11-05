@@ -1,13 +1,12 @@
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode, type RefObject } from 'react';
+import { useMemo, useRef, useState, type KeyboardEvent, type ReactNode, type RefObject } from 'react';
 import { Combobox } from '@base-ui/react/combobox';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog';
 import { Icon } from '@/components/ui/icon';
 import { Input } from '@/components/ui/input';
-import { Switch } from '@/components/ui/switch';
 import { Tooltip } from '@/components/ui/tooltip';
 import { modelKey, sameModel, type CatalogModel, type ModelLabel } from '@/lib/opencode/models/catalog';
-import { manageGroups, pickerGroups, type PickerGroup, type PickerItem } from '@/lib/opencode/models/controls';
+import { pickerGroups, type PickerGroup, type PickerItem } from '@/lib/opencode/models/controls';
 import type { ModelState, ModelStore } from '@/lib/opencode/models/model-store';
 
 type Props = {
@@ -15,34 +14,29 @@ type Props = {
   onOpenChange: (open: boolean) => void;
   store: ModelStore;
   state: ModelState;
+  /** Opens the settings page, where models are shown or hidden. */
+  onManage: () => void;
 };
 
 /**
- * The model picker, after opencode's model dialog. Pick view: search, Favorites and Recent, then
- * providers (collapsible). Effort is not chosen here: the prompt box offers the chosen model's
- * efforts. Manage view: show or hide models in the picker, per model or per provider.
+ * The model picker, after opencode's model dialog: search, Favorites and Recent, then the providers'
+ * switched-on models (collapsible). Only those models are listed; Manage opens the settings page,
+ * where they are switched on or off. Effort is not chosen here: the prompt box offers the chosen
+ * model's efforts.
  */
-export function ModelPicker({ open, onOpenChange, store, state }: Props) {
-  const [view, setView] = useState<'pick' | 'manage'>('pick');
+export function ModelPicker({ open, onOpenChange, store, state, onManage }: Props) {
   const search = useRef<HTMLInputElement>(null);
-  useEffect(() => {
-    if (open) setView('pick');
-  }, [open]);
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent data-slot="model-picker" initialFocus={search}>
         <DialogDescription>Search models and choose one.</DialogDescription>
-        {view === 'pick' ? (
-          <PickView
-            store={store}
-            state={state}
-            searchRef={search}
-            onManage={() => setView('manage')}
-            onChosen={() => onOpenChange(false)}
-          />
-        ) : (
-          <ManageView store={store} state={state} searchRef={search} onBack={() => setView('pick')} />
-        )}
+        <PickView
+          store={store}
+          state={state}
+          searchRef={search}
+          onManage={onManage}
+          onChosen={() => onOpenChange(false)}
+        />
       </DialogContent>
     </Dialog>
   );
@@ -264,60 +258,3 @@ function ModelRow({
   );
 }
 
-// ─── Manage view ────────────────────────────────────────────────────────────
-
-/** Each switch is labelled by its enclosing `<label>` (Base UI's switch renders a span for it). */
-function ManageView({
-  store,
-  state,
-  searchRef,
-  onBack,
-}: {
-  store: ModelStore;
-  state: ModelState;
-  searchRef: RefObject<HTMLInputElement | null>;
-  onBack: () => void;
-}) {
-  const [query, setQuery] = useState('');
-  const groups = useMemo(() => manageGroups(state, query), [state, query]);
-  const providerModels = (id: string) => state.catalog?.providers.find((p) => p.id === id)?.models ?? [];
-  return (
-    <>
-      <div className="flex shrink-0 items-center gap-1 pl-2">
-        <Button variant="ghost" size="icon-sm" aria-label="Back to models" onClick={onBack}>
-          <Icon name="arrow-left" />
-        </Button>
-        <div className="min-w-0 flex-1">
-          <Header title="Manage models" />
-        </div>
-      </div>
-      <div className="shrink-0 px-3 pb-2">
-        <Input
-          ref={searchRef}
-          type="search"
-          aria-label="Search all models"
-          placeholder="Search all models"
-          value={query}
-          onChange={(event) => setQuery(event.target.value)}
-        />
-      </div>
-      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-1.5 pb-2">
-        {groups.length === 0 && <p className="px-3 py-6 text-center text-sm text-text-tertiary">No models match your search.</p>}
-        {groups.map((group) => (
-          <section key={group.id} aria-label={group.title} className="pb-2">
-            <label className="flex h-8 items-center gap-2 px-2.5 text-xs font-medium text-text-secondary">
-              <span className="min-w-0 flex-1 truncate">{group.title}</span>
-              <Switch checked={group.visible} onCheckedChange={(checked) => store.setVisibility(providerModels(group.id), checked)} />
-            </label>
-            {group.items.map(({ model, label, visible }) => (
-              <label key={modelKey(model)} className="flex h-8 items-center gap-2 px-2.5 text-sm">
-                <bdi className="min-w-0 flex-1 truncate">{label.model}</bdi>
-                <Switch checked={visible} onCheckedChange={(checked) => store.setVisibility([model], checked)} />
-              </label>
-            ))}
-          </section>
-        ))}
-      </div>
-    </>
-  );
-}

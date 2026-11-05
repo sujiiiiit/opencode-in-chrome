@@ -7,7 +7,7 @@ import { BASE, TOKEN, WORKSPACE_WIN, jsonResponse, routeFetch } from '@/tests/su
 describe('web search choice', () => {
   it('parses stored values, falling back to the server default', () => {
     expect(parseChoice('random')).toBe('random');
-    expect(parseChoice('off')).toBe('off');
+    expect(parseChoice('off')).toBe('server');
     expect(parseChoice({ provider: 'tavily' })).toEqual({ provider: 'tavily' });
     expect(parseChoice({ provider: '' })).toBe('server');
     expect(parseChoice(undefined)).toBe('server');
@@ -16,7 +16,6 @@ describe('web search choice', () => {
   it('writes the provider the way opencode.jsonc expects it', () => {
     expect(JSON.parse(configFor({ provider: 'exa' })).websearch).toEqual({ provider: 'exa' });
     expect(JSON.parse(configFor('random')).websearch).toEqual({ provider: 'random' });
-    expect(JSON.parse(configFor('off')).websearch).toBe(false);
     expect(JSON.parse(configFor('server'))).not.toHaveProperty('websearch');
   });
 

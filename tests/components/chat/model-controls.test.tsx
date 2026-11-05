@@ -171,14 +171,15 @@ describe('model picker', () => {
     expect(options()).toHaveLength(2);
   });
 
-  it('hides a model from the picker in Manage models', async () => {
+  it('Manage closes the picker and opens the settings page, not a view in the picker', async () => {
+    const { browser } = await import('wxt/browser');
+    const create = vi.spyOn(browser.tabs, 'create').mockResolvedValue({} as never);
     const { user } = await mount();
     await openPicker(user);
+    expect(within(picker()).queryByRole('switch')).not.toBeInTheDocument();
     await user.click(within(picker()).getByRole('button', { name: 'Manage' }));
-    await user.click(within(picker()).getByRole('switch', { name: 'Claude Opus 5.5' }));
-    expect(within(picker()).getByRole('switch', { name: 'Anthropic' })).not.toBeChecked();
-    await user.click(within(picker()).getByRole('button', { name: 'Back to models' }));
-    expect(options().map((o) => o.textContent)).not.toContainEqual(expect.stringContaining('Claude Opus 5.5'));
+    expect(create).toHaveBeenCalledWith({ url: browser.runtime.getURL('/settings.html') });
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
   });
 });
 

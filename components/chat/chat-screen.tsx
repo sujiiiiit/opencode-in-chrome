@@ -20,7 +20,6 @@ import { ModelCatalogProvider } from './model/model-names';
 import { useModelShortcuts, useModelStore, useModelSync } from './model/use-models';
 import { FormCard } from './form-card';
 import { Notice } from './notice';
-import { WebSearchMenu } from './web-search-menu';
 import { DropOverlay } from './drop-overlay';
 import { useFileDrop } from './use-file-drop';
 import { AttachMenu } from './prompt-box/attach-menu';
@@ -72,16 +71,12 @@ function openSettings() {
 function ChatHeader({
   title,
   activeID,
-  connection,
-  onError,
   onHistory,
   onNewChat,
 }: {
   title: string;
   /** The open chat's id, so the title id is stable per chat and changes when a chat is named. */
   activeID: string | null;
-  connection: Connection;
-  onError: (message: string) => void;
   onHistory: () => void;
   onNewChat: () => void;
 }) {
@@ -95,7 +90,6 @@ function ChatHeader({
         <MorphText id={id} text={title} textSlot="chat-title" />
       </MarqueeTitle>
       <div className="flex items-center gap-0.5">
-        <WebSearchMenu connection={connection} onError={onError} />
         <Button variant="ghost" size="icon-lg" aria-label="Settings" title="Settings" onClick={openSettings}>
           <Icon name="settings" />
         </Button>
@@ -252,7 +246,6 @@ function ChatPane({ connection, session, models, active, onHistory, onNewChat }:
     box,
     models: { store: models.store, controls: models.controls, phase: models.state.phase },
   });
-  const [searchError, setSearchError] = useState<string | null>(null);
   const store = models.store;
   const picker = usePicker(models, box);
   const title = useChatTitle(activeID, state.title);
@@ -263,7 +256,7 @@ function ChatPane({ connection, session, models, active, onHistory, onNewChat }:
 
   return (
     <div className="relative flex h-full min-h-0 flex-col">
-      <ChatHeader title={title} activeID={activeID} connection={connection} onError={setSearchError} onHistory={onHistory} onNewChat={onNewChat} />
+      <ChatHeader title={title} activeID={activeID} onHistory={onHistory} onNewChat={onNewChat} />
       <ConnectionBanners connection={connection} />
       {/* Shell tools in the replies read their live output through the open chat. */}
       <ShellOutputProvider value={chat?.shellOutput ?? null}>
@@ -281,11 +274,21 @@ function ChatPane({ connection, session, models, active, onHistory, onNewChat }:
         </ModelCatalogProvider>
       </ShellOutputProvider>
       <div className="mx-auto w-full max-w-chat">
-        {searchError && <Notice text={`Web search: ${searchError}`} onDismiss={() => setSearchError(null)} />}
         <PaneNotice session={session} models={models} />
         <ChatComposer box={box} composer={composer} models={models} active={active} question={paneQuestion(session)} onOpenPicker={picker.open} />
       </div>
-      {store && <ModelPicker open={picker.picking} onOpenChange={picker.onOpenChange} store={store} state={models.state} />}
+      {store && (
+        <ModelPicker
+          open={picker.picking}
+          onOpenChange={picker.onOpenChange}
+          store={store}
+          state={models.state}
+          onManage={() => {
+            picker.onOpenChange(false);
+            openSettings();
+          }}
+        />
+      )}
     </div>
   );
 }
