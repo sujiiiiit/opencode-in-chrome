@@ -10,6 +10,8 @@ import {
   allowsCustom,
   answerFor,
   askedFields,
+  browserApprovalOf,
+  type BrowserApproval,
   chooseCustom,
   chooseOption,
   choiceMode,
@@ -55,10 +57,10 @@ function OptionRow({ option, control }: { option: FormOption; control: (ids: { l
   const hint = option.description ? `${id}-hint` : undefined;
   return (
     <label className="flex cursor-pointer items-start gap-3 rounded-xl px-3 py-2 transition-colors duration-150 ease-(--ease-calm) hover:bg-background-secondary-transparent">
-      <span className="flex h-[1.3125rem] items-center">{control({ label: `${id}-label`, hint })}</span>
+      <span className="flex h-5 items-center">{control({ label: `${id}-label`, hint })}</span>
       <span className="flex min-w-0 flex-col">
         <span id={`${id}-label`} className="type-body text-text-primary">{option.label}</span>
-        {hint && <span id={hint} className="text-[0.8125rem] leading-snug text-text-tertiary">{option.description}</span>}
+        {hint && <span id={hint} className="text-sm leading-snug text-text-tertiary">{option.description}</span>}
       </span>
     </label>
   );
@@ -170,7 +172,7 @@ function TypedAnswer({ field, draft, onDraft, onEnter, labelledBy }: StepProps &
         type={field.type === 'string' ? 'text' : 'number'}
         aria-labelledby={labelledBy}
         value={typeof value === 'string' || typeof value === 'number' ? String(value) : ''}
-        placeholder={field.placeholder}
+        placeholder={field.placeholder ?? 'Describe yuor answer'}
         onChange={(event) => onDraft(setValue(draft, field, event.target.value))}
         onKeyDown={(event) => {
           if (event.key === 'Enter' && !event.nativeEvent.isComposing) {
@@ -199,7 +201,7 @@ function StepBody(props: StepProps & { labelledBy: string }) {
 }
 
 /** One question's page: the question, then its answers. */
-function Step(props: StepProps & { heading: string; roomFor: 'one' | 'pager' }) {
+function Step(props: StepProps & { heading: string; roomFor: 'one' | 'pager'; detail?: React.ReactNode }) {
   const id = useId();
   return (
     <div className="flex flex-col gap-2 px-1 pt-3.5 pb-1">
@@ -209,7 +211,22 @@ function Step(props: StepProps & { heading: string; roomFor: 'one' | 'pager' }) 
       >
         {props.heading}
       </h2>
+      {props.detail}
       <StepBody {...props} labelledBy={id} />
+    </div>
+  );
+}
+
+/** What a browser approval is about: the action (or site) and where, under the question. */
+function ApprovalDetail({ approval }: { approval: BrowserApproval }) {
+  return (
+    <div className="flex flex-col gap-0.5 px-3" data-browser-approval={approval.approval}>
+      {approval.approval === 'action' && approval.summary && <p className="type-body text-text-primary">{approval.summary}</p>}
+      <p className="flex items-center gap-1.5 text-sm leading-snug text-text-tertiary">
+        <Icon name="globe" className="shrink-0" />
+        <span className="truncate">{approval.site}</span>
+        {approval.approval === 'site' && <span>· the agent wants to read and act on this site</span>}
+      </p>
     </div>
   );
 }
@@ -259,6 +276,7 @@ export function FormCard({ form, onAnswer, onCancel }: Props) {
   const [busy, setBusy] = useState(false);
   const answer = draftAnswer(form, draft);
   const steps = askedFields(form, answer);
+  const approval = browserApprovalOf(form);
   const index = Math.min(at, steps.length - 1);
   const step = steps[index]!;
   const last = index === steps.length - 1;
@@ -305,7 +323,8 @@ export function FormCard({ form, onAnswer, onCancel }: Props) {
                 onDraft={setDraft}
                 onEnter={goOn}
                 onPicked={onPicked}
-                heading={headingOf(form, field)}
+                heading={approval ? form.title : headingOf(form, field)}
+                detail={approval ? <ApprovalDetail approval={approval} /> : undefined}
                 roomFor={steps.length > 1 ? 'pager' : 'one'}
               />
             </TabsContent>

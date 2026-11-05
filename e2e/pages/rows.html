@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Shopping list</title></head>
+<body>
+  <h1>Shopping list</h1>
+  <ul id="rows"><li>Milk</li></ul>
+  <label>New item <input id="item" type="text" placeholder="Item name"></label>
+  <button type="button" id="add">Add row</button>
+  <p id="count">1 row</p>
+  <script>
+    const rows = document.getElementById('rows');
+    const input = document.getElementById('item');
+    document.getElementById('add').addEventListener('click', () => {
+      const li = document.createElement('li');
+      li.textContent = input.value.trim() || `Item ${rows.children.length + 1}`;
+      rows.append(li);
+      input.value = '';
+      const n = rows.children.length;
+      document.getElementById('count').textContent = `${n} row${n === 1 ? '' : 's'}`;
+    });
+  </script>
+</body>
+</html>

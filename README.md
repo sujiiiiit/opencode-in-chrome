@@ -1,5 +1,15 @@
 # Opencode
 
+## Browser agent setup
+
+The browser agent needs opencode 2.2.5 or newer and a local server that allows the extension's origin. Find the extension ID on `chrome://extensions`, then start the server with:
+
+```powershell
+opencode serve --cors chrome-extension://YOUR_EXTENSION_ID
+```
+
+Run `opencode pair --url <server URL printed by serve>`, open its link in the extension's browser, and turn on browser access in Settings. The `--cors` origin is required for the client-MCP ticket request; the default `opencode service start` command does not expose a CORS option. Keep the server running while using browser tools.
+
 ## Shared development browser
 
 Start the extension once and leave the WXT-managed Chrome window open:

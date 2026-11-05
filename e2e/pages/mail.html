@@ -1,0 +1,16 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Inbox - Planning meeting</title></head>
+<body>
+  <h1>Planning meeting</h1>
+  <article class="message">
+    <h2>From: Dana Lee</h2>
+    <p>Hi! Could we meet this week to go over the plan? Does Thursday at 3pm work for you?</p>
+  </article>
+  <form id="reply" method="post" action="/submit/mail">
+    <input type="hidden" name="to" value="dana@example.com">
+    <label>Reply to Dana <textarea name="message" rows="4"></textarea></label>
+    <button type="submit">Send reply</button>
+  </form>
+</body>
+</html>

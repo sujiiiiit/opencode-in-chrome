@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Kettle Corner</title></head>
+<body>
+  <h1>Kettle Corner</h1>
+  <p id="cart">Cart: 0 items</p>
+  <ul id="products">
+    <li class="product"><h2>Red kettle</h2><p class="price">$24.00</p><button type="button" data-name="Red kettle">Add to cart</button></li>
+    <li class="product"><h2>Blue kettle</h2><p class="price">$31.50</p><button type="button" data-name="Blue kettle">Add to cart</button></li>
+    <li class="product"><h2>Steel kettle</h2><p class="price">$45.00</p><button type="button" data-name="Steel kettle">Add to cart</button></li>
+  </ul>
+  <p><a href="/shipping.html">Shipping information</a></p>
+  <script>
+    let count = 0;
+    const added = [];
+    for (const button of document.querySelectorAll('#products button')) {
+      button.addEventListener('click', () => {
+        count += 1;
+        added.push(button.dataset.name);
+        document.getElementById('cart').textContent = `Cart: ${count} item${count === 1 ? '' : 's'} (${added.join(', ')})`;
+      });
+    }
+  </script>
+</body>
+</html>

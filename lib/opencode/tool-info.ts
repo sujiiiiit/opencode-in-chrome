@@ -1,6 +1,7 @@
 // How each tool call reads in the timeline: its family, its title while it works and once it is
 // done, and the one-line subject (the command, the file, the query). Pure and defensive: tool
 // input and metadata are untyped at runtime (plugin tools send whatever they like).
+import { browserCalls, browserStepsText, isBrowserPart } from './browser-steps';
 import { isRecord, type ReplyToolPart } from './reply';
 
 type ToolCategory = 'shell' | 'read' | 'search' | 'edit' | 'web' | 'agent' | 'other';
@@ -142,6 +143,7 @@ const SUBJECTS: Record<string, (part: ReplyToolPart) => string | undefined> = {
  * a field that is still streaming counts only once it is whole.
  */
 export function toolSubject(part: ReplyToolPart, closed = false): string | undefined {
+  if (isBrowserPart(part)) return browserStepsText(part, part.status !== 'streaming' && part.status !== 'running');
   if (Object.hasOwn(SUBJECTS, part.name)) return SUBJECTS[part.name]!(part);
   if (!Object.hasOwn(SPECS, part.name)) return pluginSubject(part);
   const spec = SPECS[part.name]!;
@@ -165,12 +167,15 @@ export const toolStopped = (part: ReplyToolPart, live: boolean) =>
 
 /** The tool's title for its state: "Running" while it works, "Ran" once done. */
 export function toolTitle(part: ReplyToolPart, live: boolean): string {
+  if (isBrowserPart(part)) return toolPending(part, live) ? 'Browsing' : 'Browsed';
   const spec = toolSpec(part.name);
   return toolPending(part, live) ? spec.active : spec.done;
 }
 
 /** The call as one sentence for a summary line: `Searching for "TODO"`, `Ran npm test`. */
 export function toolLabel(part: ReplyToolPart, live: boolean): string {
+  // Browser steps read as their own phrases: "Opening example.com · Reading the page".
+  if (isBrowserPart(part)) return browserStepsText(part, !toolPending(part, live));
   const spec = toolSpec(part.name);
   const title = toolTitle(part, live);
   const subject = toolSubject(part, true);
@@ -226,12 +231,14 @@ function touched(part: ReplyToolPart): string[] {
   return files.length ? files : [`#${part.id}`];
 }
 
-type Bucket = ToolCategory | 'websearch' | 'page';
+type Bucket = ToolCategory | 'websearch' | 'page' | 'browser';
 
 /** Where a call counts in a summary; bookkeeping and calls the interrupt cut off count nowhere. */
 function bucketOf(part: ReplyToolPart): Bucket | undefined {
+  if (part.aborted) return undefined;
+  if (isBrowserPart(part)) return 'browser';
   const spec = toolSpec(part.name);
-  if (spec.internal || part.aborted) return undefined;
+  if (spec.internal) return undefined;
   if (spec.category === 'web') return part.name === 'websearch' ? 'websearch' : 'page';
   return spec.category;
 }
@@ -244,6 +251,7 @@ const PIECES: readonly [Bucket, string, string][] = [
   ['search', 'search', 'searches'],
   ['websearch', 'web search', 'web searches'],
   ['page', 'page opened', 'pages opened'],
+  ['browser', 'browser step', 'browser steps'],
   ['agent', 'agent', 'agents'],
 ];
 
@@ -266,7 +274,12 @@ export function toolSummary(parts: readonly ReplyToolPart[]): string {
     const bucket = bucketOf(part);
     if (bucket === 'other') plugins.push(part.name);
     if (!bucket || bucket === 'other') continue;
-    const keys = bucket === 'edit' || bucket === 'read' ? touched(part) : [part.id];
+    const keys =
+      bucket === 'edit' || bucket === 'read'
+        ? touched(part)
+        : bucket === 'browser'
+          ? browserCalls(part).map((_, i) => `${part.id}#${i}`)
+          : [part.id];
     const set = seen.get(bucket) ?? new Set<string>();
     keys.forEach((key) => set.add(key));
     seen.set(bucket, set);

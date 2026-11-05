@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Actions</title>
+  <style>
+    body { font-family: sans-serif; margin: 20px; }
+    #covered-wrap { position: relative; height: 60px; }
+    #banner { position: absolute; inset: 0; background: #fffbe6; border: 1px solid #ccc; }
+    #menu-items { display: none; }
+    #menu-items.open { display: block; }
+    button, input, a { margin: 6px 0; }
+  </style>
+</head>
+<body>
+  <h1>Actions</h1>
+
+  <div id="covered-wrap">
+    <button id="covered">Buy now</button>
+    <div id="banner" role="region" aria-label="Cookie consent">We use cookies</div>
+  </div>
+
+  <button id="menu" aria-expanded="false">Filters</button>
+  <ul id="menu-items"><li><button>Price: low to high</button></li><li><button>Newest</button></li></ul>
+
+  <p><button id="trusted">Trusted only</button> <span id="trusted-status">idle</span></p>
+
+  <p><a id="popup" href="/form.html" target="_blank">Open form in new tab</a></p>
+
+  <p><button id="confirm">Delete item</button> <span id="confirm-status">kept</span></p>
+
+  <p><label>Controlled name <input id="controlled"></label> <span id="controlled-state">state: ""</span></p>
+
+  <p><label>Notes <textarea id="notes"></textarea></label></p>
+
+  <p><label>Attachment <input id="file" type="file"></label> <span id="file-status">no file</span></p>
+
+  <div id="drop" style="width:200px;height:80px;border:2px dashed #888">Drop here</div>
+  <span id="drop-status">nothing dropped</span>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+    $('covered').addEventListener('click', () => ($('covered').textContent = 'bought'));
+    $('menu').addEventListener('click', () => {
+      const open = $('menu-items').classList.toggle('open');
+      $('menu').setAttribute('aria-expanded', String(open));
+    });
+    $('trusted').addEventListener('click', (e) => ($('trusted-status').textContent = e.isTrusted ? 'trusted click' : 'synthetic click'));
+    $('confirm').addEventListener('click', () => ($('confirm-status').textContent = confirm('Delete item?') ? 'deleted' : 'kept'));
+    $('file').addEventListener('change', () => ($('file-status').textContent = Array.from($('file').files).map((f) => `${f.name}:${f.size}`).join(',')));
+    $('drop').addEventListener('dragover', (e) => e.preventDefault());
+    $('drop').addEventListener('drop', (e) => {
+      e.preventDefault();
+      $('drop-status').textContent = Array.from(e.dataTransfer.files).map((f) => f.name).join(',');
+    });
+
+    // A controlled input that behaves like React's: the page tracks the last value it set
+    // through the element's own `value` property and only reports real user edits.
+    const input = $('controlled');
+    const native = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value');
+    let tracked = '';
+    Object.defineProperty(input, 'value', {
+      get() { return native.get.call(this); },
+      set(v) { tracked = String(v); native.set.call(this, v); },
+    });
+    input.addEventListener('input', () => {
+      const v = native.get.call(input);
+      if (v !== tracked) {
+        tracked = v;
+        $('controlled-state').textContent = `state: "${v}"`;
+      }
+    });
+  </script>
+</body>
+</html>

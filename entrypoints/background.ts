@@ -1,3 +1,7 @@
+import { startBrowserAgent } from '@/lib/browser/agent';
+import { allowClientMcpFrom } from '@/lib/browser/origin-rule';
+import { createBrowserRuntime } from '@/lib/browser/runtime';
+
 interface FirefoxSidebarAction {
   toggle: () => Promise<void>;
 }
@@ -9,6 +13,9 @@ export default defineBackground(() => {
     browser.sidePanel
       .setPanelBehavior({ openPanelOnActionClick: true })
       .catch((error) => console.error('Failed to set side panel behavior', error));
+    // The browser agent: tools served to the paired opencode server (lib/browser).
+    const runtime = createBrowserRuntime();
+    startBrowserAgent({ tools: runtime.tools, beforeConnect: allowClientMcpFrom });
     return;
   }
 

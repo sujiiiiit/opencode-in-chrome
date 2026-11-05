@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>SPA home</title></head>
+<body>
+  <nav><a id="to-about" href="/about">About</a></nav>
+  <main id="view"><h1>Home</h1></main>
+  <script>
+    document.getElementById('to-about').addEventListener('click', (e) => {
+      e.preventDefault();
+      history.pushState({}, '', '/spa/about');
+      setTimeout(() => {
+        document.getElementById('view').innerHTML = '<h1>About us</h1><button>Contact</button>';
+        document.title = 'SPA about';
+      }, 200);
+    });
+  </script>
+</body>
+</html>

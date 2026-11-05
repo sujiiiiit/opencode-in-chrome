@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Tall page</title><style>section { height: 400px; }</style></head>
+<body>
+  <h1>Tall page</h1>
+  <main id="sections"></main>
+  <script>
+    // 20 sections of 400 px each, one button per section: about 10 viewports at 800 px.
+    const main = document.getElementById('sections');
+    for (let i = 0; i < 20; i++) {
+      const s = document.createElement('section');
+      const b = document.createElement('button');
+      b.textContent = 'Section ' + i;
+      s.append(b);
+      main.append(s);
+    }
+  </script>
+</body>
+</html>

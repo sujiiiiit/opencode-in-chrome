@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Task board</title></head>
+<body>
+  <h1>Task board</h1>
+  <label>Due date <input id="due" type="date" value="2026-11-10"></label>
+  <p id="due-status">Due 2026-11-10</p>
+  <label>Filter
+    <select id="filter"><option value="all">All</option><option value="open">Open</option><option value="done">Done</option></select>
+  </label>
+  <label>Sort
+    <select id="sort"><option value="name">Name</option><option value="due">Due date</option></select>
+  </label>
+  <ul id="items"></ul>
+  <script>
+    const data = [
+      { name: 'Alpha', due: '2026-11-12', done: false },
+      { name: 'Bravo', due: '2026-11-08', done: true },
+      { name: 'Charlie', due: '2026-11-15', done: false },
+    ];
+    const filter = document.getElementById('filter');
+    const sort = document.getElementById('sort');
+    const due = document.getElementById('due');
+    const items = document.getElementById('items');
+    function render() {
+      const shown = data.filter((item) => filter.value === 'all' || (filter.value === 'done') === item.done);
+      shown.sort((a, b) => a[sort.value].localeCompare(b[sort.value]));
+      items.replaceChildren(...shown.map((item) => {
+        const li = document.createElement('li');
+        li.textContent = `${item.name} — ${item.due} — ${item.done ? 'Done' : 'Open'}`;
+        return li;
+      }));
+      document.getElementById('due-status').textContent = `Due ${due.value}`;
+    }
+    for (const control of [filter, sort, due]) control.addEventListener('change', render);
+    render();
+  </script>
+</body>
+</html>

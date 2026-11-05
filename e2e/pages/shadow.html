@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Shadow DOM</title></head>
+<body>
+  <h1>Shadow DOM</h1>
+  <div id="open-host"></div>
+  <div id="closed-host"></div>
+  <p id="status">idle</p>
+  <script>
+    const open = document.getElementById('open-host').attachShadow({ mode: 'open' });
+    open.innerHTML = '<button id="save" aria-label="Shadow Save">S</button><input placeholder="shadow input">';
+    open.getElementById('save').addEventListener('click', () => (document.getElementById('status').textContent = 'saved'));
+    const closed = document.getElementById('closed-host').attachShadow({ mode: 'closed' });
+    closed.innerHTML = '<button>Closed shadow btn</button>';
+  </script>
+</body>
+</html>

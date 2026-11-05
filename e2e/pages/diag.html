@@ -1,0 +1,13 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Diagnostics</title></head>
+<body>
+  <h1>Diagnostics</h1>
+  <button id="boom" onclick="setTimeout(() => { throw new Error('boom from button'); })">Throw</button>
+  <script>
+    console.log('probe-log', 1);
+    console.warn('careful');
+    fetch('/api/items').then((r) => r.json()).then((j) => console.log('items', j.items.length));
+  </script>
+</body>
+</html>

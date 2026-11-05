@@ -1,0 +1,14 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Frames</title></head>
+<body>
+  <h1>Frames</h1>
+  <button>Top button</button>
+  <iframe title="Same origin" srcdoc="<button>Iframe btn</button><input placeholder='inframe'>" style="width:300px;height:80px"></iframe>
+  <iframe id="cross" title="Cross origin" style="width:400px;height:120px"></iframe>
+  <script>
+    // localhost and 127.0.0.1 are different sites: this frame is cross-origin (out of process).
+    document.getElementById('cross').src = 'http://localhost:' + location.port + '/inner.html';
+  </script>
+</body>
+</html>

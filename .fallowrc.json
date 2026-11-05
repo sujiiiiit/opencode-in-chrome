@@ -4,7 +4,9 @@
     "components/**/*.{ts,tsx}",
     "composables/**/*.{ts,tsx}",
     "hooks/**/*.{ts,tsx}",
-    "utils/**/*.{ts,tsx}"
+    "utils/**/*.{ts,tsx}",
+    "tests/**/*.{ts,tsx}",
+    "e2e/**/*.ts"
   ],
   "ignorePatterns": [".output/**", ".wxt/**", "temp/**", ".claude/**", ".agents/**", "openspec/**", ".code-review-graph/**"],
   "ignoreDependencies": ["vite", "web-ext", "typescript", "fallow", "@fission-ai/openspec"]

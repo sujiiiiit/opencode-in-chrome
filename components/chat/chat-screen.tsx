@@ -1,12 +1,13 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode, type RefObject } from 'react';
 import { browser } from 'wxt/browser';
 import { Button } from '@/components/ui/button';
 import { Icon } from '@/components/ui/icon';
-import { Tabs, TabsContent, TabsContentWrapper } from '@/components/ui/tabs';
-import { pendingMessages } from '@/lib/opencode/chat';
+import { Tabs, TabsContent, TabsContentWrapper, useTabPanelActive } from '@/components/ui/tabs';
+import { ChatSession, INITIAL_CHAT_STATE, pendingMessages, type ChatState } from '@/lib/opencode/chat';
 import type { Turn } from '@/lib/opencode/timeline';
 import { PINNED_SERVER_VERSION } from '@/lib/opencode/client';
 import type { Connection } from '@/lib/opencode/connection';
+import type { EventHub } from '@/lib/opencode/events';
 import type { Selection } from '@/lib/opencode/models/selection';
 import { displayTitle, isUntitled } from '@/lib/opencode/sessions';
 import { ShellOutputProvider, useLingering } from './flow/live';
@@ -23,9 +24,11 @@ import { Notice } from './notice';
 import { DropOverlay } from './drop-overlay';
 import { useFileDrop } from './use-file-drop';
 import { AttachMenu } from './prompt-box/attach-menu';
+import { BrowserControls } from './browser-controls';
 import { AttachmentStrip } from './prompt-box/attachment-strip';
 import { PromptBox, type PromptBoxHandle } from './prompt-box/prompt-box';
 import { useChatSession, useComposer, useEventHub, useHistory, useLatest } from './use-chat';
+import { SubagentTabs } from './subagent-tabs';
 
 type Props = {
   connection: Connection;
@@ -110,6 +113,8 @@ type ChatPaneProps = {
   connection: Connection;
   session: ReturnType<typeof useChatSession>;
   models: Models;
+  hub: EventHub | null;
+  onUnauthorized: () => void;
   /** The chat is the view on screen (not History): files can be dropped on it. */
   active: boolean;
   onHistory: () => void;
@@ -204,21 +209,29 @@ type ChatComposerProps = {
   /** A question the agent asks, shown in the box in place of the editor. */
   question: ReactNode;
   onOpenPicker: () => void;
+  /** The open chat's session, for sharing a tab with it (undefined before its first message). */
+  sessionID: string | undefined;
 };
 
 /**
  * The prompt box with its attach menu, attached images and model chips, and the drop zone that
  * covers the whole pane (the overlay is placed against the pane, its nearest positioned box).
  */
-function ChatComposer({ box, composer, models, active, question, onOpenPicker }: ChatComposerProps) {
+function ChatComposer({ box, composer, models, active, question, onOpenPicker, sessionID }: ChatComposerProps) {
   // History, sliding over the chat, takes no drops.
-  const dragging = useFileDrop(composer.addFiles, active);
+  const panelActive = useTabPanelActive();
+  const dragging = useFileDrop(composer.addFiles, active && panelActive);
   return (
     <>
       <DropOverlay visible={dragging} />
       <PromptBox
         ref={box}
-        controls={<AttachMenu onFiles={composer.addFiles} />}
+        controls={
+          <>
+            <AttachMenu onFiles={composer.addFiles} />
+            <BrowserControls sessionID={sessionID} />
+          </>
+        }
         footer={models.store && <ComposerFooter models={models} onOpenPicker={onOpenPicker} />}
         attachments={<AttachmentStrip images={composer.images} onRemove={composer.removeImage} />}
         takeover={question}
@@ -237,7 +250,7 @@ function ChatComposer({ box, composer, models, active, question, onOpenPicker }:
 }
 
 /** The conversation and the composer. */
-function ChatPane({ connection, session, models, active, onHistory, onNewChat }: ChatPaneProps) {
+function ChatPane({ connection, session, models, hub, onUnauthorized, active, onHistory, onNewChat }: ChatPaneProps) {
   const { chat, state, activeID } = session;
   const box = useRef<PromptBoxHandle>(null);
   const composer = useComposer({
@@ -249,46 +262,80 @@ function ChatPane({ connection, session, models, active, onHistory, onNewChat }:
   const store = models.store;
   const picker = usePicker(models, box);
   const title = useChatTitle(activeID, state.title);
-  // Stable props, so typing in the composer (which re-renders this pane) skips the message list.
-  const { timeline, local } = state;
-  const pending = useMemo(() => pendingMessages({ timeline, local }, chat?.previewFiles), [timeline, local, chat]);
-  const loadEarlier = useCallback(() => void chat?.loadEarlier(), [chat]);
+  const transcript = (
+    <>
+      <TranscriptList chat={chat} state={state} models={models} />
+      <div className="mx-auto w-full max-w-chat">
+        <PaneNotice session={session} models={models} />
+        <ChatComposer box={box} composer={composer} models={models} active={active} question={paneQuestion(session)} onOpenPicker={picker.open} sessionID={activeID ?? undefined} />
+      </div>
+      {store && (
+        <ModelPicker open={picker.picking} onOpenChange={picker.onOpenChange} store={store} state={models.state}
+          onManage={() => { picker.onOpenChange(false); openSettings(); }} />
+      )}
+    </>
+  );
 
   return (
     <div className="relative flex h-full min-h-0 flex-col">
       <ChatHeader title={title} activeID={activeID} onHistory={onHistory} onNewChat={onNewChat} />
       <ConnectionBanners connection={connection} />
-      {/* Shell tools in the replies read their live output through the open chat. */}
-      <ShellOutputProvider value={chat?.shellOutput ?? null}>
-        {/* Answer footers name the model each reply ran on. */}
-        <ModelCatalogProvider catalog={models.state.catalog ?? models.state.cached}>
-          <MessageList
-            turns={timeline?.turns ?? NO_TURNS}
-            switches={timeline?.switches}
-            pending={pending}
-            previewFiles={chat?.previewFiles}
-            hasEarlier={state.hasEarlier}
-            loadingEarlier={state.loadingEarlier}
-            onLoadEarlier={loadEarlier}
-          />
-        </ModelCatalogProvider>
-      </ShellOutputProvider>
-      <div className="mx-auto w-full max-w-chat">
-        <PaneNotice session={session} models={models} />
-        <ChatComposer box={box} composer={composer} models={models} active={active} question={paneQuestion(session)} onOpenPicker={picker.open} />
-      </div>
-      {store && (
-        <ModelPicker
-          open={picker.picking}
-          onOpenChange={picker.onOpenChange}
-          store={store}
-          state={models.state}
-          onManage={() => {
-            picker.onOpenChange(false);
-            openSettings();
-          }}
-        />
-      )}
+      <SessionBranch activeID={activeID} hub={hub} connection={connection} models={models} onUnauthorized={onUnauthorized}>
+        {transcript}
+      </SessionBranch>
+    </div>
+  );
+}
+
+const noSubscribe = () => () => undefined;
+
+function useTranscript(chat: ChatSession | null, state: typeof INITIAL_CHAT_STATE) {
+  const { timeline, local } = state;
+  const pending = useMemo(() => pendingMessages({ timeline, local }, chat?.previewFiles), [timeline, local, chat]);
+  const loadEarlier = useCallback(() => void chat?.loadEarlier(), [chat]);
+  return { timeline, pending, loadEarlier };
+}
+
+function TranscriptList({ chat, state, models }: { chat: ChatSession | null; state: ChatState; models: Models }) {
+  const { timeline, pending, loadEarlier } = useTranscript(chat, state);
+  return (
+    <ShellOutputProvider value={chat?.shellOutput ?? null}>
+      <ModelCatalogProvider catalog={models.state.catalog ?? models.state.cached}>
+        <MessageList turns={timeline?.turns ?? NO_TURNS} switches={timeline?.switches} pending={pending}
+          previewFiles={chat?.previewFiles} hasEarlier={state.hasEarlier} loadingEarlier={state.loadingEarlier} onLoadEarlier={loadEarlier} />
+      </ModelCatalogProvider>
+    </ShellOutputProvider>
+  );
+}
+
+function SessionBranch({ activeID, hub, connection, models, onUnauthorized, children }: {
+  activeID: string | null; hub: EventHub | null; connection: Connection; models: Models; onUnauthorized: () => void;
+  children: ReactNode;
+}) {
+  if (!activeID || !hub) return children;
+  return (
+    <SubagentTabs rootID={activeID}
+      renderChild={(id) => <SubagentTranscript key={id} sessionID={id} connection={connection} hub={hub} models={models} onUnauthorized={onUnauthorized} />}>
+      <div className="flex h-full min-h-0 flex-col">{children}</div>
+    </SubagentTabs>
+  );
+}
+
+function SubagentTranscript({ sessionID, connection, hub, models, onUnauthorized }: {
+  sessionID: string; connection: Connection; hub: EventHub; models: Models; onUnauthorized: () => void;
+}) {
+  const [chat, setChat] = useState<ChatSession | null>(null);
+  useEffect(() => {
+    const child = new ChatSession({ connection, events: hub, sessionID, onUnauthorized });
+    setChat(child);
+    void child.load();
+    return () => child.dispose();
+  }, [connection, hub, sessionID, onUnauthorized]);
+  const state = useSyncExternalStore(chat?.subscribe ?? noSubscribe, chat?.getState ?? (() => INITIAL_CHAT_STATE));
+  return (
+    <div className="flex h-full min-h-0 flex-col">
+      <TranscriptList chat={chat} state={state} models={models} />
+      {state.error && <Notice text={state.error} />}
     </div>
   );
 }
@@ -358,6 +405,8 @@ export function ChatScreen({ connection, onUnauthorized }: Props) {
             connection={connection}
             session={session}
             models={models}
+            hub={hub}
+            onUnauthorized={onUnauthorized}
             active={view === 'chat'}
             onHistory={() => setView('history')}
             onNewChat={startNewChat}

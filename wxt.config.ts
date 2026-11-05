@@ -1,3 +1,4 @@
+import { resolve } from 'node:path';
 import tailwindcss from '@tailwindcss/vite';
 import { defineConfig } from 'wxt';
 
@@ -12,7 +13,10 @@ export default defineConfig({
     chromiumArgs: [
       `--remote-debugging-port=${process.env.WXT_CDP_PORT ?? 9222}`,
     ],
-    chromiumProfile: '.wxt/chrome-profile',
+    // Must be absolute: on Windows, Chrome ignores a relative --user-data-dir,
+    // falls back to the default profile, hands off to an already-open Chrome
+    // and exits, which surfaces as "CDP connection closed before response".
+    chromiumProfile: resolve('.wxt/chrome-profile'),
     keepProfileChanges: true,
   },
   vite: () => ({
@@ -24,11 +28,33 @@ export default defineConfig({
     // No popup is built for Chromium/Firefox, so declare the toolbar action
     // explicitly. Clicking it opens the side panel (see entrypoints/background.ts).
     action: { default_title: 'Opencode' },
-    // Loopback only: the extension talks to the local opencode server and
-    // nothing else. Non-loopback servers need optional_host_permissions later.
     // cookies: adopt the web UI's loopback session cookie after the user opens
     // an `opencode pair` link (see lib/opencode/browser-session.ts).
-    permissions: ['storage', 'sidePanel', 'cookies'],
-    host_permissions: ['http://127.0.0.1/*', 'http://localhost/*'],
+    // The rest drive the browser agent (lib/browser): debugger for trusted input,
+    // screenshots, console and network; tabs/tabGroups to scope agent tabs;
+    // scripting + webNavigation for page snapshots in every frame; alarms keep the
+    // tool bridge alive; downloads saves GIF recordings (encoded in the worker).
+    // Chrome does not allow `debugger` as an optional permission, so it is required.
+    // declarativeNetRequestWithHostAccess removes the extension's Origin header on its own
+    // client-MCP requests to the paired server (lib/browser/origin-rule.ts); with
+    // <all_urls> already granted it adds no install warning.
+    permissions: [
+      'storage',
+      'sidePanel',
+      'cookies',
+      'debugger',
+      'tabs',
+      'tabGroups',
+      'scripting',
+      'webNavigation',
+      'alarms',
+      'downloads',
+      'declarativeNetRequestWithHostAccess',
+    ],
+    // Pages in any site are scripted for the browser agent; the opencode server
+    // itself stays loopback-only (lib/opencode/link.ts).
+    host_permissions: ['<all_urls>'],
+    // Flat CDP child sessions (cross-origin iframes) need Chrome 125.
+    minimum_chrome_version: '125',
   },
 });

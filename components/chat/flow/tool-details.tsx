@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ComponentType } from 'react';
 import { CopyButton } from '@/components/ui/copy-button';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { browserImages, isBrowserPart } from '@/lib/opencode/browser-steps';
 import type { ReplyToolPart } from '@/lib/opencode/reply';
 import { followShellOutput, plainTerminalText } from '@/lib/opencode/shell-output';
 import {
@@ -140,6 +141,25 @@ function GenericDetails({ part, live }: DetailProps) {
   );
 }
 
+/** Browser steps: what the page tools returned, with any screenshots as thumbnails. */
+function BrowserDetails({ part, live }: DetailProps) {
+  const images = browserImages(part);
+  return (
+    <div className="flex flex-col gap-2">
+      {images.length > 0 && (
+        <div className="flex flex-wrap gap-2">
+          {images.map((image, i) => (
+            <a key={i} href={image.uri} target="_blank" rel="noreferrer" className="block overflow-hidden rounded-lg border border-border-secondary-transparent">
+              <img src={image.uri} alt={`Screenshot ${i + 1}`} className="max-h-40 w-auto" data-browser-screenshot />
+            </a>
+          ))}
+        </div>
+      )}
+      <OutputDetails part={part} live={live} />
+    </div>
+  );
+}
+
 /** Each tool's details; a tool missing here uses GenericDetails, one mapped to null has none. */
 const DETAILS: Record<string, ComponentType<DetailProps> | null> = {
   shell: ShellDetails,
@@ -158,6 +178,7 @@ const DETAILS: Record<string, ComponentType<DetailProps> | null> = {
 
 /** The component that shows a tool's details, or null when the row says it all. */
 export function toolDetails(part: ReplyToolPart): ComponentType<DetailProps> | null {
+  if (isBrowserPart(part)) return toolOutput(part) || browserImages(part).length ? BrowserDetails : null;
   const details = Object.hasOwn(DETAILS, part.name) ? (DETAILS[part.name] ?? null) : GenericDetails;
   if (details === OutputDetails && !toolOutput(part)) return null;
   return details;

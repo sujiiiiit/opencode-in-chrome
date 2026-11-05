@@ -1,4 +1,4 @@
-import { memo, useState } from 'react';
+import { memo, useState, type ReactNode } from 'react';
 import { cn } from 'cn';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
@@ -7,6 +7,7 @@ import type { ReplyToolPart } from '@/lib/opencode/reply';
 import { shellExit, toolPending, toolResult, toolStopped, toolSubject, toolTitle } from '@/lib/opencode/tool-info';
 import { Shimmer } from './live';
 import { toolDetails } from './tool-details';
+import { useSubagentNavigation } from '../subagent-tabs';
 
 /**
  * What the row reports after its title: a call the interrupt cut off (not a failure, though the
@@ -24,6 +25,25 @@ function outcome(part: ReplyToolPart, live: boolean): { text: string; failed: bo
 
 type Props = { part: ReplyToolPart; live: boolean };
 
+function agentSessionID(part: ReplyToolPart): string | undefined {
+  if (part.name !== 'task' && part.name !== 'subagent') return undefined;
+  const value = part.metadata.sessionID ?? part.metadata.sessionId;
+  return typeof value === 'string' && value ? value : undefined;
+}
+
+function AgentLink({ part, header, result, sessionID, title, navigate }: {
+  part: ReplyToolPart; header: ReactNode; result: ReturnType<typeof outcome>;
+  sessionID: string; title: string; navigate: (id: string, title: string) => void;
+}) {
+  return (
+    <Button variant="quiet" size="step" data-tool={part.name} data-status={part.status}
+      className="hover:bg-transparent" onClick={() => navigate(sessionID, title)}>
+      {header}
+      <Icon name="arrow-right" className={cn('shrink-0 text-text-tertiary', !result && 'ml-auto')} />
+    </Button>
+  );
+}
+
 /**
  * One tool call: a row naming what it does ("Running npm test", then "Ran npm test") that opens
  * onto its details (the shell output, the diff, the result) when the reader chooses.
@@ -34,6 +54,8 @@ export const ToolRow = memo(function ToolRow({ part, live }: Props) {
   const Details = toolDetails(part);
   const subject = toolSubject(part);
   const result = outcome(part, live);
+  const navigate = useSubagentNavigation();
+  const childID = agentSessionID(part);
 
   const header = (
     <>
@@ -56,9 +78,11 @@ export const ToolRow = memo(function ToolRow({ part, live }: Props) {
   const chevron = (
     <Icon
       name="chevron-down"
-      className={cn('shrink-0 text-text-tertiary transition-[rotate] duration-200', !open && '-rotate-90', !result && 'ml-auto')}
+      className={cn('shrink-0 text-text-tertiary transition-transform duration-200', !open && '-rotate-90', !result && 'ml-auto')}
     />
   );
+
+  if (navigate && childID) return <AgentLink part={part} header={header} result={result} sessionID={childID} title={subject ?? 'Subagent'} navigate={navigate} />;
 
   // Nothing to open (a file read): the same row, not a button.
   if (!Details && !part.error) {

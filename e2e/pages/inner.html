@@ -1,0 +1,10 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Inner</title></head>
+<body>
+  <label>Card number <input id="card" name="card"></label>
+  <!-- Inline handler: it exists as soon as the button does (no race with a later script). -->
+  <button id="pay" onclick="document.getElementById('paid').textContent = 'paid'">Pay now</button>
+  <p id="paid">unpaid</p>
+</body>
+</html>

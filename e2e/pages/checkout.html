@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Checkout</title></head>
+<body>
+  <h1>Checkout</h1>
+  <p>Blue kettle - <strong>$31.50</strong></p>
+  <form method="post" action="/submit/pay">
+    <label>Name on card <input name="name" autocomplete="cc-name"></label>
+    <label>Card number <input name="card" autocomplete="cc-number" inputmode="numeric"></label>
+    <label>Expiry <input name="exp" autocomplete="cc-exp" placeholder="MM/YY"></label>
+    <label>CVC <input name="cvc" autocomplete="cc-csc"></label>
+    <button type="submit">Pay $31.50</button>
+  </form>
+</body>
+</html>

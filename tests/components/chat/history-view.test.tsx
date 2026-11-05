@@ -52,7 +52,7 @@ describe('ChatScreen: resuming', () => {
     await remember(SESSION_ID);
     mount(fakeOpencode({ messages: transcript, sessions: [loginChat] }));
     expect(await screen.findByText('Check the callback URL.')).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'Fix login redirect' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Fix login redirect' })).toBeInTheDocument();
     // The page title follows in an effect after the heading renders.
     await waitFor(() => expect(document.title).toBe('Fix login redirect · Opencode'));
   });
@@ -62,7 +62,7 @@ describe('ChatScreen: resuming', () => {
     expect(document.title).toBe('Opencode');
     await user.type(screen.getByRole('textbox', { name: /message/i }), 'how do I fix the login redirect{Enter}');
     await waitFor(() => expect(fake.prompts).toHaveLength(1));
-    expect(screen.getByRole('heading', { name: 'New chat' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'New chat' })).toBeInTheDocument();
     fake.emit('session.renamed', { title: 'Fix login redirect' });
     expect(await screen.findByRole('heading', { name: 'Fix login redirect' })).toBeInTheDocument();
     // The page title follows in an effect after the heading renders.
@@ -205,7 +205,7 @@ describe('ChatScreen: history', () => {
     await user.click(await screen.findByRole('button', { name: /^delete fix login redirect$/i }));
     await user.click(await screen.findByRole('button', { name: /confirm delete fix login redirect/i }));
     await user.click(screen.getByRole('button', { name: /back to chat/i }));
-    expect(screen.getByRole('heading', { name: 'New chat' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'New chat' })).toBeInTheDocument();
     expect(screen.queryByText('Check the callback URL.')).not.toBeInTheDocument();
     expect(screen.queryByText(/that chat was deleted/i)).not.toBeInTheDocument();
   });

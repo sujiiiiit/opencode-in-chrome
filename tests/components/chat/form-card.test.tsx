@@ -239,12 +239,45 @@ describe('FormCard: other forms', () => {
       { key: 'count', type: 'integer', title: 'Count' },
       { key: 'ok', type: 'boolean', title: 'Sure?' },
     ]);
-    await user.type(current().getByRole('textbox', { name: 'Name' }), 'Ada');
+    const name = current().getByRole('textbox', { name: 'Name' });
+    expect(name).toHaveAttribute('placeholder', 'Describe yuor answer');
+    await user.type(name, 'Ada');
     await user.click(screen.getByRole('button', { name: 'Next' }));
     await user.type(current().getByRole('spinbutton', { name: 'Count' }), '3');
     await user.click(screen.getByRole('button', { name: 'Next' }));
     await user.click(current().getByRole('radio', { name: 'Yes' }));
     await user.click(screen.getByRole('button', { name: 'Submit' }));
     expect(onAnswer).toHaveBeenCalledWith('frm_1', { name: 'Ada', count: 3, ok: true });
+  });
+});
+
+describe('FormCard: browser approvals', () => {
+  // Built by the real helper so the card is tested against the forms the extension creates.
+  const approval = async (kind: 'site' | 'action') => {
+    const { approvalForm } = await import('@/lib/browser/approvals');
+    const spec = approvalForm({ sessionID: 'ses_1', kind, site: 'shop.test', tool: 'computer', summary: 'Places the order', tier: 'consequential' });
+    return parseForm({ id: 'frm_b', sessionID: 'ses_1', ...spec })!;
+  };
+
+  it('shows the action, the site and Allow / Deny, and answers with the choice', async () => {
+    const onAnswer = vi.fn().mockResolvedValue(true);
+    const user = userEvent.setup();
+    render(<FormCard form={await approval('action')} onAnswer={onAnswer} onCancel={vi.fn()} />);
+    expect(current().getByRole('heading', { name: 'Allow this action on shop.test?' })).toBeInTheDocument();
+    expect(current().getByText('Places the order')).toBeInTheDocument();
+    expect(current().getByText('shop.test')).toBeInTheDocument();
+    expect(current().getAllByRole('radio')).toHaveLength(2);
+    expect(current().getByText('Allow')).toBeInTheDocument();
+    expect(current().queryByRole('textbox', { name: /your own answer/i })).toBeNull();
+    await user.click(current().getByText('Deny'));
+    await user.click(screen.getByRole('button', { name: 'Submit' }));
+    expect(onAnswer).toHaveBeenCalledWith('frm_b', { choice: 'deny' });
+  });
+
+  it('offers allow for this chat, always and deny for a new site', async () => {
+    render(<FormCard form={await approval('site')} onAnswer={vi.fn()} onCancel={vi.fn()} />);
+    expect(current().getByRole('heading', { name: 'Let the agent use shop.test?' })).toBeInTheDocument();
+    expect(current().getByText(/the agent wants to read and act on this site/)).toBeInTheDocument();
+    expect(current().getByText('Always allow shop.test')).toBeInTheDocument();
   });
 });

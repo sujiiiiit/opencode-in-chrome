@@ -92,6 +92,10 @@ export type ChatSessionOptions = {
   sessionID?: string;
   /** The first send created the session (with `selection`, when the send named one). */
   onCreated?: (sessionID: string, selection?: Selection) => void;
+  /** Runs after the session is created and before the first prompt joins it (the browsing guide). Must not throw. */
+  prepare?: (client: OpenCodeClient, sessionID: string) => Promise<unknown>;
+  /** Runs before every prompt so an enabled browser agent cannot answer without its tools. */
+  beforePrompt?: () => Promise<void>;
   /** The attached session no longer exists (deleted elsewhere). */
   onMissing?: () => void;
   onUnauthorized?: () => void;
@@ -524,6 +528,7 @@ export class ChatSession extends Store<ChatState> {
       { signal: this.signal },
     );
     this.adoptSession(session, { agent: selection?.agent, model: modelOf(model) });
+    await this.options.prepare?.(this.client, session.id).catch(() => undefined);
     if (selection) this.switched = selectionKey({ ...selection.model, variant: selection.variant });
     this.options.onCreated?.(session.id, selection);
     return { sessionID: session.id, created: true };
@@ -586,6 +591,7 @@ export class ChatSession extends Store<ChatState> {
     try {
       const { sessionID, created } = await this.ensureSession(selection);
       if (selection && !created) await this.applySelection(sessionID, selection);
+      await this.options.beforePrompt?.();
       const ack: unknown = await this.client.session.prompt(
         promptBody(sessionID, local, files) as never,
         { signal: this.signal },

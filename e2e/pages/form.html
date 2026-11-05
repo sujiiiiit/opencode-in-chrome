@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Pizza order</title></head>
+<body>
+  <h1>Order a pizza</h1>
+  <form id="order" action="/submitted.html" method="get">
+    <p><label>Customer name: <input name="custname"></label></p>
+    <p><label>Telephone: <input type="tel" name="custtel"></label></p>
+    <p><label>Password: <input type="password" name="pw"></label></p>
+    <fieldset><legend>Pizza Size</legend>
+      <label><input type="radio" name="size" value="small"> Small</label>
+      <label><input type="radio" name="size" value="medium"> Medium</label>
+      <label><input type="radio" name="size" value="large"> Large</label>
+    </fieldset>
+    <fieldset><legend>Toppings</legend>
+      <label><input type="checkbox" name="topping" value="cheese"> Extra Cheese</label>
+      <label><input type="checkbox" name="topping" value="onion" disabled> Onion</label>
+    </fieldset>
+    <p><label>Crust <select name="crust"><option value="thin">Thin</option><option value="deep" selected>Deep dish</option></select></label></p>
+    <p><label>Delivery instructions: <textarea name="comments"></textarea></label></p>
+    <p><button type="submit">Submit order</button> <button type="button" id="trusted">Trusted only</button></p>
+  </form>
+  <p id="status">idle</p>
+  <script>
+    document.getElementById('trusted').addEventListener('click', (e) => {
+      document.getElementById('status').textContent = e.isTrusted ? 'trusted click' : 'synthetic click';
+    });
+  </script>
+</body>
+</html>

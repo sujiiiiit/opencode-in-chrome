@@ -132,6 +132,35 @@ describe('ChatSession.submit', () => {
     expect(fake.prompts).toEqual([]);
   });
 
+  it('runs prepare (the browsing guide) on the new session before the first prompt, and survives its failure', async () => {
+    const { fake, chat } = setup({}, {
+      prepare: async (_client, sessionID) => {
+        fake.log.push(`prepare:${sessionID}`);
+        throw new Error('instructions route missing');
+      },
+    });
+    await chat.load();
+    expect(await chat.submit('hello')).toBe(true);
+    expect(fake.log).toEqual(['create', `prepare:${SESSION_ID}`, 'prompt:steer']);
+  });
+
+  it('does not send a prompt while browser tools are unavailable, then retries on the same session', async () => {
+    let ready = false;
+    const { fake, chat } = setup({}, {
+      beforePrompt: async () => {
+        if (!ready) throw new Error('Browser tools are still connecting.');
+      },
+    });
+    await chat.load();
+    expect(await chat.submit('check this tab')).toBe(false);
+    expect(fake.prompts).toHaveLength(0);
+    expect(chat.getState().notice).toBe('Browser tools are still connecting.');
+    ready = true;
+    expect(await chat.submit('check this tab')).toBe(true);
+    expect(fake.prompts).toHaveLength(1);
+    expect(fake.log.filter((entry) => entry === 'create')).toHaveLength(1);
+  });
+
   it('creates the session with the default model, then prompts with a client-minted ID', async () => {
     const { fake, chat } = setup();
     await chat.load();

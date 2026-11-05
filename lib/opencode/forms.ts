@@ -28,6 +28,16 @@ export type FormField = {
   when: Array<{ key: string; op: 'eq' | 'neq'; value: string | number | boolean }>;
 };
 
+/** A browser-agent approval (lib/browser/approvals.ts) as the card shows it, from the form's metadata. */
+export type BrowserApproval = { approval: 'site' | 'action'; site: string; summary: string; tool: string };
+
+export function browserApprovalOf(form: PendingForm): BrowserApproval | null {
+  const m = form.metadata;
+  if (m.kind !== 'browser-approval') return null;
+  const text = (v: unknown) => (typeof v === 'string' ? v : '');
+  return { approval: m.approval === 'site' ? 'site' : 'action', site: text(m.site), summary: text(m.summary), tool: text(m.tool) };
+}
+
 export type PendingForm = {
   id: string;
   sessionID: string;

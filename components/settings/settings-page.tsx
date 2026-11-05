@@ -2,14 +2,16 @@ import { useEffect, useState } from 'react';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Icon, type IconName } from '@/components/ui/icon';
 import { loadConnection, type Connection } from '@/lib/opencode/connection';
+import { BrowserSection } from './browser-section';
 import { ModelsSection, type ModelsPreview } from './models-section';
 import { WebSearchSection } from './web-search-section';
 
-type Page = 'models' | 'web-search';
+type Page = 'models' | 'web-search' | 'browser';
 
 const PAGES: Array<{ id: Page; label: string; description: string; icon: IconName }> = [
   { id: 'models', label: 'Models', description: 'Choose which models of each provider appear in the model picker.', icon: 'sliders' },
   { id: 'web-search', label: 'Web search', description: 'Choose the search backend your chats use.', icon: 'globe' },
+  { id: 'browser', label: 'Browser', description: 'Let chats read and act in your browser, and choose what needs your OK.', icon: 'browser' },
 ];
 
 /** While developing, `?preview=loading` or `?preview=empty` shows those states of the Models page. */
@@ -65,16 +67,21 @@ export function SettingsPage() {
             <h2 className="text-xl font-semibold">{current.label}</h2>
             <p className="text-sm text-text-secondary">{current.description}</p>
           </header>
-          {connection === undefined ? null : connection === null ? (
-            <p className="text-sm text-text-secondary">Pair the extension from its side panel to manage these settings.</p>
-          ) : page === 'models' ? (
-            <ModelsSection connection={connection} preview={devPreview()} />
-          ) : (
-            <WebSearchSection connection={connection} />
-          )}
+          <SettingsContent page={page} connection={connection} />
         </div>
       </main>
     </div>
     </ScrollArea>
   );
+}
+
+function SettingsContent({ page, connection }: { page: Page; connection: Connection | null | undefined }) {
+  if (page === 'browser') return <BrowserSection />;
+  if (connection === undefined) return null;
+  if (connection === null) return <p className="text-sm text-text-secondary">Pair the extension from its side panel to manage these settings.</p>;
+  return <ConnectedSettings page={page} connection={connection} />;
+}
+
+function ConnectedSettings({ page, connection }: { page: Page; connection: Connection }) {
+  return page === 'models' ? <ModelsSection connection={connection} preview={devPreview()} /> : <WebSearchSection connection={connection} />;
 }

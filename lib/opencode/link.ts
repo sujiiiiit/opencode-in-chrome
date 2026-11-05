@@ -1,5 +1,6 @@
 // Parses what the user pastes from `opencode pair` into { baseUrl, code }.
-// Slice 1 only accepts loopback servers (matches host_permissions).
+// Slice 1 only accepts loopback servers (host access to every site exists for the
+// browser agent's page scripting, not for talking to remote opencode servers).
 
 export type ParsedPairing =
   | { ok: true; baseUrl: string; code: string }

@@ -1,0 +1,14 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Dead button</title></head>
+<body>
+  <h1>Dead button</h1>
+  <button type="button" id="dead">Does nothing</button>
+  <p id="clicks">0</p>
+  <script>
+    // Counts clicks without changing what the page shows, so a refused click is visible here.
+    let n = 0;
+    document.getElementById('dead').addEventListener('click', () => (window.deadClicks = ++n));
+  </script>
+</body>
+</html>
