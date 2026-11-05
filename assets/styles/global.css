@@ -462,6 +462,16 @@
   }
 }
 
+/* A plain fade, for content that appears all at once (the Models page's lists and states). One
+ * opacity animation on one element, with no rise and no stagger: it runs on the compositor, so a
+ * long list costs nothing extra. Reduced motion shortens it. */
+@utility animate-fade-in {
+  animation: calm-fade 220ms ease-out both;
+  @media (prefers-reduced-motion: reduce) {
+    animation-duration: 120ms;
+  }
+}
+
 /* Reveal (a reply's images, components/chat/flow/reply-image.tsx) ---------------
  * An image fades in as the words around it do: the same plain opacity fade (Streamdown's
  * sd-fadeIn, FlowToken's fadeIn at its demo's 0.6s), no blur, no rise, on the panel's calm
