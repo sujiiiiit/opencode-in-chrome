@@ -13,7 +13,7 @@ import type { Selection } from '@/lib/opencode/models/selection';
 import type { PromptBoxHandle } from './prompt-box/prompt-box';
 import { launchSendFlight } from './send-flight';
 import { useAttachedImages } from './use-attachments';
-import { ensureBrowserToolsReady, prepareBrowserSession } from '@/lib/browser/guidance';
+import { browserSessionPermissions, ensureBrowserToolsReady, prepareBrowserSession } from '@/lib/browser/guidance';
 
 const noopSubscribe = () => () => undefined;
 
@@ -83,6 +83,7 @@ function useChatStore(connection: Connection, hub: EventHub | null, target: Targ
       sessionID: target.sessionID ?? undefined,
       onCreated: (sessionID, selection) => handlers.current.onCreated(sessionID, selection),
       prepare: prepareBrowserSession,
+      sessionPermissions: browserSessionPermissions,
       beforePrompt: ensureBrowserToolsReady,
       onMissing: () => handlers.current.onMissing(),
       onUnauthorized: () => handlers.current.onUnauthorized(),

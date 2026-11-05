@@ -1,5 +1,5 @@
 // Starts a private `opencode serve` for live tests (OPENCODE_LIVE=1) and drives sessions on
-// it with the kilo/kilo-auto/free model. The free model is weak, so prompts spell out the
+// it with the Kilo Gateway Nemotron 3 Nano Omni free model. Live prompts spell out the
 // exact code-mode call to make (design D14).
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { mkdtempSync } from 'node:fs';
@@ -8,7 +8,7 @@ import path from 'node:path';
 import { OpenCode } from '@opencode/client';
 
 export const LIVE = process.env.OPENCODE_LIVE === '1';
-export const LIVE_MODEL = { providerID: 'kilo', id: 'kilo-auto/free' };
+export const LIVE_MODEL = { providerID: 'kilo', id: 'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free' };
 
 export type LiveServer = {
   baseUrl: string;
@@ -57,8 +57,8 @@ export async function startOpencodeServe(corsOrigin?: string): Promise<LiveServe
 export type LiveTurn = { text: string; toolParts: Array<{ name: string; state: Record<string, unknown> }> };
 
 /** A fresh session with the live model in `directory`. */
-export async function createSession(server: LiveServer, directory = server.directory, model = LIVE_MODEL): Promise<string> {
-  const session = (await server.client.session.create({ location: { directory }, model })) as unknown as {
+export async function createSession(server: LiveServer, directory = server.directory, model = LIVE_MODEL, permissions?: ReadonlyArray<{ action: string; resource: string; effect: 'allow' | 'deny' | 'ask' }>): Promise<string> {
+  const session = (await server.client.session.create({ location: { directory }, model, permissions })) as unknown as {
     data?: { id: string };
     id?: string;
   };

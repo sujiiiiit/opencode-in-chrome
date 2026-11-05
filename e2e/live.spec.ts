@@ -1,5 +1,5 @@
 // Live end-to-end (OPENCODE_LIVE=1): the built extension paired with a private `opencode serve`,
-// driven by normal chat turns with the kilo/kilo-auto/free model. The free model is weak, so
+// driven by normal chat turns with the Kilo Gateway Nemotron 3 Nano Omni free model. These
 // prompts spell out the code-mode calls to make; the assertions check what really happened in
 // the browser and in the session transcript.
 import { browserStepsText } from '../lib/opencode/browser-steps';
@@ -34,7 +34,7 @@ test('@live a normal chat turn opens a page in the browser, reads it and answers
   expect(execute, JSON.stringify(turn.toolParts).slice(0, 2000)).toBeDefined();
   const inner = ((execute!.state.metadata as { toolCalls?: Array<{ tool: string }> }).toolCalls ?? []).map((c) => c.tool);
   expect(inner, JSON.stringify(turn).slice(0, 5000)).toContain('browser.batch');
-  expect(turn.text).toMatch(/order a pizza/i);
+  expect(turn.text).toMatch(/pizza order|order a pizza/i);
   // The timeline reads the same parts as browser steps.
   expect(browserStepsText(asPart(execute!), true)).toBe('Ran 2 browser steps');
   // The page really is open in the session's tab group.

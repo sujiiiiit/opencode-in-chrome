@@ -4,6 +4,7 @@
 import type { BrowserContext, Page, Worker } from '@playwright/test';
 import { createSession, sessionMessages, turnOf, waitForIdle, type LiveMessage, type LiveServer } from '../../tests/live/opencode-serve';
 import type { PageServer } from '../support/page-server';
+import { CONFLICTING_BROWSER_SKILL_PERMISSIONS } from '../../lib/browser/guidance';
 import { resolveTask, type Approval, type BrowserCall, type GoalTask, type RunFacts } from './tasks';
 
 export type GoalModel = { providerID: string; id: string };
@@ -44,17 +45,17 @@ export async function runGoal(task: GoalTask, env: RunEnv): Promise<RunRecord> {
   const { server, context, pages } = env;
   const { url, goal } = resolveTask(task, pages.origin);
   pages.clearSubmissions();
-  const sessionID = await createSession(server, env.workspace, env.model);
+  const sessionID = await createSession(server, env.workspace, env.model, CONFLICTING_BROWSER_SKILL_PERMISSIONS);
   await env.hooks?.prepare?.(server, sessionID);
   const user = await context.newPage();
   await user.goto(url).catch(() => undefined);
-  await shareTab(env, sessionID, user);
+  const browserContext = await shareTab(env, sessionID, user);
   const approvals: Approval[] = [];
   const answering = answerApprovals(server, sessionID, task, approvals);
   let items: LiveMessage[] = [];
   let error: string | undefined;
   try {
-    await server.client.session.prompt({ sessionID, text: goal });
+    await server.client.session.prompt({ sessionID, text: `${browserContext}\n\nUser request: ${goal}` });
     let idles = 1;
     for (;;) {
       items = await waitForIdle(server, sessionID, idles, env.timeoutMs ?? 240_000);
@@ -64,6 +65,7 @@ export async function runGoal(task: GoalTask, env: RunEnv): Promise<RunRecord> {
   } catch (e) {
     error = String(e).slice(0, 300);
     items = await sessionMessages(server, sessionID).catch(() => items);
+    console.info('[goal transcript]', sessionID, JSON.stringify(turnOf(items)).slice(0, 6000));
   } finally {
     answering.stop();
   }
@@ -97,10 +99,10 @@ export function turnError(items: LiveMessage[]): string | undefined {
 export const isFatalRunError = (error: string | undefined) => !!error && /^provider\.(quota|auth)|Unauthorized/i.test(error);
 
 /** Shares the user's start tab into the session from an extension page (the side panel's share control). */
-async function shareTab(env: RunEnv, sessionID: string, user: Page): Promise<void> {
+async function shareTab(env: RunEnv, sessionID: string, user: Page): Promise<string> {
   const href = user.url();
   const tabId = await env.sw.evaluate(async (u) => (await chrome.tabs.query({})).find((t: { url?: string }) => t.url === u)?.id, href);
-  if (tabId === undefined) return;
+  if (tabId === undefined) throw new Error('Could not find the starting browser tab');
   const panel = await env.context.newPage();
   try {
     await panel.goto(`chrome-extension://${env.extensionId}/sidepanel.html`);
@@ -108,6 +110,7 @@ async function shareTab(env: RunEnv, sessionID: string, user: Page): Promise<voi
   } finally {
     await panel.close();
   }
+  return `The user's current browser tab is already open in this chat: tab ${tabId}, ${JSON.stringify(await user.title())}, ${JSON.stringify(href)}. Your first tool call must be execute with code "return await tools.browser.tabs_context()". Do not call tools.browser.tabs_context as a tool name. Then read this tab before searching the web or opening another tab.`;
 }
 
 /**

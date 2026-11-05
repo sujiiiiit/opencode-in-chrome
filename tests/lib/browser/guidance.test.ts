@@ -38,13 +38,13 @@ describe('browsing guide', () => {
     expect(put).toHaveBeenCalledTimes(1);
   });
 
-  it('records a failure instead of throwing, and does not retry a failed session', async () => {
+  it('reports failure and retries when the server recovers', async () => {
     const put = vi.fn(async () => Promise.reject(new Error('404')));
     const store = memory();
     expect(await attachGuide(clientWith(put), 'ses_2', store)).toBe('failed');
-    expect(store.value).toEqual({ ses_2: 'failed' });
+    expect(store.value).toEqual({});
     expect(await attachGuide(clientWith(put), 'ses_2', store)).toBe('failed');
-    expect(put).toHaveBeenCalledTimes(1);
+    expect(put).toHaveBeenCalledTimes(2);
   });
 
   it('hashes stably and differently for different text', () => {

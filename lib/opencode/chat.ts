@@ -94,6 +94,8 @@ export type ChatSessionOptions = {
   onCreated?: (sessionID: string, selection?: Selection) => void;
   /** Runs after the session is created and before the first prompt joins it (the browsing guide). Must not throw. */
   prepare?: (client: OpenCodeClient, sessionID: string) => Promise<unknown>;
+  /** Rules for this session only; other MCPs and global skills remain available. */
+  sessionPermissions?: () => Promise<ReadonlyArray<{ action: string; resource: string; effect: 'allow' | 'deny' | 'ask' }> | undefined>;
   /** Runs before every prompt so an enabled browser agent cannot answer without its tools. */
   beforePrompt?: () => Promise<void>;
   /** The attached session no longer exists (deleted elsewhere). */
@@ -136,8 +138,8 @@ function parseAck(ack: unknown, local: LocalPrompt): PendingPrompt {
 const ackFiles = (local: LocalPrompt, payload: Record<string, unknown>) => local.files ?? parseSentFiles(payload.files);
 
 /** A steer's request: the text, plus its attachments when there are any. */
-function promptBody(sessionID: string, local: LocalPrompt, files: readonly PromptFile[] = []) {
-  const body = { sessionID, id: local.id, text: local.text, delivery: 'steer' as const };
+function promptBody(sessionID: string, local: LocalPrompt, files: readonly PromptFile[] = [], browserContext?: string) {
+  const body = { sessionID, id: local.id, text: browserContext ? `${browserContext}\n\nUser request: ${local.text}` : local.text, delivery: 'steer' as const };
   return files.length ? { ...body, files } : body;
 }
 
@@ -227,6 +229,9 @@ export class ChatSession extends Store<ChatState> {
   private switched: string | null = null;
   private directory: string | null = null;
   private sessionID: string | null;
+  private preparedSession = false;
+  private createdUnannounced = false;
+  private firstBrowserContext: string | undefined;
   /** Events that arrive while a snapshot is in flight; replayed on top of it. */
   private buffer: ServerEvent[] | null = null;
   /** Cursor to the page before the oldest loaded message. */
@@ -515,8 +520,12 @@ export class ChatSession extends Store<ChatState> {
 
   /** Creates the session on the first send, with the chosen agent and model (else the default model). */
   private async ensureSession(selection: Selection | undefined): Promise<{ sessionID: string; created: boolean }> {
-    if (this.sessionID) return { sessionID: this.sessionID, created: false };
+    if (this.sessionID) {
+      await this.prepareCurrentSession(selection);
+      return { sessionID: this.sessionID, created: false };
+    }
     const model = selection ? wireModel(selection) : await this.defaultModel(this.directory!);
+    const permissions = await this.options.sessionPermissions?.();
     // No title: opencode names an untitled session from its first message.
     const session = await this.client.session.create(
       {
@@ -524,14 +533,26 @@ export class ChatSession extends Store<ChatState> {
         ...(selection ? { agent: selection.agent } : {}),
         model,
         metadata: EXTENSION_METADATA,
+        ...(permissions?.length ? { permissions } : {}),
       },
       { signal: this.signal },
     );
     this.adoptSession(session, { agent: selection?.agent, model: modelOf(model) });
-    await this.options.prepare?.(this.client, session.id).catch(() => undefined);
+    this.createdUnannounced = true;
+    await this.prepareCurrentSession(selection);
     if (selection) this.switched = selectionKey({ ...selection.model, variant: selection.variant });
-    this.options.onCreated?.(session.id, selection);
     return { sessionID: session.id, created: true };
+  }
+
+  private async prepareCurrentSession(selection: Selection | undefined): Promise<void> {
+    if (this.preparedSession || !this.sessionID) return;
+    const context = await this.options.prepare?.(this.client, this.sessionID);
+    if (typeof context === 'string') this.firstBrowserContext = context;
+    this.preparedSession = true;
+    if (this.createdUnannounced) {
+      this.options.onCreated?.(this.sessionID, selection);
+      this.createdUnannounced = false;
+    }
   }
 
   /** The created session is the chat's now. The server records what was sent; the response may not echo it. */
@@ -593,10 +614,11 @@ export class ChatSession extends Store<ChatState> {
       if (selection && !created) await this.applySelection(sessionID, selection);
       await this.options.beforePrompt?.();
       const ack: unknown = await this.client.session.prompt(
-        promptBody(sessionID, local, files) as never,
+        promptBody(sessionID, local, files, this.firstBrowserContext) as never,
         { signal: this.signal },
       );
       this.admit(ack, local);
+      this.firstBrowserContext = undefined;
       return true;
     } catch (error) {
       if (!this.disposed && !this.unauthorized(error)) this.set({ notice: describeError(error) });

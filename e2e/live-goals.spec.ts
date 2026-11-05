@@ -1,6 +1,6 @@
 // Live goal suite (OPENCODE_LIVE=1, spec browser/task-evals): the built extension paired with
 // a private `opencode serve`; every task is a plain goal, run GOAL_RUNS times (default 3) with
-// GOAL_MODEL (default kilo/kilo-auto/free). GOAL_ONLY=id,id runs a subset; GOAL_REPORT sets
+// GOAL_MODEL (default Kilo Gateway Nemotron 3 Nano Omni free). GOAL_ONLY=id,id runs a subset; GOAL_REPORT sets
 // the report path (default research_notes/browser-agent-goal-suite.md).
 import { writeFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -13,7 +13,7 @@ import { expect, test } from './fixtures';
 import { pairExtension } from './support/live';
 
 const RUNS = Number(process.env.GOAL_RUNS ?? 3);
-const MODEL = process.env.GOAL_MODEL ?? 'kilo/kilo-auto/free';
+const MODEL = process.env.GOAL_MODEL ?? 'kilo/nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free';
 const ONLY = process.env.GOAL_ONLY?.split(',').map((s) => s.trim()).filter(Boolean);
 const REPORT = path.resolve(import.meta.dirname, '..', process.env.GOAL_REPORT ?? 'research_notes/browser-agent-goal-suite.md');
 
@@ -38,7 +38,7 @@ test('@live goal-only browsing tasks', async ({ sw, context, pages, extensionId 
   });
   // Keep one page open so closing a run's pages never closes the browser.
   const keep = await context.newPage();
-  const env = { server, workspace, context, sw, pages, extensionId, model: parseModel(MODEL), hooks: GOAL_HOOKS };
+  const env = { server, workspace, context, sw, pages, extensionId, model: parseModel(MODEL), hooks: GOAL_HOOKS, timeoutMs: Number(process.env.GOAL_TIMEOUT_MS ?? 240_000) };
   const results: TaskRuns[] = [];
   let stopped: string | undefined;
   for (const task of tasks) {

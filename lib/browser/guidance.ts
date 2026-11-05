@@ -10,14 +10,25 @@ import { isBrowserAccessEnabled } from './settings';
 /** The instruction entry key in a session. */
 export const GUIDE_KEY = 'browser';
 
+/** Hide only browser skills that route this panel's agent to a different browser bridge. */
+export const CONFLICTING_BROWSER_SKILL_PERMISSIONS = [
+  { action: 'skill', resource: 'chrome-browser', effect: 'deny' },
+  { action: 'skill', resource: 'built-in-browser', effect: 'deny' },
+] as const;
+
+export async function browserSessionPermissions() {
+  return (await isBrowserAccessEnabled()) ? CONFLICTING_BROWSER_SKILL_PERMISSIONS : undefined;
+}
+
 export const BROWSER_GUIDE = `# Working in the user's browser
 
-You can control the user's Chrome through the browser tools. In code mode call them as \`await tools.browser.<name>(args)\` inside \`execute\`; each call returns text.
+You can control the user's Chrome through the browser tools. The only callable tool name for browser work is \`execute\`. Put JavaScript such as \`return await tools.browser.tabs_context()\` in its \`code\` argument. \`tools.browser.tabs_context\` is a JavaScript API inside \`execute\`, never a tool name to call directly. Each call returns text.
 
 ## How to work
 - Work only in this session's tabs. Every result ends with a <browser-state> block: your tabs, the current one, open dialogs, tabs that changed without you, and actions you have not verified. "This page" means the current tab.
 - The web page beside the side panel joins a new chat automatically. Call tabs_context first to see it. Listing tabs does not require a separate consent question; browser tools handle site and action approvals.
 - Observe before you act on a page you have not seen or that has changed: \`read_page\` (or \`find\` for one element), then act on the refs it shows, such as [e12]. Refs from before a page changed are no longer valid.
+- For any task that clicks, types or changes a page, call \`read_page\` first because it supplies refs. \`get_page_text\` supplies text without actionable refs. Use \`computer\` or \`form_input\` on those refs; do not use \`javascript\` for ordinary page interaction or to bypass an approval.
 - Act with \`computer\` (left_click, type, key, scroll, ...) on a ref, or \`form_input\` to set a field, select, checkbox or radio. Use the page's own controls (buttons, filters, sort menus, date fields), the way a person would.
 - Read each result. An action's result shows what changed on the page (lines added with +, removed with -), a navigation or a new tab, or "No visible change". You rarely need to read the whole page again after an action whose result shows its change.
 - "No visible change" means the action may not have worked: check the page before you try again, and try another way rather than repeating the same call.
@@ -60,15 +71,14 @@ export function guideHash(text = BROWSER_GUIDE): string {
 
 type Attached = Record<string, string>;
 
-/** Per-session record of the guide hash attached, or `failed`; survives worker restarts. */
+/** Per-session record of the guide hash attached; survives worker restarts. */
 export const attachedGuides = sessionValue<Attached>('opencode.browser.guides');
 
 export type GuideStore = { get(): Promise<Attached | undefined>; set(value: Attached): Promise<void> };
 
 /**
  * Attaches the guide to a session once. Never throws: on a server without the instructions route
- * (it is experimental) it records `failed` for the session, which then relies on the short form
- * in the tool description. A failed session is not tried again.
+ * (it is experimental) it returns `failed`. A later send can retry after a connection repair.
  */
 export function attachGuide(client: OpenCodeClient, sessionID: string, store: GuideStore = attachedGuides): Promise<'attached' | 'already' | 'failed'> {
   // Concurrent first calls of one session (a batch, parallel reads) share one attach.
@@ -85,24 +95,25 @@ async function attachOnce(client: OpenCodeClient, sessionID: string, store: Guid
   const hash = guideHash();
   const done = (await store.get().catch(() => undefined)) ?? {};
   if (done[sessionID] === hash) return 'already';
-  if (done[sessionID] === 'failed') return 'failed';
   try {
     await client.experimental.session.instructions.entry.put({ sessionID, key: GUIDE_KEY, value: BROWSER_GUIDE });
     await store.set({ ...(await store.get().catch(() => undefined)), [sessionID]: hash }).catch(() => undefined);
     return 'attached';
   } catch {
-    await store.set({ ...(await store.get().catch(() => undefined)), [sessionID]: 'failed' }).catch(() => undefined);
     return 'failed';
   }
 }
 
 /** For a session the side panel creates: attach the guide when browser access is on. */
-export async function prepareBrowserSession(client: OpenCodeClient, sessionID: string): Promise<void> {
+export async function prepareBrowserSession(client: OpenCodeClient, sessionID: string): Promise<string | undefined> {
   if (!(await isBrowserAccessEnabled().catch(() => false))) return;
-  await attachGuide(client, sessionID);
+  if (await attachGuide(client, sessionID) === 'failed') {
+    throw new Error('Could not attach browser instructions to this chat. Check the opencode connection and try again.');
+  }
   const [tab] = await browser.tabs.query({ active: true, lastFocusedWindow: true });
   if (tab?.id === undefined || !/^https?:/.test(tab.url ?? '')) return;
   await browser.runtime.sendMessage({ type: 'opencode.browser.share', sessionID, tabId: tab.id, move: true });
+  return `The user's current browser tab is already open in this chat: tab ${tab.id}, ${JSON.stringify(tab.title ?? '')}, ${JSON.stringify(tab.url)}. Your first tool call must be execute with code "return await tools.browser.tabs_context()". Do not call tools.browser.tabs_context as a tool name. Then read this tab before searching the web or opening another tab.`;
 }
 
 /** Wait for tool registration before a model turn when browser access is enabled. */

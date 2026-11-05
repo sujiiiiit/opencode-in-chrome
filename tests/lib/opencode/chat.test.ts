@@ -132,16 +132,29 @@ describe('ChatSession.submit', () => {
     expect(fake.prompts).toEqual([]);
   });
 
-  it('runs prepare (the browsing guide) on the new session before the first prompt, and survives its failure', async () => {
+  it('stops before prompting when browser preparation fails, then retries the same session', async () => {
+    let ready = false;
     const { fake, chat } = setup({}, {
       prepare: async (_client, sessionID) => {
         fake.log.push(`prepare:${sessionID}`);
-        throw new Error('instructions route missing');
+        if (!ready) throw new Error('instructions route missing');
       },
     });
     await chat.load();
+    expect(await chat.submit('hello')).toBe(false);
+    expect(fake.prompts).toHaveLength(0);
+    ready = true;
     expect(await chat.submit('hello')).toBe(true);
-    expect(fake.log).toEqual(['create', `prepare:${SESSION_ID}`, 'prompt:steer']);
+    expect(fake.log).toEqual(['create', `prepare:${SESSION_ID}`, `prepare:${SESSION_ID}`, 'prompt:steer']);
+  });
+
+  it('sends the starting browser tab with the first prompt only', async () => {
+    const { fake, chat } = setup({}, { prepare: async () => 'Current tab: Kettle Corner. Use execute first.' });
+    await chat.load();
+    expect(await chat.submit('How much is the blue kettle?')).toBe(true);
+    expect(body(fake, `/api/session/${SESSION_ID}/prompt`).text).toContain('Current tab: Kettle Corner');
+    expect(await chat.submit('And the red kettle?')).toBe(true);
+    expect(fake.prompts.at(-1)?.text).toBe('And the red kettle?');
   });
 
   it('does not send a prompt while browser tools are unavailable, then retries on the same session', async () => {
