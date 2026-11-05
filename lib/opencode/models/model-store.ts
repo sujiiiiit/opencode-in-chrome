@@ -143,6 +143,8 @@ export class ModelStore extends Store<ModelState> {
   private resolvedFor: ModelState | null = null;
   private resolvedCache: Resolved | null = null;
   private reloadTimer: ReturnType<typeof setTimeout> | undefined;
+  /** The preference writes, one after another. */
+  private saving: Promise<void> = Promise.resolve();
 
   constructor(private readonly options: ModelStoreOptions) {
     super(INITIAL_MODEL_STATE);
@@ -328,10 +330,16 @@ export class ModelStore extends Store<ModelState> {
     void saveSelections(this.baseUrl, saved).catch(() => undefined);
   }
 
+  /**
+   * Applies a change to the preferences: on screen at once, and into storage, where it lasts. The
+   * same change is applied to what storage holds (one write at a time), so a change another panel
+   * saved a moment ago is kept, not overwritten. A failed save is reported, not swallowed.
+   */
   private updatePrefs(change: (prefs: ModelPreferences) => ModelPreferences): void {
-    const prefs = change(this.state.prefs);
-    this.set({ prefs });
-    void savePreferences(prefs).catch(() => undefined);
+    this.set({ prefs: change(this.state.prefs) });
+    this.saving = this.saving
+      .then(async () => savePreferences(change(await loadPreferences().catch(() => this.state.prefs))))
+      .catch(() => this.notify("Couldn't save your model choices. They will reset when the browser restarts."));
   }
 
   /**

@@ -2,7 +2,7 @@
 // catalog loads (opencode's web app borrows a catalog loaded for another location the same way).
 import { browser } from 'wxt/browser';
 import { isRecord } from '../reply';
-import type { Catalog, CatalogModel, CatalogProvider } from './catalog';
+import { readDetails, type Catalog, type CatalogModel, type CatalogProvider } from './catalog';
 
 const CATALOG_CACHE_KEY = 'opencode.modelCatalog';
 
@@ -24,6 +24,7 @@ function parseModel(value: unknown, providerID: string): CatalogModel | null {
     context: typeof value.context === 'number' ? value.context : 0,
     inputs: strings(value.inputs) as CatalogModel['inputs'],
     tools: value.tools === true,
+    details: readDetails(value.details),
   };
 }
 

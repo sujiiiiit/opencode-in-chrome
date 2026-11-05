@@ -50,8 +50,13 @@
   --viewer-control-hover: #ffffff2e; /* 18% */
   --tile-shade: #00000061; /* 38%: under a gallery's "+N", frosted */
   --tile-hover: #00000014; /* 8%: a picture that opens, under the pointer */
-  /* The drop overlay (components/chat/drop-overlay): the panel fades behind a white veil. */
-  --drop-veil: #ffffffd9; /* 85% */
+  /* The drop overlay (components/chat/drop-overlay), as ChatGPT's: the panel fades behind an
+   * 80% white veil, under fanned cards in three blues (code behind, file in the middle,
+   * picture in front). */
+  --drop-veil: #ffffffcc; /* 80% */
+  --drop-art-back: #afc1ff;
+  --drop-art-middle: #7989ff;
+  --drop-art-front: #3c46ff;
   /* Streamdown's code block and table headers (its `bg-sidebar` / `border-sidebar`). */
   --sidebar: var(--background-secondary);
   /* Terminal output in a shell tool's details. */
@@ -194,6 +199,9 @@
   --color-tile-shade: var(--tile-shade);
   --color-tile-hover: var(--tile-hover);
   --color-drop-veil: var(--drop-veil);
+  --color-drop-art-back: var(--drop-art-back);
+  --color-drop-art-middle: var(--drop-art-middle);
+  --color-drop-art-front: var(--drop-art-front);
   --color-popover: var(--popover);
   --color-popover-foreground: var(--popover-foreground);
   --color-background-primary-transparent: var(--bacPriTra);
@@ -454,6 +462,16 @@
   }
 }
 
+/* A plain fade, for content that appears all at once (the Models page's lists and states). One
+ * opacity animation on one element, with no rise and no stagger: it runs on the compositor, so a
+ * long list costs nothing extra. Reduced motion shortens it. */
+@utility animate-fade-in {
+  animation: calm-fade 220ms ease-out both;
+  @media (prefers-reduced-motion: reduce) {
+    animation-duration: 120ms;
+  }
+}
+
 /* Reveal (a reply's images, components/chat/flow/reply-image.tsx) ---------------
  * An image fades in as the words around it do: the same plain opacity fade (Streamdown's
  * sd-fadeIn, FlowToken's fadeIn at its demo's 0.6s), no blur, no rise, on the panel's calm
@@ -461,6 +479,44 @@
  * Reduced motion shows it at once. */
 @utility animate-reveal {
   animation: calm-fade 600ms var(--ease-calm) both;
+  @media (prefers-reduced-motion: reduce) {
+    animation: none;
+  }
+}
+
+/* Prompt box (components/chat/prompt-box/prompt-box.tsx) ------------------------------------
+ * The card glides to its measured content height (use-smooth-height.ts) on the panel's calm
+ * curve when images are added or removed or it clears after a send; typing snaps
+ * (data-instant). Its elevation shadow keeps Notion's quick rest/hover/focus change. The content
+ * is pinned to the bottom edge, so while the card grows the text stays still and the top edge
+ * rises over it (the composer sits at the panel's bottom); while it shrinks the top edge settles.
+ * Clipped, not scrolled: nothing inside moves or reflows during the glide. */
+[data-slot="prompt-box"] {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  overflow: clip;
+  transition:
+    height 220ms var(--ease-calm),
+    box-shadow 150ms var(--ease-standard);
+  &[data-instant] {
+    transition: box-shadow 150ms var(--ease-standard);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    transition: box-shadow 150ms var(--ease-standard);
+  }
+}
+
+/* An attached image's thumbnail: it fades in with a small settle as the box makes room. */
+@keyframes thumb-in {
+  from {
+    opacity: 0;
+    transform: scale(0.92);
+  }
+}
+
+@utility animate-thumb-in {
+  animation: thumb-in 260ms var(--ease-calm) both;
   @media (prefers-reduced-motion: reduce) {
     animation: none;
   }
@@ -865,7 +921,7 @@ body {
 }
 
 .morph[data-ready] {
-  transition: width 320ms var(--ease-calm);
+  transition: width 400ms var(--ease-calm);
 }
 
 .morph-measure {
@@ -894,38 +950,57 @@ body {
 
 /* A swap (morph-text.tsx) fades only the words that change: a mask keeps the shared words
  * (left of --morph-kept) opaque and takes the rest to --morph-tail. One text at a time, never
- * two overlaid: out to nothing, swap, back in. */
+ * two overlaid: out to nothing, swap, back in. When no word is shared (data-whole) the line
+ * also blurs and drifts up on the way out and settles from below on the way in; a pure opacity
+ * dip reads as a blink, the blur hides the instant the words change. The out fade is a
+ * transition, not keyframes, so a swap cancelled midway (the label came back) eases back. The
+ * mask stays on at rest (fully opaque then) so it never drops mid-way through that ease. */
 @property --morph-tail {
   syntax: "<number>";
   inherits: false;
   initial-value: 1;
 }
 
-.morph-out,
-.morph-in {
+.morph-text {
+  --morph-blur: 3px;
+  --morph-drift: 0.14em;
   mask-image: linear-gradient(
     to right,
     #000 var(--morph-kept, 0px),
     rgb(0 0 0 / var(--morph-tail)) var(--morph-kept, 0px)
   );
+  transition:
+    --morph-tail 160ms cubic-bezier(0.4, 0, 1, 1),
+    filter 160ms cubic-bezier(0.4, 0, 1, 1),
+    translate 160ms cubic-bezier(0.4, 0, 1, 1);
 }
 
 .morph-out {
-  animation: morph-tail-out 120ms ease-in both;
+  --morph-tail: 0;
+}
+
+.morph-out[data-whole] {
+  filter: blur(var(--morph-blur));
+  translate: 0 calc(-1 * var(--morph-drift));
 }
 
 .morph-in {
-  animation: morph-tail-in 200ms ease-out both;
+  transition: none;
+  animation: morph-tail-in 240ms var(--ease-calm) both;
 }
 
-@keyframes morph-tail-out {
-  from { --morph-tail: 1; }
-  to { --morph-tail: 0; }
+.morph-in[data-whole] {
+  animation-name: morph-whole-in;
 }
 
 @keyframes morph-tail-in {
   from { --morph-tail: 0; }
   to { --morph-tail: 1; }
+}
+
+@keyframes morph-whole-in {
+  from { --morph-tail: 0; filter: blur(var(--morph-blur)); translate: 0 var(--morph-drift); }
+  to { --morph-tail: 1; filter: blur(0); translate: 0 0; }
 }
 
 /* Marquee title (components/chat/marquee-title.tsx): a title that does not fit fades out on the
@@ -995,7 +1070,7 @@ body {
 
 @media (prefers-reduced-motion: reduce) {
   .morph[data-ready] { transition: none; }
-  .morph-out, .morph-in { animation: none; mask-image: none; }
+  .morph-text, .morph-out, .morph-in { transition: none; animation: none; mask-image: none; filter: none; translate: none; }
 }
 
 /* Collapsible panels (components/ui/collapsible.tsx) grow and shrink to their measured

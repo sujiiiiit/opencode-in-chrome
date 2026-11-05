@@ -1,37 +1,80 @@
-import type { ReactNode } from 'react';
-import { ThinkingStatus } from '@/components/loader-demo/thinking-status';
+import { useEffect, useState } from 'react';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import { Icon, type IconName } from '@/components/ui/icon';
+import { loadConnection, type Connection } from '@/lib/opencode/connection';
+import { ModelsSection, type ModelsPreview } from './models-section';
+import { WebSearchSection } from './web-search-section';
+
+type Page = 'models' | 'web-search';
+
+const PAGES: Array<{ id: Page; label: string; description: string; icon: IconName }> = [
+  { id: 'models', label: 'Models', description: 'Choose which models of each provider appear in the model picker.', icon: 'sliders' },
+  { id: 'web-search', label: 'Web search', description: 'Choose the search backend your chats use.', icon: 'globe' },
+];
+
+/** While developing, `?preview=loading` or `?preview=empty` shows those states of the Models page. */
+function devPreview(): ModelsPreview | undefined {
+  if (!import.meta.env.DEV) return undefined;
+  const value = new URLSearchParams(window.location.search).get('preview');
+  return value === 'loading' || value === 'empty' ? value : undefined;
+}
 
 export function SettingsPage() {
-  return (
-    <main className="mx-auto max-w-2xl space-y-10 px-6 py-12 text-text-primary">
-      <header className="space-y-2">
-        <h1 className="text-xl font-semibold">Settings</h1>
-        <p className="text-sm text-text-secondary">Opencode extension preferences.</p>
-      </header>
+  const [page, setPage] = useState<Page>('models');
+  const [connection, setConnection] = useState<Connection | null | undefined>(undefined);
 
-      <Section title="Components">
-        <Card label="Thinking status">
-          <ThinkingStatus />
-        </Card>
-      </Section>
-    </main>
-  );
-}
+  useEffect(() => {
+    void loadConnection().then(setConnection, () => setConnection(null));
+  }, []);
 
-function Section({ title, children }: { title: string; children: ReactNode }) {
-  return (
-    <section className="space-y-4">
-      <h2 className="text-sm font-medium text-text-secondary">{title}</h2>
-      {children}
-    </section>
-  );
-}
+  // The ScrollArea below is the page's only scroller. The model card floats in a layer on <body>;
+  // when it glides near the window's edge it can stick out and give the document its own native
+  // scrollbar beside ours, so the document itself is not allowed to scroll on this page.
+  useEffect(() => {
+    const root = document.documentElement;
+    const previous = root.style.overflow;
+    root.style.overflow = 'hidden';
+    return () => {
+      root.style.overflow = previous;
+    };
+  }, []);
 
-function Card({ label, children }: { label: string; children: ReactNode }) {
+  const current = PAGES.find((item) => item.id === page)!;
+
   return (
-    <div className="space-y-2">
-      <span className="text-xs text-text-secondary">{label}</span>
-      <div className="rounded-lg border border-border p-6">{children}</div>
+    <ScrollArea className="h-screen bg-background text-text-primary">
+    <div className="mx-auto flex w-full max-w-5xl items-start">
+      <nav aria-label="Settings" className="sticky top-0 flex w-60 shrink-0 flex-col gap-1 px-3 py-10">
+        <h1 className="mb-6 px-3 text-xl font-semibold">Settings</h1>
+        {PAGES.map((item) => (
+          <button
+            key={item.id}
+            type="button"
+            aria-current={item.id === page ? 'page' : undefined}
+            onClick={() => setPage(item.id)}
+            className="flex h-9 cursor-pointer items-center gap-2.5 rounded-2xl px-3 text-left text-sm text-text-secondary outline-none transition-colors hover:bg-background-tertiary-transparent hover:text-text-primary focus-visible:ring-3 focus-visible:ring-ring/30 aria-[current=page]:bg-background-tertiary-transparent aria-[current=page]:text-text-primary"
+          >
+            <Icon name={item.icon} />
+            {item.label}
+          </button>
+        ))}
+      </nav>
+      <main className="min-w-0 flex-1">
+        <div className="w-full space-y-6 px-8 py-10">
+          <header className="space-y-1">
+            <h2 className="text-xl font-semibold">{current.label}</h2>
+            <p className="text-sm text-text-secondary">{current.description}</p>
+          </header>
+          {connection === undefined ? null : connection === null ? (
+            <p className="text-sm text-text-secondary">Pair the extension from its side panel to manage these settings.</p>
+          ) : page === 'models' ? (
+            <ModelsSection connection={connection} preview={devPreview()} />
+          ) : (
+            <WebSearchSection connection={connection} />
+          )}
+        </div>
+      </main>
     </div>
+    </ScrollArea>
   );
 }

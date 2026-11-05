@@ -9,22 +9,21 @@ import { isRecord } from './reply';
 export const WEBSEARCH_KEY = 'opencode.websearch';
 
 /** `server`: leave the server's own default alone. */
-export type WebSearchChoice = 'server' | 'random' | 'off' | { provider: string };
+export type WebSearchChoice = 'server' | 'random' | { provider: string };
 
 export type SearchProvider = { id: string; name: string };
 
 const CONFIG_FILE = 'opencode.jsonc';
 
 export function parseChoice(value: unknown): WebSearchChoice {
-  if (value === 'random' || value === 'off') return value;
+  if (value === 'random') return value;
   if (isRecord(value) && typeof value.provider === 'string' && value.provider) return { provider: value.provider };
   return 'server';
 }
 
 /** The workspace config that expresses a choice; `server` writes nothing but an empty config. */
 export function configFor(choice: WebSearchChoice): string {
-  const websearch =
-    choice === 'off' ? false : choice === 'random' ? { provider: 'random' } : choice === 'server' ? undefined : choice;
+  const websearch = choice === 'random' ? { provider: 'random' } : choice === 'server' ? undefined : choice;
   return JSON.stringify({ $schema: 'https://opencode.ai/config.json', ...(websearch === undefined ? {} : { websearch }) }, null, 2) + '\n';
 }
 

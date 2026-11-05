@@ -7,6 +7,25 @@ export type ModelKey = { providerID: string; modelID: string };
 
 export type ModelInput = 'text' | 'image' | 'pdf' | 'audio' | 'video';
 
+/** One price row, in USD per million tokens; `contextOver` is set on a pricier long-context tier. */
+export type ModelPrice = { input: number; output: number; cacheRead: number; cacheWrite: number; contextOver?: number };
+
+/** What the catalog knows about a model beyond what the picker needs: shown on a model's card. */
+export type ModelDetails = {
+  /** What it produces: chat, image, decision, ... (unset means chat). */
+  type?: string;
+  status: 'active' | 'beta' | 'alpha';
+  outputs: string[];
+  /** Largest reply, in tokens; 0 when unknown. */
+  maxOutput: number;
+  /** Largest prompt, in tokens, when it differs from the context window; 0 when unknown. */
+  maxInput: number;
+  /** Whether it accepts a sampling temperature; undefined when unknown. */
+  temperature?: boolean;
+  /** The base price first, then any long-context tiers. */
+  prices: ModelPrice[];
+};
+
 export type CatalogModel = ModelKey & {
   /** Display name, without opencode's "(latest)" marker. */
   name: string;
@@ -22,6 +41,8 @@ export type CatalogModel = ModelKey & {
   context: number;
   inputs: ModelInput[];
   tools: boolean;
+  /** Absent in a catalog cached by an older version. */
+  details?: ModelDetails;
 };
 
 export type CatalogProvider = {
@@ -77,6 +98,67 @@ const variantIDs = (value: unknown): string[] =>
     return id ? [id] : [];
   });
 
+const num = (value: unknown) => (typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : 0);
+const strings = (value: unknown): string[] => list(value).filter((item): item is string => typeof item === 'string');
+
+function parsePrice(raw: unknown): ModelPrice | null {
+  if (!isRecord(raw)) return null;
+  const cache = record(raw.cache);
+  const tier = record(raw.tier);
+  const contextOver = positive(tier.size);
+  return {
+    input: num(raw.input),
+    output: num(raw.output),
+    cacheRead: num(cache.read),
+    cacheWrite: num(cache.write),
+    ...(Number.isNaN(contextOver) ? {} : { contextOver }),
+  };
+}
+
+/** The extra facts of a model from the server's model list. */
+function parseDetails(raw: Record<string, unknown>): ModelDetails {
+  const capabilities = record(raw.capabilities);
+  const limit = record(raw.limit);
+  const prices = list(raw.cost).flatMap((item) => parsePrice(item) ?? []);
+  return {
+    type: str(raw.type),
+    status: raw.status === 'alpha' || raw.status === 'beta' ? raw.status : 'active',
+    outputs: strings(capabilities.output),
+    maxOutput: num(limit.output),
+    maxInput: num(limit.input),
+    temperature: typeof capabilities.temperature === 'boolean' ? capabilities.temperature : undefined,
+    // The untiered price leads, so a card can show it first.
+    prices: [...prices.filter((price) => price.contextOver === undefined), ...prices.filter((price) => price.contextOver !== undefined)],
+  };
+}
+
+/** Reads details back from the cache (the shape written above), dropping anything malformed. */
+export function readDetails(value: unknown): ModelDetails | undefined {
+  if (!isRecord(value)) return undefined;
+  const prices = list(value.prices).flatMap((item): ModelPrice[] => {
+    if (!isRecord(item)) return [];
+    const over = typeof item.contextOver === 'number' ? item.contextOver : undefined;
+    return [
+      {
+        input: num(item.input),
+        output: num(item.output),
+        cacheRead: num(item.cacheRead),
+        cacheWrite: num(item.cacheWrite),
+        ...(over === undefined ? {} : { contextOver: over }),
+      },
+    ];
+  });
+  return {
+    type: str(value.type),
+    status: value.status === 'alpha' || value.status === 'beta' ? value.status : 'active',
+    outputs: strings(value.outputs),
+    maxOutput: num(value.maxOutput),
+    maxInput: num(value.maxInput),
+    temperature: typeof value.temperature === 'boolean' ? value.temperature : undefined,
+    prices,
+  };
+}
+
 function parseModel(raw: Record<string, unknown>, providerID: string): CatalogModel | null {
   const id = str(raw.id);
   const name = str(raw.name) ?? id;
@@ -96,6 +178,7 @@ function parseModel(raw: Record<string, unknown>, providerID: string): CatalogMo
     // The server matches by prefix ("image" also covers an "image/png" entry), so the catalog does too.
     inputs: INPUTS.filter((type) => input.some((item) => typeof item === 'string' && item.startsWith(type))),
     tools: capabilities.tools === true,
+    details: parseDetails(raw),
   };
 }
 
@@ -148,37 +231,12 @@ export function firstModel(catalog: Catalog | null): ModelKey | undefined {
 
 // ─── Default visibility ─────────────────────────────────────────────────────
 
-/** luxon's diffNow().as("months") used an average month; opencode keeps the same window. */
-const SIX_MONTHS = 6 * 30.436875 * 24 * 60 * 60 * 1000;
-
 /**
- * The newest release of each family per provider. A free model shares its family and release
- * date with its paid twin, so the two are grouped apart. A tie keeps the first model listed.
+ * Models the picker shows when the user has not said otherwise: all of them, so a model that
+ * arrives later is on too. Only a model the user switched off is hidden, and that is remembered.
  */
-export function latestModels(models: CatalogModel[]): CatalogModel[] {
-  const groups = new Map<string, CatalogModel>();
-  for (const model of models) {
-    const group = `${model.providerID}\u0000${model.family}\u0000${model.free}`;
-    const best = groups.get(group);
-    if (!best || model.released > best.released) groups.set(group, model);
-  }
-  return [...groups.values()];
-}
-
-/**
- * Models the picker shows when the user has not said otherwise: the newest of each family released
- * in the last six months, OpenCode's free models (whatever their age), and models with no known
- * release date.
- */
-export function defaultVisible(catalog: Catalog | null, now = Date.now()): Set<string> {
-  const models = allModels(catalog);
-  const recent = models.filter((model) => Math.abs(now - model.released) < SIX_MONTHS);
-  return new Set(
-    [
-      ...latestModels(recent),
-      ...models.filter((model) => model.free || !Number.isFinite(model.released)),
-    ].map(modelKey),
-  );
+export function defaultVisible(catalog: Catalog | null): Set<string> {
+  return new Set(allModels(catalog).map(modelKey));
 }
 
 // ─── Labels ─────────────────────────────────────────────────────────────────
@@ -227,6 +285,16 @@ function sharedPrefix(ids: string[]): number {
  * models of one provider with the same name show the part of their IDs that differs.
  */
 export function modelLabels(catalog: Catalog | null): Map<string, ModelLabel> {
+  if (!catalog) return buildLabels(null);
+  let labels = labelCache.get(catalog);
+  if (!labels) labelCache.set(catalog, (labels = buildLabels(catalog)));
+  return labels;
+}
+
+/** Labels depend only on the catalog, which never changes once built: typing in a search reuses them. */
+const labelCache = new WeakMap<Catalog, Map<string, ModelLabel>>();
+
+function buildLabels(catalog: Catalog | null): Map<string, ModelLabel> {
   const rows = allModels(catalog).map((model) => {
     const provider = providerName(catalog, model.providerID);
     return { model, provider, text: provider ? `${provider} / ${model.name}` : model.name };

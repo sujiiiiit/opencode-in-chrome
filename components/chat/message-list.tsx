@@ -1,6 +1,7 @@
 import { memo, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { cn } from 'cn';
 import { Button } from '@/components/ui/button';
+import { Icon } from '@/components/ui/icon';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import type { PendingMessage } from '@/lib/opencode/chat';
 import { replyParts } from '@/lib/opencode/reply';
@@ -9,6 +10,7 @@ import { turnStats } from '@/lib/opencode/turn-stats';
 import { CollapsibleText } from './collapsible-text';
 import { AssistantReply } from './flow/assistant-reply';
 import { UserMessageFooter } from './message-footer';
+import { NoticeDivider } from './notice-divider';
 import { SentAttachments } from './sent-attachments';
 import { useModelName } from './model/model-names';
 import { useInFlight } from './send-flight';
@@ -54,11 +56,7 @@ function SwitchNotice({ notice }: { notice: ModelSwitch }) {
   const name = useModelName(notice.model);
   const variantOnly = notice.previous?.providerID === notice.model.providerID && notice.previous.modelID === notice.model.modelID;
   const label = variantOnly ? `Switched variant to ${notice.model.variant ?? 'Default'}` : `Switched to ${name}`;
-  return <div data-slot="model-switch" className="flex items-center gap-3 text-xs text-text-secondary">
-    <div className="h-px flex-1 bg-border-strong" aria-hidden="true" />
-    <span className="min-w-0 max-w-[70%] truncate" title={label}>{label}</span>
-    <div className="h-px flex-1 bg-border-strong" aria-hidden="true" />
-  </div>;
+  return <NoticeDivider slot="model-switch" label={label} />;
 }
 
 /** One stable component per message ID, from local send through admission and delivery. */
@@ -91,36 +89,18 @@ const MessageEntry = memo(function MessageEntry({ turn, pending, latest, files }
   );
 });
 
-/** Arm at 90%, confirm continuation past 95%, and turn the page so 400px of room shows below the text. */
+/** Turn the page when streamed content reaches the viewport's bottom, leaving room below it. */
 const STICK_PX = 48;
 /** A scroll this soon after a wheel, key or released drag is the reader's (smooth wheel scrolling runs on). */
 const INTENT_MS = 600;
-const ARM_AT = 0.9;
-const CONFIRM_AT = 0.95;
-const EDGE_AT = 0.98;
+const EDGE_AT = 1;
 /** Room kept below the content for page turns; a short viewport keeps at least 25% of it for text. */
-const FOLLOW_SPACE_PX = 400;
+const FOLLOW_SPACE_PX = 300;
 const MAX_FOLLOW_SHARE = 0.75;
 const SCROLL_MS = 200;
 const PAGE_TURN_MS = 650;
 
 type Motion = { id: number; target: number; from: number; start: number; end: number; lastNow: number };
-type Gate = { id: string; phase: 'armed' | 'ready'; length: number };
-
-function shouldTurn(gate: Gate | null, current: { id: string; length: number }, position: number): boolean {
-  if (position >= EDGE_AT) return true;
-  return gate?.id === current.id && gate.phase === 'ready' && current.length > gate.length;
-}
-
-function advanceGate(gate: Gate | null, current: { id: string; length: number }, position: number): { gate: Gate | null; turn: boolean } {
-  if (position < ARM_AT) return { gate: null, turn: false };
-  if (shouldTurn(gate, current, position)) return { gate: null, turn: true };
-  if (position >= CONFIRM_AT) {
-    return { gate: gate?.id === current.id && gate.phase === 'ready' ? gate : { ...current, phase: 'ready' }, turn: false };
-  }
-  return { gate: { ...current, phase: 'armed' }, turn: false };
-}
-
 const bottom = (element: HTMLElement) => Math.max(0, element.scrollHeight - element.clientHeight);
 const easeOutCubic = (progress: number) => 1 - (1 - progress) ** 3;
 
@@ -164,8 +144,8 @@ function usePageTurn(turns: Turn[], pending: PendingMessage[]) {
   const motion = useRef<Motion | null>(null);
   const lastSet = useRef<number | null>(null);
   const [space, setSpace] = useState(0);
+  const [awayFromBottom, setAwayFromBottom] = useState(false);
   const spaceRef = useRef(0);
-  const gate = useRef<Gate | null>(null);
   const stream = useRef<{ id: string; length: number } | null>(null);
   const activeTurn = turns.at(-1);
   const streaming = useMemo(
@@ -198,6 +178,10 @@ function usePageTurn(turns: Turn[], pending: PendingMessage[]) {
   const cancelMotion = () => {
     if (motion.current) cancelAnimationFrame(motion.current.id);
     motion.current = null;
+  };
+
+  const syncAwayFromBottom = (element: HTMLElement) => {
+    setAwayFromBottom(bottom(element) - element.scrollTop > 1);
   };
 
   const follow = (element: HTMLElement, duration = SCROLL_MS) => {
@@ -237,13 +221,10 @@ function usePageTurn(turns: Turn[], pending: PendingMessage[]) {
       return;
     }
     if (!stick.current || !current || element.clientHeight <= 0) {
-      if (!current || !stick.current) gate.current = null;
       return;
     }
     const position = contentEnd(element) / element.clientHeight;
-    const next = advanceGate(gate.current, current, position);
-    gate.current = next.gate;
-    if (next.turn) follow(element, PAGE_TURN_MS);
+    if (position >= EDGE_AT) follow(element, PAGE_TURN_MS);
   };
 
   // Follow the reader: scrolling up to read stops the list from pulling them back down.
@@ -258,6 +239,7 @@ function usePageTurn(turns: Turn[], pending: PendingMessage[]) {
     const onScroll = () => {
       const moved = element.scrollTop - lastTop;
       lastTop = element.scrollTop;
+      syncAwayFromBottom(element);
       if (motion.current && lastSet.current !== null && Math.abs(element.scrollTop - lastSet.current) < 1) return;
       // Only the reader's own scrolling changes following. Scrolls the browser makes itself (scroll
       // anchoring, clamping when content shrinks) must not switch it off mid-reply.
@@ -296,6 +278,7 @@ function usePageTurn(turns: Turn[], pending: PendingMessage[]) {
     const observer = content && new ResizeObserver(() => {
       syncSpace(element);
       considerTurn(element);
+      syncAwayFromBottom(element);
       previous.current.height = element.scrollHeight;
     });
     if (content) observer?.observe(content);
@@ -327,7 +310,6 @@ function usePageTurn(turns: Turn[], pending: PendingMessage[]) {
     } else if (edges.last !== previous.current.last) {
       // A new message rises until the whole follow space shows below it. A chat short enough
       // to fit with that space has nothing to scroll, so it stays put.
-      gate.current = null;
       follow(element);
       stick.current = true;
     } else if (stick.current) {
@@ -336,7 +318,15 @@ function usePageTurn(turns: Turn[], pending: PendingMessage[]) {
     previous.current = { ...edges, height: element.scrollHeight };
   }, [turns, pending, space]);
 
-  return { ref, space };
+  const goToBottom = () => {
+    const element = viewport();
+    if (!element) return;
+    stick.current = true;
+    setAwayFromBottom(false);
+    follow(element);
+  };
+
+  return { ref, space, awayFromBottom, goToBottom };
 }
 
 /** Which chat, from which oldest turn, a list shows. A new key is a chat opened or older turns loaded. */
@@ -369,31 +359,61 @@ export const MessageList = memo(function MessageList(props: Props) {
 });
 
 const TurnList = memo(function TurnList({ turns, switches = [], pending, previewFiles, hasEarlier = false, loadingEarlier = false, onLoadEarlier }: Props) {
-  const { ref, space } = usePageTurn(turns, pending);
+  const { ref, space, awayFromBottom, goToBottom } = usePageTurn(turns, pending);
   const empty = turns.length === 0 && pending.length === 0 && switches.length === 0;
+  const streaming = turns.at(-1)?.reply.status === 'running';
 
   if (empty) {
     return <div className="flex min-h-0 flex-1"></div>;
   }
 
   return (
-    <ScrollArea fade className="min-h-0 flex-1">
-      <div ref={ref} className="mx-auto flex w-full max-w-chat flex-col gap-6 p-4">
-        {hasEarlier && (
-          <Button variant="ghost" size="sm" className="self-center" disabled={loadingEarlier} onClick={onLoadEarlier}>
-            {loadingEarlier ? 'Loading…' : 'Load earlier messages'}
-          </Button>
-        )}
-        {[
-          ...turns.map((turn, index) => <MessageEntry key={turn.id} turn={turn} files={previewFiles?.(turn.id) ?? turn.files}
-            latest={index === turns.length - 1 && pending.length === 0} />),
-          ...switches.map((notice) => <SwitchNotice key={`switch-${notice.id}`} notice={notice} />),
-          ...pending.map((message) => <MessageEntry key={message.id} pending={message}
-            files={previewFiles?.(message.id) ?? message.files} latest={false} />),
-        ]}
-        {/* Cancel the list gap; p-3 already supplies 12px below this spacer. */}
-        <div data-slot="stream-space" aria-hidden="true" className="-mt-6" style={{ height: Math.max(0, space - 12) }} />
+    <div className="relative min-h-0 flex-1">
+      <ScrollArea fade className="h-full">
+        <div ref={ref} className="mx-auto flex w-full max-w-chat flex-col gap-6 p-4">
+          {hasEarlier && (
+            <Button variant="ghost" size="sm" className="self-center" disabled={loadingEarlier} onClick={onLoadEarlier}>
+              {loadingEarlier ? 'Loading…' : 'Load earlier messages'}
+            </Button>
+          )}
+          {[
+            ...turns.map((turn, index) => <MessageEntry key={turn.id} turn={turn} files={previewFiles?.(turn.id) ?? turn.files}
+              latest={index === turns.length - 1 && pending.length === 0} />),
+            ...switches.map((notice) => <SwitchNotice key={`switch-${notice.id}`} notice={notice} />),
+            ...pending.map((message) => <MessageEntry key={message.id} pending={message}
+              files={previewFiles?.(message.id) ?? message.files} latest={false} />),
+          ]}
+          {/* Cancel the list gap; p-3 already supplies 12px below this spacer. */}
+          <div data-slot="stream-space" aria-hidden="true" className="-mt-6" style={{ height: Math.max(0, space - 12) }} />
+        </div>
+      </ScrollArea>
+      <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 h-16 overflow-hidden">
+        <Button
+          type="button"
+          variant="outline"
+          size="icon"
+          aria-label="Scroll to bottom"
+          aria-hidden={!awayFromBottom}
+          tabIndex={awayFromBottom ? 0 : -1}
+          data-slot="go-to-bottom"
+          data-streaming={streaming || undefined}
+          data-visible={awayFromBottom}
+          className="pointer-events-auto absolute bottom-4 left-1/2 -translate-x-1/2 rounded-full bg-background shadow-md transition-[opacity,scale,translate] duration-350 ease-[var(--ease-calm)] data-[visible=false]:pointer-events-none data-[visible=false]:translate-y-12 data-[visible=false]:scale-75 data-[visible=false]:opacity-0 data-[visible=false]:duration-200 motion-reduce:translate-y-0 motion-reduce:scale-100 motion-reduce:duration-150"
+          onClick={goToBottom}
+        >
+          {streaming ? (
+            <span className="flex items-center gap-0.5 text-text-secondary" aria-hidden="true">
+              {[0, 1, 2].map((dot) => (
+                <span
+                  key={dot}
+                  className="size-[3px] animate-bounce rounded-full bg-current motion-reduce:animate-none"
+                  style={{ animationDelay: `${dot * 120}ms` }}
+                />
+              ))}
+            </span>
+          ) : <Icon name="chevron-down" />}
+        </Button>
       </div>
-    </ScrollArea>
+    </div>
   );
 });

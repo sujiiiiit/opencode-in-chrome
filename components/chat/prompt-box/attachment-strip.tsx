@@ -16,7 +16,7 @@ type ThumbProps = { image: ImageAttachment; at: number; onOpen: (at: number) => 
 /** One attached image: its tile, with an x (on hover or focus) that removes it. */
 const Thumb = memo(function Thumb({ image, at, onOpen, onRemove }: ThumbProps) {
   return (
-    <li className="group/thumb relative size-14 shrink-0">
+    <li className="group/thumb relative size-14 shrink-0 animate-thumb-in">
       <PictureTile src={image.url} name={image.name} at={at} onOpen={onOpen} className="size-full" />
       <Button
         variant="viewer"

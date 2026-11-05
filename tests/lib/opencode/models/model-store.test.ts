@@ -1,9 +1,10 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { fakeBrowser } from 'wxt/testing/fake-browser';
 import type { Connection } from '@/lib/opencode/connection';
 import { EventHub } from '@/lib/opencode/events';
 import { buildControls } from '@/lib/opencode/models/controls';
 import { ModelStore } from '@/lib/opencode/models/model-store';
-import { loadPreferences } from '@/lib/opencode/models/preferences';
+import { loadPreferences, savePreferences } from '@/lib/opencode/models/preferences';
 import { loadSavedSelections } from '@/lib/opencode/models/selection';
 import { fakeOpencode, type FakeOpencodeOptions } from '@/tests/support/queue-server';
 import { BASE, MODELS, PROVIDERS, SESSION_ID, TOKEN, jsonResponse, modelInfo, unauthorized } from '@/tests/support/testkit';
@@ -13,6 +14,9 @@ const connection: Connection = { baseUrl: BASE, token: TOKEN, expiresAt: 1796106
 const FLINT = { providerID: 'opencode', modelID: 'flint-40b-free' };
 const OPUS = { providerID: 'anthropic', modelID: 'claude-opus-5-5' };
 const SONNET = { providerID: 'anthropic', modelID: 'claude-sonnet-5-5' };
+
+// Stored preferences outlive a store, so each test starts from empty storage.
+beforeEach(() => fakeBrowser.reset());
 
 const disposers: Array<() => void> = [];
 afterEach(() => {
@@ -173,7 +177,25 @@ describe('choosing a model and its variant', () => {
     store.setModel(OPUS);
     expect(store.getState().prefs.user).toEqual([{ ...OPUS, visibility: 'show' }]);
     store.toggleFavorite(SONNET);
-    expect((await loadPreferences()).favorite).toEqual([SONNET]);
+    await vi.waitFor(async () => expect((await loadPreferences()).favorite).toEqual([SONNET]));
+  });
+});
+
+describe('saved visibility', () => {
+  it('lists every model as shown until the user hides one, and saves the choice', async () => {
+    const { store } = await setup();
+    const keys = (state: ReturnType<typeof store.getState>) => state.catalog!.providers.flatMap((p) => p.models);
+    expect(keys(store.getState()).length).toBeGreaterThan(0);
+    store.setVisibility([OPUS], false);
+    await vi.waitFor(async () => expect((await loadPreferences()).user).toEqual([{ ...OPUS, visibility: 'hide' }]));
+    expect(store.getState().prefs.user).toEqual([{ ...OPUS, visibility: 'hide' }]);
+  });
+
+  it('keeps a change another panel saved while this one writes its own', async () => {
+    const { store } = await setup();
+    await savePreferences({ user: [{ ...SONNET, visibility: 'hide' }], recent: [], favorite: [] });
+    store.setVisibility([OPUS], false);
+    await vi.waitFor(async () => expect((await loadPreferences()).user.map((item) => item.modelID).sort()).toEqual([OPUS.modelID, SONNET.modelID].sort()));
   });
 });
 

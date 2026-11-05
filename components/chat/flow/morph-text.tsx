@@ -2,9 +2,16 @@ import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from 're
 import { cn } from 'cn';
 import { TextShimmer } from '@/components/ui/text-shimmer';
 
-/** The changing words fade out, then the new ones fade in; the width eases over both (see `.morph` in global.css). */
-const OUT_MS = 120;
-const IN_MS = 200;
+/**
+ * The changing words blur and fade out, then the new ones blur and fade in; the width eases over
+ * both (see `.morph` in global.css). A new label first has to last SETTLE_MS (a call that ends in
+ * a blink is never shown), and a label that just appeared stays at least HOLD_MS, so quick
+ * Thinking / call / Thinking runs read as one steady label instead of flashing.
+ */
+const OUT_MS = 160;
+const IN_MS = 240;
+const SETTLE_MS = 180;
+const HOLD_MS = 600;
 const reducedMotion = () => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
 
 /**
@@ -31,10 +38,17 @@ function prefixWidth(element: HTMLElement | null, count: number): number {
 }
 
 type Shown = { id: string; text: string; shimmer: boolean };
-type Phase = 'idle' | 'out' | 'in';
+/** idle: at rest; wait: a new label is settling (nothing moves yet); out / in: the swap's two fades. */
+type Phase = 'idle' | 'wait' | 'out' | 'in';
 
-/** The swap's class and `data-phase` for each phase (idle: none). */
-const PHASE_CLASS: Record<Phase, string | undefined> = { idle: undefined, out: 'morph-out', in: 'morph-in' };
+/** The swap's class and `data-phase` for each phase (idle and wait: none). */
+const PHASE_CLASS: Record<Phase, string | undefined> = { idle: undefined, wait: undefined, out: 'morph-out', in: 'morph-in' };
+
+/** Two labels that look the same on screen: switching between them needs no motion at all. */
+const sameLook = (a: Shown, b: Shown) => a.text === b.text && a.shimmer === b.shimmer;
+
+/** How long a new label waits before its swap starts: it must settle, and the shown one must have held. */
+const waitDelay = (settledAt: number) => Math.max(SETTLE_MS, settledAt + HOLD_MS - Date.now());
 
 type Props = {
   /** What the text stands for. A new id swaps the words that changed (fade out, then in); new text under the same id just eases the width. */
@@ -50,20 +64,46 @@ type Props = {
   textClassName?: string;
   /** Seconds for one shimmer sweep (only while `shimmer` is on). */
   shimmerDuration?: number;
+  /** A live status that can flip fast: a new label must settle and a shown one holds (SETTLE_MS, HOLD_MS). */
+  steady?: boolean;
   'aria-hidden'?: boolean;
 };
 
+/** What the swap does when the label changes: the text to show now, the phase to enter, the words to keep. */
+type Step = { show?: Shown; phase?: Phase; kept?: number };
+
 /**
- * The text on screen through a swap. Same id: it follows the text at once. New id: the old
- * words fade out, the text swaps, the new words fade in; a swap waits for the one in flight, so
- * a label that changes again mid-swap never cuts a fade short (the newest id follows after).
+ * The same label, or one that looks the same ("Thinking" again after a call that ended in a
+ * blink): no motion. It cancels a swap still settling or fading out (the fade eases back).
  */
-function useSwap(next: Shown) {
+function sameLabelStep(shown: Shown, target: Shown, phase: Phase): Step {
+  const unchanged = shown.id === target.id && sameLook(shown, target);
+  return { show: unchanged ? undefined : target, phase: phase === 'wait' || phase === 'out' ? 'idle' : undefined };
+}
+
+function labelStep(shown: Shown, target: Shown, phase: Phase, steady: boolean | undefined): Step {
+  if (shown.id === target.id || sameLook(shown, target)) return sameLabelStep(shown, target, phase);
+  // A swap in flight finishes first; the newest label follows after.
+  if (phase !== 'idle') return {};
+  if (reducedMotion()) return { show: target };
+  return steady ? { phase: 'wait' } : { phase: 'out', kept: sharedPrefix(shown.text, target.text) };
+}
+
+/**
+ * The text on screen through a swap. Same id: it follows the text at once. New id: it waits for
+ * the label to settle, then the old words fade out, the text swaps, the new words fade in. A label
+ * that comes back to what is on screen before the swap lands cancels it (an out fade eases back,
+ * see the transition in global.css), and a swap in flight is never cut short: the newest label
+ * follows after. Only `steady` text settles and holds; other text starts its swap at once.
+ */
+function useSwap(next: Shown, steady: boolean | undefined) {
   const [shown, setShown] = useState<Shown>(next);
   const [phase, setPhase] = useState<Phase>('idle');
   /** Leading characters that stay still through the swap. */
   const [kept, setKept] = useState(0);
   const latest = useRef(next);
+  /** When the shown label finished appearing, for HOLD_MS. */
+  const settledAt = useRef(0);
   const { id, text, shimmer } = next;
 
   useLayoutEffect(() => {
@@ -71,30 +111,43 @@ function useSwap(next: Shown) {
   });
 
   useLayoutEffect(() => {
-    if (shown.id === id) {
-      if (shown.text !== text || shown.shimmer !== shimmer) setShown({ id, text, shimmer });
-    } else if (phase === 'idle' && reducedMotion()) {
-      setShown({ id, text, shimmer });
-    } else if (phase === 'idle') {
-      setKept(sharedPrefix(shown.text, text));
-      setPhase('out');
-    }
-  }, [id, text, shimmer, shown, phase]);
+    const step = labelStep(shown, { id, text, shimmer }, phase, steady);
+    if (step.show) setShown(step.show);
+    if (step.kept !== undefined) setKept(step.kept);
+    if (step.phase) setPhase(step.phase);
+  }, [id, text, shimmer, shown, phase, steady]);
 
   useEffect(() => {
     if (phase === 'idle') return;
+    const delay = phase === 'wait' ? waitDelay(settledAt.current) : phase === 'out' ? OUT_MS : IN_MS;
     const timer = setTimeout(() => {
-      if (phase === 'in') return setPhase('idle');
       const target = latest.current;
+      if (phase === 'in') {
+        settledAt.current = Date.now();
+        return setPhase('idle');
+      }
+      if (phase === 'wait') {
+        setKept(sharedPrefix(shown.text, target.text));
+        return setPhase('out');
+      }
       // The id may have moved on again mid-fade: keep still only what the new text shares too.
       setKept((count) => Math.min(count, sharedPrefix(shown.text, target.text)));
       setShown(target);
       setPhase('in');
-    }, phase === 'out' ? OUT_MS : IN_MS);
+    }, delay);
     return () => clearTimeout(timer);
   }, [phase, shown.text]);
 
-  return { view: shown.id === id ? next : shown, phase, kept };
+  const view = shown.id === id ? next : shown;
+  return {
+    view,
+    phase,
+    kept,
+    // The width eases toward the words about to show, never toward a label still settling.
+    measured: phase === 'out' ? text : view.text,
+    /** No word stays still through this swap. */
+    whole: (phase === 'out' || phase === 'in') && kept === 0,
+  };
 }
 
 /**
@@ -138,12 +191,12 @@ function useMeasuredWidth(box: RefObject<HTMLSpanElement | null>, measure: RefOb
  * hidden copy measures the natural width; the box takes that width (capped by its container),
  * and its text truncates with an ellipsis once it settles.
  */
-export function MorphText({ id, text, shimmer = false, className, slot, textSlot, textClassName, shimmerDuration, 'aria-hidden': hidden }: Props) {
+export function MorphText({ id, text, shimmer = false, className, slot, textSlot, textClassName, shimmerDuration, steady, 'aria-hidden': hidden }: Props) {
   const box = useRef<HTMLSpanElement>(null);
   const measure = useRef<HTMLSpanElement>(null);
   const line = useRef<HTMLSpanElement>(null);
   const words = useRef<HTMLSpanElement>(null);
-  const { view, phase, kept } = useSwap({ id, text, shimmer });
+  const { view, phase, kept, measured, whole } = useSwap({ id, text, shimmer }, steady);
   const swap = PHASE_CLASS[phase];
   useMeasuredWidth(box, measure);
 
@@ -156,24 +209,31 @@ export function MorphText({ id, text, shimmer = false, className, slot, textSlot
     <span ref={box} data-slot={slot} aria-hidden={hidden} className={cn('morph', className)}>
       {/* Measures the text being moved to, so the width eases across the whole swap. Draws
           through ::before, so the ruler adds no second copy to the DOM's text. */}
-      <span ref={measure} aria-hidden="true" className="morph-measure" data-text={text} />
-      {/* The swap masks this element and the shimmer animates the inner one (both use `animation`). */}
+      <span ref={measure} aria-hidden="true" className="morph-measure" data-text={measured} />
+      {/* The swap masks this element and the shimmer animates the inner one (both use `animation`).
+          When no word stays still (data-whole) the whole line also blurs and drifts: that is what
+          reads as one text turning into another rather than a blink. */}
       <span
         ref={line}
         data-slot={textSlot}
         data-phase={swap && phase}
+        data-whole={whole || undefined}
         className={cn('morph-text', swap)}
       >
         <span ref={words} className="block">
-          {view.shimmer ? (
-            <TextShimmer as="span" duration={shimmerDuration} className={cn('block max-w-full truncate', textClassName)}>
-              {view.text}
-            </TextShimmer>
-          ) : (
-            view.text
-          )}
+          <Words view={view} className={textClassName} duration={shimmerDuration} />
         </span>
       </span>
     </span>
+  );
+}
+
+/** The words themselves: shimmering while the work runs, plain otherwise. */
+function Words({ view, className, duration }: { view: Shown; className?: string; duration?: number }) {
+  if (!view.shimmer) return view.text;
+  return (
+    <TextShimmer as="span" duration={duration} className={cn('block max-w-full truncate', className)}>
+      {view.text}
+    </TextShimmer>
   );
 }

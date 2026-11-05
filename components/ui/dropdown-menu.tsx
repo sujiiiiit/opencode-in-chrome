@@ -36,7 +36,7 @@ function ItemContent({
 
   return (
     <>
-      {icon && <span className="[&_svg]:size-3.5!">{icon}</span>}
+      {icon && <span className="[&_svg]:size-[15px] text-text-secondary">{icon}</span>}
       {hasRow && (
         <ItemRow text={text} subtext={subtext} shortcut={shortcut} badge={badge} />
       )}
@@ -363,7 +363,7 @@ function CheckIndicator({ slot }: { slot: string }) {
 function RadioIndicator({ slot }: { slot: string }) {
   return (
     <span
-      className="text-muted-foreground pointer-events-none flex size-4 shrink-0 items-center justify-center"
+      className="text-muted-foreground pointer-events-none ml-auto flex size-4 shrink-0 items-center justify-center"
       data-slot={slot}
     >
       <MenuPrimitive.RadioItemIndicator>

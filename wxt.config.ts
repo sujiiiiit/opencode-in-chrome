@@ -5,8 +5,15 @@ import { defineConfig } from 'wxt';
 export default defineConfig({
   modules: ['@wxt-dev/module-react'],
   webExt: {
-    chromiumPort: process.env.WXT_CDP_PORT ? Number(process.env.WXT_CDP_PORT) : undefined,
-    chromiumArgs: process.env.WXT_CDP_PORT ? [`--remote-debugging-port=${process.env.WXT_CDP_PORT}`] : [],
+    // Keep one agent-accessible development browser instead of creating a
+    // fresh session on every run. The profile lives under the gitignored
+    // .wxt directory, so tabs, logins, and extension storage survive restarts.
+    chromiumPort: Number(process.env.WXT_CDP_PORT ?? 9222),
+    chromiumArgs: [
+      `--remote-debugging-port=${process.env.WXT_CDP_PORT ?? 9222}`,
+    ],
+    chromiumProfile: '.wxt/chrome-profile',
+    keepProfileChanges: true,
   },
   vite: () => ({
     plugins: [tailwindcss()],

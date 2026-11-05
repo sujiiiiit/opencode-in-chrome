@@ -61,6 +61,7 @@ const WorkLabel = memo(function WorkLabel({ thinking, stopped, started, ended, a
       id={label.key}
       text={label.text}
       shimmer={active}
+      steady
       textSlot="work-activity"
       className={cn('leading-[1.6]', !active && 'shrink-0')}
       textClassName="font-normal"

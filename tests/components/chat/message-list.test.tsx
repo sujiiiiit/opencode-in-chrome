@@ -215,51 +215,34 @@ describe('MessageList: scrolling', () => {
     expect(viewport.scrollTop).toBe(1040);
   });
 
-  it('waits for a new delta after 95 percent, then holds still until the next turn', () => {
+  it('waits until streamed content reaches 100 percent of the viewport', () => {
     const frame = frames();
     const { rerender } = render(<MessageList turns={streaming('a')} pending={[]} />);
     const content = { height: 1000 };
     const viewport = sized(content);
     scrollTo(viewport, 800);
-    content.height = 1130;
+    // The 150px follow space is excluded: 1149 leaves content at 99.5% of the viewport.
+    content.height = 1149;
     rerender(<MessageList turns={streaming('a b')} pending={[]} />);
-    frame(performance.now() + 240);
+    frame(performance.now() + 720);
     expect(viewport.scrollTop).toBe(800);
-    content.height = 1140;
+
+    // One more pixel reaches 100%, so the page turns.
+    content.height = 1150;
     rerender(<MessageList turns={streaming('a b c')} pending={[]} />);
-    frame(performance.now() + 480);
-    expect(viewport.scrollTop).toBe(800);
-    content.height = 1145;
-    rerender(<MessageList turns={streaming('a b c d')} pending={[]} />);
-    frame(performance.now() + 1440);
-    expect(viewport.scrollTop).toBe(945);
-    content.height = 1275;
-    rerender(<MessageList turns={streaming('a b c d e')} pending={[]} />);
-    frame(performance.now() + 1680);
-    expect(viewport.scrollTop).toBe(945);
-    content.height = 1285;
-    rerender(<MessageList turns={streaming('a b c d e f')} pending={[]} />);
-    frame(performance.now() + 1920);
-    expect(viewport.scrollTop).toBe(945);
-    content.height = 1290;
-    rerender(<MessageList turns={streaming('a b c d e f g')} pending={[]} />);
-    frame(performance.now() + 2640);
-    expect(viewport.scrollTop).toBe(1090);
+    frame(performance.now() + 720);
+    expect(viewport.scrollTop).toBe(950);
   });
 
-  it('leaves a nearly complete reply in place when it finishes after 95 percent', () => {
+  it('leaves a reply in place when it finishes just before the edge', () => {
     const frame = frames();
     const { rerender } = render(<MessageList turns={streaming('a')} pending={[]} />);
     const content = { height: 1000 };
     const viewport = sized(content);
     scrollTo(viewport, 800);
-    content.height = 1130;
-    rerender(<MessageList turns={streaming('a b')} pending={[]} />);
-    content.height = 1140;
-    rerender(<MessageList turns={streaming('a b c')} pending={[]} />);
-    content.height = 1150;
-    rerender(<MessageList turns={[first, turn('m2', 'two', reply('succeeded', 'a b c d'))]} pending={[]} />);
-    frame(performance.now() + 240);
+    content.height = 1149;
+    rerender(<MessageList turns={[first, turn('m2', 'two', reply('succeeded', 'a b'))]} pending={[]} />);
+    frame(performance.now() + 720);
     expect(viewport.scrollTop).toBe(800);
   });
 
@@ -271,6 +254,63 @@ describe('MessageList: scrolling', () => {
     content.height = 1200;
     rerender(<MessageList turns={streaming('a b')} pending={[]} />);
     expect(viewport.scrollTop).toBe(100);
+  });
+
+  it('shows a wave while streaming away from the bottom', () => {
+    render(<MessageList turns={streaming('a')} pending={[]} />);
+    const viewport = sized({ height: 1000 });
+    const hidden = document.querySelector('[data-slot="go-to-bottom"]');
+    expect(hidden).toHaveAttribute('data-visible', 'false');
+    expect(hidden).toHaveAttribute('aria-hidden', 'true');
+    expect(hidden).toHaveClass(
+      'data-[visible=false]:translate-y-12',
+      'data-[visible=false]:scale-75',
+      'data-[visible=false]:opacity-0',
+    );
+    scrollTo(viewport, 100);
+    const button = screen.getByRole('button', { name: 'Scroll to bottom' });
+    expect(button).toHaveAttribute('data-streaming', 'true');
+    expect(button).toHaveAttribute('data-visible', 'true');
+    expect(button).toHaveAttribute('aria-hidden', 'false');
+    const dots = button.querySelectorAll('span > span');
+    expect(button.querySelector('span')).toHaveClass('text-text-secondary');
+    expect(dots).toHaveLength(3);
+    dots.forEach((dot) => expect(dot).toHaveClass('size-[3px]'));
+  });
+
+  it('shows a down arrow when a finished chat is away from the bottom', () => {
+    render(<MessageList turns={[first]} pending={[]} />);
+    const viewport = sized({ height: 1000 });
+    scrollTo(viewport, 100);
+    const button = screen.getByRole('button', { name: 'Scroll to bottom' });
+    expect(button).not.toHaveAttribute('data-streaming');
+    expect(button.querySelector('svg')).toBeInTheDocument();
+  });
+
+  it('scrolls to the bottom and resumes following when the button is clicked', () => {
+    const frame = frames();
+    const content = { height: 1000 };
+    const { rerender } = render(<MessageList turns={streaming('a')} pending={[]} />);
+    const viewport = sized(content);
+    scrollTo(viewport, 100);
+    fireEvent.click(screen.getByRole('button', { name: 'Scroll to bottom' }));
+    expect(screen.queryByRole('button', { name: 'Scroll to bottom' })).toBeNull();
+    frame(performance.now() + 240);
+    expect(viewport.scrollTop).toBe(800);
+
+    content.height = 1200;
+    rerender(<MessageList turns={streaming('a b')} pending={[]} />);
+    frame(performance.now() + 720);
+    expect(viewport.scrollTop).toBe(1000);
+  });
+
+  it('hides the button after the reader returns to the bottom', () => {
+    render(<MessageList turns={streaming('a')} pending={[]} />);
+    const viewport = sized({ height: 1000 });
+    scrollTo(viewport, 100);
+    expect(screen.getByRole('button', { name: 'Scroll to bottom' })).toBeInTheDocument();
+    scrollTo(viewport, 800);
+    expect(screen.queryByRole('button', { name: 'Scroll to bottom' })).toBeNull();
   });
 
   it('stops following after even a small scroll up while the text is still on screen', () => {
@@ -356,10 +396,10 @@ describe('MessageList: scrolling', () => {
     height = 400;
     act(() => callbacks.forEach((callback) => callback([], {} as ResizeObserver)));
     expect(document.querySelector('[data-slot="stream-space"]')).toHaveStyle({ height: '288px' });
-    // A tall viewport keeps a fixed 400px of room (less the 12px the list padding supplies).
+    // A tall viewport keeps a fixed 300px of room (less the 12px the list padding supplies).
     height = 900;
     act(() => callbacks.forEach((callback) => callback([], {} as ResizeObserver)));
-    expect(document.querySelector('[data-slot="stream-space"]')).toHaveStyle({ height: '388px' });
+    expect(document.querySelector('[data-slot="stream-space"]')).toHaveStyle({ height: '288px' });
   });
 
   it('preserves the reader’s place when older turns are added above', () => {
@@ -468,9 +508,9 @@ describe('MessageList footers', () => {
     expect(document.querySelector('[data-slot="assistant-reply"] [data-slot="message-footer"]')).toBeNull();
   });
 
-  it('says Interrupted on a stopped reply', () => {
+  it('marks a stopped reply with the same divider as a model switch', () => {
     setup({ turns: [turn('m1', 'hello', { ...finished(), status: 'interrupted' })] });
-    expect(screen.getByText(/· Interrupted$/)).toBeInTheDocument();
+    expect(document.querySelector('[data-slot="reply-interrupted"]')).toHaveTextContent('Stopped before the reply finished.');
   });
 
   it('copies the answer and confirms', async () => {
