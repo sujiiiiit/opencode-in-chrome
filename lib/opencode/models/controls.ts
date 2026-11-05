@@ -97,7 +97,7 @@ export type PickerGroup = {
 /**
  * The picker's sections: Favorites and Recent lead until a search narrows the list, and leave
  * their provider's group meanwhile; then each provider, popular ones first. Only visible models
- * are listed (see Manage models).
+ * are listed (the settings page's Models section switches them on or off).
  */
 export function pickerGroups(state: ModelState, search: string): PickerGroup[] {
   const input = resolveInput(state);
@@ -156,7 +156,7 @@ export type ManageGroup = {
   items: Array<{ model: CatalogModel; label: ModelLabel; visible: boolean }>;
 };
 
-/** Every model, by provider, with its picker visibility (the Manage models view). */
+/** Every model, by provider, with its picker visibility (the settings page's Models section). */
 export function manageGroups(state: ModelState, search: string): ManageGroup[] {
   const catalog = state.catalog;
   const labels = modelLabels(catalog);

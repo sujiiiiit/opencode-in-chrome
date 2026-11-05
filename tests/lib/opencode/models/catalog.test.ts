@@ -2,11 +2,11 @@ import { describe, expect, it } from 'vitest';
 import {
   compareProviders,
   defaultVisible,
-  latestModels,
   matchesSearch,
   modelLabels,
   parseAgents,
   parseCatalog,
+  readDetails,
   parseConfiguredModel,
   providerName,
   resolveAgent,
@@ -50,25 +50,19 @@ describe('parseCatalog', () => {
 });
 
 describe('default visibility', () => {
-  const models = (list: ReturnType<typeof modelInfo>[]) =>
-    parseCatalog({ data: [{ id: 'anthropic', name: 'Anthropic' }, { id: 'opencode', name: 'OpenCode' }] }, { data: list });
-
-  it('keeps the newest of each family per provider', () => {
-    const catalog = models([
-      modelInfo('anthropic', 'opus-5', 'Opus 5', { family: 'opus', released: NOW - 60 * DAY }),
-      modelInfo('anthropic', 'opus-5-5', 'Opus 5.5', { family: 'opus', released: NOW - 10 * DAY }),
-    ]);
-    expect(latestModels(catalog.providers[0]!.models).map((m) => m.modelID)).toEqual(['opus-5-5']);
-    expect([...defaultVisible(catalog, NOW)]).toEqual(['anthropic:opus-5-5']);
-  });
-
-  it('hides models older than six months, but keeps free models and models with no release date', () => {
-    const catalog = models([
-      modelInfo('anthropic', 'old', 'Old', { released: NOW - 400 * DAY }),
-      modelInfo('anthropic', 'undated', 'Undated', { family: 'u', released: 0 }),
-      modelInfo('opencode', 'pickle', 'Big Pickle', { free: true, released: NOW - 400 * DAY }),
-    ]);
-    expect([...defaultVisible(catalog, NOW)].sort()).toEqual(['anthropic:undated', 'opencode:pickle']);
+  it('shows every model, old or new, so a model that arrives later is on', () => {
+    const catalog = parseCatalog(
+      { data: [{ id: 'anthropic', name: 'Anthropic' }, { id: 'opencode', name: 'OpenCode' }] },
+      {
+        data: [
+          modelInfo('anthropic', 'old', 'Old', { released: NOW - 900 * DAY }),
+          modelInfo('anthropic', 'undated', 'Undated', { released: 0 }),
+          modelInfo('opencode', 'pickle', 'Big Pickle', { free: true, released: NOW - 400 * DAY }),
+        ],
+      },
+    );
+    expect([...defaultVisible(catalog)].sort()).toEqual(['anthropic:old', 'anthropic:undated', 'opencode:pickle']);
+    expect(defaultVisible(null).size).toBe(0);
   });
 });
 
@@ -162,5 +156,43 @@ describe('agents and config', () => {
       parseConfiguredModel([{ type: 'document', info: { model: { providerID: 'a', model: 'm', variant: 'high' } } }]),
     ).toEqual({ providerID: 'a', modelID: 'm', variant: 'high' });
     expect(parseConfiguredModel([])).toBeUndefined();
+  });
+});
+
+describe('model details', () => {
+  it('reads limits, outputs, status and price tiers from the model list', () => {
+    const catalog = parseCatalog(
+      [{ id: 'p', name: 'P' }],
+      [
+        {
+          providerID: 'p',
+          id: 'm',
+          name: 'M',
+          status: 'beta',
+          capabilities: { tools: true, input: ['text'], output: ['text', 'image'], temperature: true },
+          limit: { context: 100, output: 50, input: 80 },
+          cost: [
+            { tier: { type: 'context', size: 200_000 }, input: 2, output: 6, cache: { read: 0.2, write: 0.4 } },
+            { input: 1, output: 3, cache: { read: 0.1, write: 0.2 } },
+          ],
+        },
+      ],
+    );
+    const details = catalog.providers[0]!.models[0]!.details!;
+    expect(details).toMatchObject({ status: 'beta', outputs: ['text', 'image'], maxOutput: 50, maxInput: 80, temperature: true });
+    expect(details.prices.map((price) => [price.input, price.contextOver])).toEqual([[1, undefined], [2, 200_000]]);
+  });
+
+  it('survives a trip through the cache and drops malformed values', () => {
+    expect(readDetails('nope')).toBeUndefined();
+    expect(readDetails({ status: 'weird', outputs: ['text', 3], prices: [null, { input: 1, contextOver: 5 }] })).toEqual({
+      type: undefined,
+      status: 'active',
+      outputs: ['text'],
+      maxOutput: 0,
+      maxInput: 0,
+      temperature: undefined,
+      prices: [{ input: 1, output: 0, cacheRead: 0, cacheWrite: 0, contextOver: 5 }],
+    });
   });
 });
