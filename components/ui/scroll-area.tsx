@@ -8,11 +8,14 @@ function ScrollArea({
   fade = false,
   horizontal = false,
   viewportClassName,
+  viewportProps,
   scrollbarClassName,
   ...props
 }: ScrollAreaPrimitive.Root.Props & {
   /** Classes for the scrolling viewport (e.g. a `max-h-*` so the area grows with its content). */
   viewportClassName?: string
+  /** Props for the viewport itself: its ref, scroll handler, or accessible label. */
+  viewportProps?: Omit<ScrollAreaPrimitive.Viewport.Props, "className" | "children">
   /** Classes for the vertical scrollbar track (Base UI sets top/bottom inline: use `!` to override). */
   scrollbarClassName?: string
   /**
@@ -35,6 +38,7 @@ function ScrollArea({
       {...props}
     >
       <ScrollAreaPrimitive.Viewport
+        {...viewportProps}
         data-slot="scroll-area-viewport"
         className={cn(
           "size-full rounded-[inherit] transition-[color,box-shadow] outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-1",

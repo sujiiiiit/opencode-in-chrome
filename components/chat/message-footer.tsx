@@ -31,16 +31,15 @@ export function UserMessageFooter({ text, created }: { text: string; created?: n
 
 /**
  * Under a finished turn's answer: Copy, then the model (and its variant), how long the turn took,
- * how fast the model wrote and whether it was interrupted.
+ * and how fast the model wrote.
  */
-export function AnswerFooter({ text, stats, interrupted }: { text: string; stats?: TurnStats; interrupted: boolean }) {
+export function AnswerFooter({ text, stats }: { text: string; stats?: TurnStats }) {
   const name = useModelName(stats?.model);
   const variant = variantLabel(stats?.model?.variant);
   const items = [
     name && (variant ? `${name} ${variant}` : name),
     stats?.durationMs !== undefined && formatDuration(stats.durationMs),
     stats?.tokensPerSecond !== undefined && formatSpeed(stats.tokensPerSecond),
-    interrupted && 'Interrupted',
   ].filter((item): item is string => !!item);
 
   return (

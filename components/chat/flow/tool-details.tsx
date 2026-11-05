@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ComponentType } from 'react';
 import { CopyButton } from '@/components/ui/copy-button';
+import { ScrollArea } from '@/components/ui/scroll-area';
 import type { ReplyToolPart } from '@/lib/opencode/reply';
 import { followShellOutput, plainTerminalText } from '@/lib/opencode/shell-output';
 import {
@@ -23,7 +24,7 @@ const clip = (text: string) => (text.length > OUTPUT_LIMIT ? `…${text.slice(-O
 
 /** Pre-formatted output that keeps its newest line in view while it grows (unless scrolled up). */
 function OutputBlock({ text, label }: { text: string; label: string }) {
-  const ref = useRef<HTMLPreElement>(null);
+  const ref = useRef<HTMLDivElement>(null);
   const follow = useRef(true);
   useLayoutEffect(() => {
     const element = ref.current;
@@ -37,15 +38,15 @@ function OutputBlock({ text, label }: { text: string; label: string }) {
   };
   return (
     <div className="group/output relative">
-      <pre
-        ref={ref}
-        onScroll={onScroll}
-        tabIndex={0}
-        aria-label={label}
-        className="max-h-60 overflow-auto px-3 py-2 font-mono font-normal type-work leading-5 whitespace-pre-wrap wrap-anywhere text-text-primary"
+      <ScrollArea
+        fade
+        viewportClassName="max-h-60 overscroll-contain"
+        viewportProps={{ ref, onScroll, 'aria-label': label }}
       >
-        {text}
-      </pre>
+        <pre className="px-3 py-2 font-mono font-normal type-work leading-5 whitespace-pre-wrap wrap-anywhere text-text-primary">
+          {text}
+        </pre>
+      </ScrollArea>
       <div className="absolute top-1 right-1 opacity-0 transition-opacity group-hover/output:opacity-100 focus-within:opacity-100">
         <CopyButton text={text} label={`Copy ${label.toLowerCase()}`} variant="quiet" />
       </div>

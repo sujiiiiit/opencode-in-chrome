@@ -84,8 +84,8 @@ describe('AssistantReply', () => {
     expect(row.querySelector('button')).toHaveClass('type-work');
     expect(row.querySelector('[title="echo hi"]')).toHaveClass('font-normal', 'text-text-primary');
     fireEvent.click(row.querySelector('button')!);
-    expect(screen.getByLabelText('Output')).toHaveClass('type-work', 'font-normal', 'text-text-primary');
-    expect(row.querySelector('pre')).toHaveClass('font-normal', 'text-text-primary');
+    expect(screen.getByLabelText('Output')).toHaveAttribute('data-slot', 'scroll-area-viewport');
+    expect(row.querySelector('pre')).toHaveClass('type-work', 'font-normal', 'text-text-primary');
   });
 
   it('calls subsecond completed thinking a second', () => {

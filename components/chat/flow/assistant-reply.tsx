@@ -4,6 +4,7 @@ import { replyFlow, type FlowItem, type WorkGroup as Group } from '@/lib/opencod
 import type { ReplyState } from '@/lib/opencode/reply';
 import type { TurnStats } from '@/lib/opencode/turn-stats';
 import { AnswerFooter } from '../message-footer';
+import { NoticeDivider } from '../notice-divider';
 import { Markdown, ReplyLive } from './markdown';
 import { WorkGroup } from './work-group';
 
@@ -40,6 +41,8 @@ export const AssistantReply = memo(function AssistantReply({
   const reactKey = (item: FlowItem, index: number) => (index === 0 && item.type === 'work' ? FIRST_WORK : item.key);
   const lastAnswer = live ? undefined : flow.findLast((item) => item.type === 'answer' && item.part.text.trim() !== '');
   const footerText = lastAnswer?.type === 'answer' ? lastAnswer.part.text : undefined;
+  const errorText = replyErrorText(reply);
+  const interrupted = reply.status === 'interrupted';
 
   return (
     <div
@@ -64,10 +67,9 @@ export const AssistantReply = memo(function AssistantReply({
           </div>
         ),
       )}
-      <ErrorLine text={replyErrorText(reply)} />
-      {footerText !== undefined && (
-        <AnswerFooter text={footerText} stats={stats} interrupted={reply.status === 'interrupted'} />
-      )}
+      {!interrupted && <ErrorLine text={errorText} />}
+      {footerText !== undefined && <AnswerFooter text={footerText} stats={stats} />}
+      {interrupted && errorText && <NoticeDivider slot="reply-interrupted" label={errorText} />}
     </div>
   );
 });
