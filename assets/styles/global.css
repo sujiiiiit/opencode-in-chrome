@@ -474,6 +474,44 @@
   }
 }
 
+/* Prompt box (components/chat/prompt-box/prompt-box.tsx) ------------------------------------
+ * The card glides to its measured content height (use-smooth-height.ts) on the panel's calm
+ * curve when images are added or removed or it clears after a send; typing snaps
+ * (data-instant). Its elevation shadow keeps Notion's quick rest/hover/focus change. The content
+ * is pinned to the bottom edge, so while the card grows the text stays still and the top edge
+ * rises over it (the composer sits at the panel's bottom); while it shrinks the top edge settles.
+ * Clipped, not scrolled: nothing inside moves or reflows during the glide. */
+[data-slot="prompt-box"] {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  overflow: clip;
+  transition:
+    height 220ms var(--ease-calm),
+    box-shadow 150ms var(--ease-standard);
+  &[data-instant] {
+    transition: box-shadow 150ms var(--ease-standard);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    transition: box-shadow 150ms var(--ease-standard);
+  }
+}
+
+/* An attached image's thumbnail: it fades in with a small settle as the box makes room. */
+@keyframes thumb-in {
+  from {
+    opacity: 0;
+    transform: scale(0.92);
+  }
+}
+
+@utility animate-thumb-in {
+  animation: thumb-in 260ms var(--ease-calm) both;
+  @media (prefers-reduced-motion: reduce) {
+    animation: none;
+  }
+}
+
 /* The wave is an entrance: once History has settled (`data-settled`), rows that a
  * search, a page or a live update adds just appear instead of replaying it, so the
  * list never blinks while it changes. The settled rows are already at rest, so

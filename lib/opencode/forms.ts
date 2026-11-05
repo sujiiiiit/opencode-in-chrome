@@ -163,3 +163,125 @@ export function answerFor(form: PendingForm, answer: FormAnswer): FormAnswer {
   }
   return out;
 }
+
+// Drafts: answering by choosing ------------------------------------------------------------
+// A field with options is answered by choosing: one option (radios) or any number (checkboxes).
+// Where the field allows free text, a last "own answer" row takes typed text under the same
+// rule: for one answer it replaces the option, for several it is added after them.
+
+/** Whether a field is answered with one choice (radios), several (checkboxes), or by typing. */
+export function choiceMode(field: FormField): 'single' | 'multiple' | null {
+  if (field.type === 'multiselect') return 'multiple';
+  if (field.type === 'boolean') return 'single';
+  return field.type === 'string' && field.options.length > 0 ? 'single' : null;
+}
+
+const YES_NO: FormOption[] = [
+  { value: 'true', label: 'Yes' },
+  { value: 'false', label: 'No' },
+];
+
+/** The options to choose from; a yes-or-no question offers Yes and No. */
+export const choiceOptions = (field: FormField): FormOption[] => (field.type === 'boolean' ? YES_NO : field.options);
+
+/** Whether a choice field ends with an own-answer row (a typed answer). */
+export const allowsCustom = (field: FormField): boolean =>
+  choiceMode(field) !== null && field.type !== 'boolean' && field.custom;
+
+/** The own-answer row: whether it is chosen, and its text (kept while another option is). */
+export type CustomDraft = { on: boolean; text: string };
+
+/**
+ * What the user has chosen so far. `answer` holds the chosen options (and typed fields' values);
+ * `custom` the own-answer rows, folded into the answer by `draftAnswer`.
+ */
+export type FormDraft = { answer: FormAnswer; custom: Record<string, CustomDraft> };
+
+/** A fresh draft: each field's default, a default the options do not list becoming typed text. */
+export function startDraft(form: PendingForm): FormDraft {
+  const answer = initialAnswer(form);
+  const custom: Record<string, CustomDraft> = {};
+  for (const field of form.fields) {
+    const value = answer[field.key];
+    if (!allowsCustom(field) || value === undefined) continue;
+    const listed = new Set(field.options.map((option) => option.value));
+    if (field.type === 'multiselect' && Array.isArray(value)) {
+      const extra = value.filter((item) => !listed.has(item));
+      if (extra.length) {
+        answer[field.key] = value.filter((item) => listed.has(item));
+        custom[field.key] = { on: true, text: extra.join(', ') };
+      }
+    } else if (typeof value === 'string' && !listed.has(value)) {
+      delete answer[field.key];
+      custom[field.key] = { on: true, text: value };
+    }
+  }
+  return { answer, custom };
+}
+
+const customOf = (draft: FormDraft, field: FormField): CustomDraft => draft.custom[field.key] ?? { on: false, text: '' };
+
+const withCustom = (draft: FormDraft, field: FormField, next: CustomDraft): FormDraft => ({
+  ...draft,
+  custom: { ...draft.custom, [field.key]: next },
+});
+
+const picked = (draft: FormDraft, field: FormField): string[] => {
+  const value = draft.answer[field.key];
+  return Array.isArray(value) ? value : [];
+};
+
+/** Whether an option (by value; a yes-or-no question's are 'true' and 'false') is chosen. */
+export function isChosen(draft: FormDraft, field: FormField, value: string): boolean {
+  const current = draft.answer[field.key];
+  if (field.type === 'multiselect') return picked(draft, field).includes(value);
+  if (field.type === 'boolean') return current !== undefined && String(current) === value;
+  return !customOf(draft, field).on && current === value;
+}
+
+/** Picks an option: for one answer it replaces the choice (own answer included), for several it toggles. */
+export function chooseOption(draft: FormDraft, field: FormField, value: string): FormDraft {
+  if (field.type === 'multiselect') {
+    const chosen = picked(draft, field);
+    const next = chosen.includes(value) ? chosen.filter((item) => item !== value) : [...chosen, value];
+    return { ...draft, answer: { ...draft.answer, [field.key]: next } };
+  }
+  const answer = { ...draft.answer, [field.key]: field.type === 'boolean' ? value === 'true' : value };
+  const custom = draft.custom[field.key];
+  return custom ? withCustom({ ...draft, answer }, field, { ...custom, on: false }) : { ...draft, answer };
+}
+
+/** Picks the own-answer row: for one answer it is the choice, for several it toggles. */
+export function chooseCustom(draft: FormDraft, field: FormField): FormDraft {
+  const custom = customOf(draft, field);
+  return withCustom(draft, field, { ...custom, on: field.type === 'multiselect' ? !custom.on : true });
+}
+
+/** Types into the own-answer row, which chooses it. */
+export const typeCustom = (draft: FormDraft, field: FormField, text: string): FormDraft =>
+  withCustom(draft, field, { on: true, text });
+
+/** Sets a typed field's value (free text, a number). */
+export const setValue = (draft: FormDraft, field: FormField, value: FormValue): FormDraft => ({
+  ...draft,
+  answer: { ...draft.answer, [field.key]: value },
+});
+
+/** The draft as answers: the own-answer text (trimmed) replaces or joins the chosen options. */
+export function draftAnswer(form: PendingForm, draft: FormDraft): FormAnswer {
+  const answer: FormAnswer = { ...draft.answer };
+  for (const field of form.fields) {
+    const custom = draft.custom[field.key];
+    if (!allowsCustom(field) || !custom?.on) continue;
+    const text = custom.text.trim();
+    if (field.type === 'multiselect') {
+      const chosen = picked(draft, field);
+      answer[field.key] = text && !chosen.includes(text) ? [...chosen, text] : chosen;
+    } else if (text) answer[field.key] = text;
+    else delete answer[field.key];
+  }
+  return answer;
+}
+
+/** Whether a field has an answer (a skipped one has none). */
+export const isAnswered = (field: FormField, answer: FormAnswer): boolean => !blank(answer[field.key]);

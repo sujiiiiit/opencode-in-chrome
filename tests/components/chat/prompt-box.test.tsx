@@ -211,3 +211,20 @@ describe('PromptBox delivery', () => {
     expect(screen.queryByRole('button', { name: /steer|queue/i })).toBeNull();
   });
 });
+
+describe('PromptBox question takeover', () => {
+  it('shows a question inside the box in place of the editor, and keeps the draft for after', async () => {
+    const { ref, rerender } = setup({ disabled: false });
+    act(() => ref.current?.setText('half a thought'));
+    rerender({ disabled: false, takeover: <p>Which one?</p> });
+    const card = document.querySelector('[data-slot="prompt-box"]')!;
+    expect(card).toContainElement(screen.getByText('Which one?'));
+    // The editor and its toolbar step aside (hidden, still mounted, so nothing is lost).
+    expect(screen.queryByRole('textbox', { name: /message/i })).toBeNull();
+    expect(screen.queryByRole('button', { name: /^send$/i })).toBeNull();
+    rerender({ disabled: false, takeover: undefined });
+    expect(screen.queryByText('Which one?')).toBeNull();
+    expect(box()).toHaveTextContent('half a thought');
+    expect(submit()).toBeInTheDocument();
+  });
+});

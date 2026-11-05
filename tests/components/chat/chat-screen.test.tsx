@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { ChatScreen } from '@/components/chat/chat-screen';
 import type { Connection } from '@/lib/opencode/connection';
 import { fakeOpencode, type FakeOpencode } from '@/tests/support/queue-server';
-import { BASE, MODELS, PROVIDER_ERROR, TOKEN, jsonResponse, routeFetch, sseStream, unauthorized } from '@/tests/support/testkit';
+import { BASE, MODELS, PROVIDER_ERROR, SESSION_ID, TOKEN, jsonResponse, routeFetch, sseStream, unauthorized } from '@/tests/support/testkit';
 import { transfer } from '@/tests/support/transfer';
 
 const connection: Connection = {
@@ -288,5 +288,42 @@ describe('ChatScreen: follow-ups', () => {
     fake.say('corrected', 'msg_assistant_2');
     expect(await screen.findByText('corrected')).toBeInTheDocument();
     expect(bubble('correction')).not.toHaveAttribute('data-pending');
+  });
+});
+
+describe('ChatScreen: questions from the agent', () => {
+  it('asks inside the prompt box, sends the answer and gives the box back', async () => {
+    const fake = fakeOpencode({
+      overrides: {
+        [`POST /api/session/${SESSION_ID}/form/frm_q/reply`]: () => new Response(null, { status: 204 }),
+      },
+    });
+    const { user } = mount(fake);
+    await startTurn(fake, user);
+    fake.emit('form.created', {
+      form: {
+        id: 'frm_q',
+        sessionID: SESSION_ID,
+        title: 'Questions',
+        fields: [
+          {
+            key: 'q0',
+            title: 'Video',
+            description: 'What kind of video should I make?',
+            type: 'string',
+            custom: true,
+            options: [{ value: 'Tutorial', label: 'Tutorial', description: 'Step-by-step guide' }],
+          },
+        ],
+      },
+    });
+    const card = () => document.querySelector<HTMLElement>('[data-slot="prompt-box"]')!;
+    expect(await within(card()).findByRole('heading', { name: 'What kind of video should I make?' })).toBeInTheDocument();
+    expect(screen.queryByRole('textbox', { name: /message/i })).toBeNull();
+    await user.click(within(card()).getByRole('radio', { name: /tutorial/i }));
+    await user.click(within(card()).getByRole('button', { name: 'Submit' }));
+    await waitFor(() => expect(box()).toBeInTheDocument());
+    const reply = fake.fetch.calls.find((call) => call.url.pathname.endsWith('/form/frm_q/reply'))!;
+    expect(JSON.parse(String(reply.init.body))).toMatchObject({ answer: { q0: 'Tutorial' } });
   });
 });

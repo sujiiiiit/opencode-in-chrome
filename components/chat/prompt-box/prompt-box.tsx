@@ -6,6 +6,7 @@ import { Tooltip } from '@/components/ui/tooltip';
 import { insertLineBreak } from './editor-dom';
 import { keyAction, type KeyAction } from './keys';
 import { usePlainTextEditor, type PromptBoxHandle } from './use-editor';
+import { useSmoothHeight } from './use-smooth-height';
 
 export type { PromptBoxHandle } from './use-editor';
 
@@ -28,6 +29,11 @@ type Props = {
   footer?: ReactNode;
   /** Shown above the text (the attached images). */
   attachments?: ReactNode;
+  /**
+   * Shown inside the card in place of the editor and its toolbar (a question the agent asks).
+   * The editor stays mounted, hidden, so the draft and its images are there again afterwards.
+   */
+  takeover?: ReactNode;
   onChange: (text: string) => void;
   onSubmit: () => void;
   onStop: () => void;
@@ -69,13 +75,39 @@ function SubmitButton({
 }
 
 /**
+ * The row overlaid at the card's bottom: controls at the start, the submit button at the end.
+ * Clicks on its empty space fall through to the editor underneath. Its bottom radius must match
+ * the card's: a smaller radius lets this opaque background paint over the card's 1px shadow ring
+ * at the bottom corners, making the border look cut off. `rounded-b-surface` shares the card's
+ * radius token.
+ */
+function Toolbar(props: Pick<Props, 'controls' | 'stopping' | 'held' | 'disabled' | 'onSubmit' | 'onStop'>) {
+  return (
+    <div className="pointer-events-none absolute inset-x-0 bottom-0 flex h-10 items-center justify-between gap-2 rounded-b-surface bg-background px-2 pt-1 pb-2">
+      <div className="pointer-events-auto flex min-w-0 items-center overflow-x-auto no-scrollbar">{props.controls}</div>
+      <div className="pointer-events-auto flex shrink-0 items-center gap-1.5">
+        <SubmitButton
+          stopping={props.stopping}
+          held={props.held}
+          disabled={props.disabled}
+          onSubmit={props.onSubmit}
+          onStop={props.onStop}
+        />
+      </div>
+    </div>
+  );
+}
+
+/**
  * Plain-text prompt box built on a `contenteditable` div, modelled on opencode's composer. The
  * owner decides what a submit means (send or stop); this component
  * renders the editor, the submit button states and the keyboard shortcuts (see `keyAction`).
  *
- * Height: the editor is never measured or sized from JS. It grows with its own content inside a
- * `max-h` ScrollArea viewport, so each new line lands in the same frame as the keystroke: no
- * one-frame lag, no flicker. The ScrollArea scrollbar overlays the content (it takes no width),
+ * Height: the editor is never sized from JS. It grows with its own content inside a `max-h`
+ * ScrollArea viewport, so each new line lands in the same frame as the keystroke: no one-frame
+ * lag, no flicker. The card follows that height (useSmoothHeight): it snaps while typing, and
+ * glides when images are attached or removed and when it clears after a send, so the chat
+ * above eases along with it instead of jumping. The ScrollArea scrollbar overlays the content (it takes no width),
  * so a long prompt does not rewrap as it starts to scroll. Text fades out softly at the top edge
  * and just above the toolbar (mask gradient) instead of being cut off.
  *
@@ -91,6 +123,7 @@ function SubmitButton({
  */
 export function PromptBox({ ref, placeholder = PLACEHOLDER, ...props }: Props) {
   const { editor, text, handlers } = usePlainTextEditor(ref, props.onChange, props.onPasteFiles);
+  const card = useSmoothHeight<HTMLDivElement, HTMLDivElement, HTMLDivElement>();
 
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     const { key, ctrlKey, metaKey, altKey, shiftKey, repeat, keyCode } = event;
@@ -110,60 +143,55 @@ export function PromptBox({ ref, placeholder = PLACEHOLDER, ...props }: Props) {
     <div className="px-3 pb-3 pt-1">
       {/* Notion-style surface: no CSS border (the 1px hairline is the first shadow layer).
           Elevation tokens live in global.css: rest -> hover -> focus. Hover only applies while
-          the box is not focused, so moving the mouse never weakens the focused lift. */}
+          the box is not focused, so moving the mouse never weakens the focused lift. The card
+          glides to its content's height (useSmoothHeight); the motion and the bottom-pinned,
+          clipped content live in global.css under [data-slot="prompt-box"]. */}
       <div
+        ref={card.outer}
         data-slot="prompt-box"
-        className="group/prompt-box relative rounded-surface bg-background shadow-surface-rest transition-shadow duration-150 ease-standard hover:not-focus-within:shadow-surface-hover focus-within:shadow-surface-focus"
+        className="group/prompt-box relative rounded-surface bg-background shadow-surface-rest hover:not-focus-within:shadow-surface-hover focus-within:shadow-surface-focus"
       >
-        {props.attachments}
-        <ScrollArea
-          fade
-          className="rounded-surface [--fade-top-max:2rem] [--fade-bottom-max:3rem] [--fade-bottom-inset:2.5rem]"
-          viewportClassName="max-h-70 overscroll-contain scroll-pt-3 scroll-pb-10"
-          scrollbarClassName="top-3! bottom-12! h-auto!"
-        >
-          <div className="relative">
-          <div
-            ref={editor}
-            role="textbox"
-            aria-label="Message"
-            aria-multiline="true"
-            aria-placeholder={placeholder}
-            contentEditable
-            suppressContentEditableWarning
-            spellCheck
-            dir="auto"
-            autoCapitalize="sentences"
-            className="block min-h-24 w-full whitespace-pre-wrap break-words px-4 pt-3 pb-10 type-body text-text-primary caret-text-primary outline-none [unicode-bidi:plaintext]"
-            onKeyDown={onKeyDown}
-            {...handlers}
-          />
-          {text === '' && (
-            <div
-              aria-hidden="true"
-              className="pointer-events-none absolute inset-x-0 top-0 select-none truncate px-4 pt-3 type-body text-text-tertiary"
-            >
-              {placeholder}
+        <div ref={card.inner} className="shrink-0">
+          {props.takeover}
+          <div hidden={!!props.takeover}>
+            {props.attachments}
+            <div ref={card.steady}>
+              <ScrollArea
+                fade
+                className="rounded-surface [--fade-top-max:2rem] [--fade-bottom-max:3rem] [--fade-bottom-inset:2.5rem]"
+                viewportClassName="max-h-70 overscroll-contain scroll-pt-3 scroll-pb-10"
+                scrollbarClassName="top-3! bottom-12! h-auto!"
+              >
+                <div className="relative">
+                  <div
+                    ref={editor}
+                    role="textbox"
+                    aria-label="Message"
+                    aria-multiline="true"
+                    aria-placeholder={placeholder}
+                    contentEditable
+                    suppressContentEditableWarning
+                    spellCheck
+                    dir="auto"
+                    autoCapitalize="sentences"
+                    className="block min-h-24 w-full whitespace-pre-wrap break-words px-4 pt-3 pb-10 type-body text-text-primary caret-text-primary outline-none [unicode-bidi:plaintext]"
+                    onKeyDown={onKeyDown}
+                    {...handlers}
+                  />
+                  {text === '' && (
+                    <div
+                      aria-hidden="true"
+                      className="pointer-events-none absolute inset-x-0 top-0 select-none truncate px-4 pt-3 type-body text-text-tertiary"
+                    >
+                      {placeholder}
+                    </div>
+                  )}
+                </div>
+              </ScrollArea>
             </div>
-          )}
-          </div>
-        </ScrollArea>
-        {/* Overlay toolbar: clicks on its empty space fall through to the editor underneath.
-            Its bottom radius must match the card's: a smaller radius lets this opaque background
-            paint over the card's 1px shadow ring at the bottom corners, making the border look
-            cut off. `rounded-b-surface` shares the card's radius token. */}
-        <div className="pointer-events-none absolute inset-x-0 bottom-0 flex h-10 items-center justify-between gap-2 rounded-b-surface bg-background px-2 pt-1 pb-2">
-          <div className="pointer-events-auto flex min-w-0 items-center overflow-x-auto no-scrollbar">{props.controls}</div>
-          <div className="pointer-events-auto flex shrink-0 items-center gap-1.5">
-            <SubmitButton
-              stopping={props.stopping}
-              held={props.held}
-              disabled={props.disabled}
-              onSubmit={props.onSubmit}
-              onStop={props.onStop}
-            />
           </div>
         </div>
+        {!props.takeover && <Toolbar {...props} />}
       </div>
       {props.footer && <div className="flex min-w-0 items-center px-1.5 pt-1.5">{props.footer}</div>}
     </div>

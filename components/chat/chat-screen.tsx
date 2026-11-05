@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react';
 import { browser } from 'wxt/browser';
 import { Button } from '@/components/ui/button';
 import { Icon } from '@/components/ui/icon';
@@ -160,17 +160,21 @@ function ComposerFooter({ models, onOpenPicker }: { models: Models; onOpenPicker
   );
 }
 
-/** The questions the running turn is asking, over the composer. */
-function PaneForms({ session }: { session: ReturnType<typeof useChatSession> }) {
-  const { chat, state } = session;
-  return state.forms.map((form) => (
+/**
+ * The question the running turn is asking (the oldest, when several wait), asked inside the
+ * prompt box. Keyed by form, so the next one starts from its own first page and defaults.
+ */
+function paneQuestion({ chat, state }: ReturnType<typeof useChatSession>): ReactNode {
+  const form = state.forms[0];
+  if (!form) return null;
+  return (
     <FormCard
       key={form.id}
       form={form}
       onAnswer={(id, answer) => chat?.answerForm(id, answer)}
       onCancel={(id) => chat?.cancelForm(id)}
     />
-  ));
+  );
 }
 
 /** The model picker's open state and its shortcuts (⌘' opens it, ⇧⌘D cycles the effort). */
@@ -203,6 +207,8 @@ type ChatComposerProps = {
   models: Models;
   /** The chat is on screen: files dropped on the panel attach to the draft. */
   active: boolean;
+  /** A question the agent asks, shown in the box in place of the editor. */
+  question: ReactNode;
   onOpenPicker: () => void;
 };
 
@@ -210,7 +216,7 @@ type ChatComposerProps = {
  * The prompt box with its attach menu, attached images and model chips, and the drop zone that
  * covers the whole pane (the overlay is placed against the pane, its nearest positioned box).
  */
-function ChatComposer({ box, composer, models, active, onOpenPicker }: ChatComposerProps) {
+function ChatComposer({ box, composer, models, active, question, onOpenPicker }: ChatComposerProps) {
   // History, sliding over the chat, takes no drops.
   const dragging = useFileDrop(composer.addFiles, active);
   return (
@@ -221,6 +227,7 @@ function ChatComposer({ box, composer, models, active, onOpenPicker }: ChatCompo
         controls={<AttachMenu onFiles={composer.addFiles} />}
         footer={models.store && <ComposerFooter models={models} onOpenPicker={onOpenPicker} />}
         attachments={<AttachmentStrip images={composer.images} onRemove={composer.removeImage} />}
+        takeover={question}
         placeholder={composer.placeholder}
         working={composer.working}
         held={composer.held}
@@ -274,10 +281,9 @@ function ChatPane({ connection, session, models, active, onHistory, onNewChat }:
         </ModelCatalogProvider>
       </ShellOutputProvider>
       <div className="mx-auto w-full max-w-chat">
-        <PaneForms session={session} />
         {searchError && <Notice text={`Web search: ${searchError}`} onDismiss={() => setSearchError(null)} />}
         <PaneNotice session={session} models={models} />
-        <ChatComposer box={box} composer={composer} models={models} active={active} onOpenPicker={picker.open} />
+        <ChatComposer box={box} composer={composer} models={models} active={active} question={paneQuestion(session)} onOpenPicker={picker.open} />
       </div>
       {store && <ModelPicker open={picker.picking} onOpenChange={picker.onOpenChange} store={store} state={models.state} />}
     </div>
