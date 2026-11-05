@@ -50,7 +50,8 @@ describe('AssistantReply', () => {
     // One line, never two texts overlaid: "Thinking" fades out first, then the new label fades in.
     const activity = header.querySelector('[data-slot="work-activity"]')!;
     expect(activity).toHaveTextContent('Thinking');
-    expect(activity).toHaveAttribute('data-phase', 'out');
+    await waitFor(() => expect(activity).toHaveAttribute('data-phase', 'out'));
+    expect(activity).toHaveTextContent('Thinking');
     await waitFor(() => expect(activity).toHaveTextContent('Reading a.ts'));
     expect(activity).toHaveAttribute('data-phase', 'in');
     expect(header.querySelector('[data-slot="work-activity"]')).toBe(activity);
@@ -494,7 +495,9 @@ describe('AssistantReply', () => {
     const groups = root.querySelectorAll('[data-slot="work-group"]');
     expect(root).toHaveAttribute('data-footer-host');
     expect(groups[1]!.compareDocumentPosition(footer) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(screen.getByText('Interrupted')).toBeInTheDocument();
+    const notice = root.querySelector('[data-slot="reply-interrupted"]');
+    expect(notice).toHaveTextContent('Stopped before the reply finished.');
+    expect(footer.compareDocumentPosition(notice!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(within(footer as HTMLElement).getByRole('button', { name: 'Copy response' })).toBeInTheDocument();
   });
 
