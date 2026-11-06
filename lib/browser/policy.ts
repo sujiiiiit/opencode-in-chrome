@@ -92,6 +92,10 @@ function submitsWithEnter(call: GuardCall, target: TargetLike): boolean {
   return call.tool === 'computer' && call.action === 'key' && !!target.inForm && /\b(enter|return)\b/i.test(call.text ?? '');
 }
 
+function crossesLinkSite(call: GuardCall, target: TargetLike, pageUrl: string): boolean {
+  return call.tool === 'computer' && call.action.includes('click') && !!target.url && siteKey(target.url) !== siteKey(pageUrl);
+}
+
 export type PolicyDeps = {
   store: KeyValue<PolicySettings>;
   approve: (request: ApprovalRequest) => Promise<ApprovalAnswer>;
@@ -148,7 +152,7 @@ export class Policy {
    * The site gate every page tool passes (reads included): blocked sites fail; in "ask"
    * mode a site not yet allowed needs the user's OK once per session.
    */
-  async siteGate(sessionID: string, url: string, tool: string, tier: Tier = 'read'): Promise<void> {
+  async siteGate(sessionID: string, url: string, tool: string, tier: Tier = 'read', requireExplicit = false): Promise<void> {
     this.assertRunning();
     const site = siteKey(url);
     if (!site) return;
@@ -158,7 +162,7 @@ export class Policy {
       throw new ToolError('BLOCKED_SITE', `${site} is blocked in the browser settings. Do not try to reach it another way; ask the user.`);
     }
     this.trackSensitiveRead(sessionID, site, tier, settings);
-    if (this.siteAllowed(sessionID, site, rule, settings)) return;
+    if (this.siteAllowed(sessionID, site, rule, settings) && (!requireExplicit || rule === 'allow' || this.allowedThisSession.get(sessionID)?.has(site))) return;
     const answer = await this.deps.approve({ sessionID, kind: 'site', site, tool, summary: `Use ${site}`, tier });
     await this.applySiteAnswer(sessionID, site, answer, settings);
     this.assertRunning();
@@ -199,7 +203,7 @@ export class Policy {
     const pageUrl = await this.deps.currentUrl(call.tabId);
     const target = (call.target ?? {}) as TargetLike;
     // Navigations are judged by where they go; everything else by the page they act on.
-    const destination = call.tool === 'navigate' && target.url ? target.url : pageUrl;
+    const destination = target.url ?? pageUrl;
     let tier = classify(call, pageUrl);
     if (tier === 'handoff') {
       throw new ToolError('DENIED', `This step (${call.summary || call.action}) is for the user: passwords, one-time codes, card numbers, CAPTCHAs and sign-in consent screens are never done by the agent. Ask the user to do it, then continue.`);
@@ -209,7 +213,7 @@ export class Policy {
     if (this.leavesSensitiveSite(call, site, tier)) {
       tier = 'consequential';
     }
-    await this.siteGate(call.sessionID, destination, call.tool, tier);
+    await this.siteGate(call.sessionID, destination, call.tool, tier, crossesLinkSite(call, target, pageUrl));
     await this.approveAction(call, site, tier);
     // The tab may have moved while we waited: the approval was for that site only.
     await this.assertSiteUnchanged(call, expectedUrl ?? pageUrl);

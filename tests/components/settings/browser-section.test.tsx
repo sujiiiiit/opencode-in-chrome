@@ -9,14 +9,14 @@ import { BROWSER_ENABLED_KEY, loadPolicy, POLICY_KEY } from '@/lib/browser/setti
 beforeEach(() => fakeBrowser.reset());
 
 describe('BrowserSection', () => {
-  it('turns browser access on and persists it', async () => {
+  it('starts with browser access on and persists an explicit off choice', async () => {
     const user = userEvent.setup();
     render(<BrowserSection />);
     const toggle = await screen.findByRole('switch', { name: 'Let chats use the browser' });
-    expect(toggle).not.toBeChecked();
+    expect(toggle).toBeChecked();
     await user.click(toggle);
-    await waitFor(async () => expect((await fakeBrowser.storage.local.get(BROWSER_ENABLED_KEY))[BROWSER_ENABLED_KEY]).toBe(true));
-    await waitFor(() => expect(toggle).toBeChecked());
+    await waitFor(async () => expect((await fakeBrowser.storage.local.get(BROWSER_ENABLED_KEY))[BROWSER_ENABLED_KEY]).toBe(false));
+    await waitFor(() => expect(toggle).not.toBeChecked());
   });
 
   it('switches the approval mode', async () => {

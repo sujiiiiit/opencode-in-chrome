@@ -1,8 +1,9 @@
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fakeBrowser } from 'wxt/testing/fake-browser';
 import { ChatScreen } from '@/components/chat/chat-screen';
+import { BROWSER_ENABLED_KEY } from '@/lib/browser/settings';
 import { ACTIVE_CHAT_KEY } from '@/lib/opencode/active-chat';
 import type { Connection } from '@/lib/opencode/connection';
 import { extensionSession, fakeOpencode, type FakeOpencode, type SessionRow } from '@/tests/support/queue-server';
@@ -15,6 +16,8 @@ const connection: Connection = {
   serverVersion: '2.2.5',
   pairedAt: 1,
 };
+
+beforeEach(() => fakeBrowser.storage.local.set({ [BROWSER_ENABLED_KEY]: false }));
 
 const now = Date.now();
 const transcript = [

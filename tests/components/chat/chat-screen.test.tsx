@@ -1,7 +1,9 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { fakeBrowser } from 'wxt/testing/fake-browser';
 import { ChatScreen } from '@/components/chat/chat-screen';
+import { BROWSER_ENABLED_KEY } from '@/lib/browser/settings';
 import type { Connection } from '@/lib/opencode/connection';
 import { fakeOpencode, type FakeOpencode } from '@/tests/support/queue-server';
 import { BASE, MODELS, PROVIDER_ERROR, SESSION_ID, TOKEN, jsonResponse, routeFetch, sseStream, unauthorized } from '@/tests/support/testkit';
@@ -14,6 +16,8 @@ const connection: Connection = {
   serverVersion: '2.2.5',
   pairedAt: 1,
 };
+
+beforeEach(() => fakeBrowser.storage.local.set({ [BROWSER_ENABLED_KEY]: false }));
 
 const box = () => screen.getByRole('textbox', { name: /message/i });
 const submitButton = () => screen.getByRole('button', { name: /^(send|stop)$/i });

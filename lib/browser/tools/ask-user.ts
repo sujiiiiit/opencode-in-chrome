@@ -9,7 +9,7 @@ const TIMEOUT_MS = 5 * 60_000;
 export function askUserTool(server: ServerAccess, pollMs = 500, timeoutMs = TIMEOUT_MS, onStop?: (cb: () => void) => () => void): ToolDef {
   return {
     name: 'ask_user',
-    description: 'Ask the user one simple question, or hand them a step such as sign-in or CAPTCHA. Use kind "input" for a short text answer and "takeover" when they must work in the browser, then press Done. Do not use the built-in question tool for browser handoffs.',
+    description: 'Ask one non-secret text question, or hand the browser to the user for sign-in or CAPTCHA. Never request passwords, card details, or one-time codes as text. For payment, tell the user in your final answer that they must complete checkout themselves. Do not use the built-in question tool for browser handoffs.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -19,13 +19,18 @@ export function askUserTool(server: ServerAccess, pollMs = 500, timeoutMs = TIME
       required: ['kind', 'message'],
     },
     async handler(args, { sessionID }) {
-      return askUser(server, sessionID, args.kind as 'input' | 'takeover', String(args.message).trim(), pollMs, timeoutMs, onStop);
+      const kind = args.kind as 'input' | 'takeover';
+      const message = String(args.message).trim();
+      if (!message) throw new ToolError('INVALID_INPUT', '`message` must say what the user should do.');
+      if (kind === 'input' && /(?:card (?:number|details|information|digits)|cvc|cvv|expir(?:y|ation)|password|passcode|one.time code|otp|security code)/i.test(message)) {
+        throw new ToolError('DENIED', 'Do not request payment details or secrets in a text answer. Tell the user to complete payment themselves, or use takeover for sign-in and similar browser steps.');
+      }
+      return askUser(server, sessionID, kind, message, pollMs, timeoutMs, onStop);
     },
   };
 }
 
 async function askUser(server: ServerAccess, sessionID: string, kind: 'input' | 'takeover', message: string, pollMs: number, timeoutMs: number, onStop?: (cb: () => void) => () => void) {
-  if (!message) throw new ToolError('INVALID_INPUT', '`message` must say what the user should do.');
   const client = await server();
   if (!client) throw new ToolError('INTERNAL', 'The opencode connection is unavailable; ask the user in your reply.');
   let stopped = false;

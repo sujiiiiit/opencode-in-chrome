@@ -64,6 +64,17 @@ describe('runTool', () => {
     expect(onInternalError).toHaveBeenCalledWith('navigate', expect.any(Error));
   });
 
+  it('includes current browser state after an error', async () => {
+    const result = await runTool(
+      def(async () => { throw new ToolError('NO_EFFECT', 'This click was not sent.'); }),
+      { url: 'x' },
+      'ses_1',
+      { footer: async () => '<browser-state>\nunverified: left_click [e1]\n</browser-state>' },
+    );
+    expect(text(result)).toContain('NO_EFFECT: This click was not sent.\n\n<browser-state>');
+    expect(text(result)).toContain('unverified: left_click [e1]');
+  });
+
   it('joins text parts, appends the footer and returns images after the text', async () => {
     const result = await runTool(
       def(async () => ({ text: ['Navigated', 'more'], images: [{ data: 'AAA', mimeType: 'image/jpeg' }], tabId: 7 })),

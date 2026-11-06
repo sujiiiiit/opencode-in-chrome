@@ -80,9 +80,11 @@
 - The URL rule alone is the simplest fix for the observed race. A redirect to another origin still commits a non-blank URL, so it still counts.
 - `navigationText` adds what it waited for.
 
-### D8. Direct tool exposure is a timeboxed investigation
-- Check opencode 2.2.5 config and the server source or docs for a setting that lists client-MCP tools as top-level tools. Record the finding in this design.
-- If such a setting exists, it is a server-side setting, so we document it. The extension can't switch it on.
+### D8. Direct tool exposure through a session permission
+- Check opencode 2.2.5 config and server source for a route that lists client-MCP tools as top-level tools.
+- Apply only to browser-capable sessions so other MCPs and skills remain registered.
+
+**Finding (2026-11-06):** The local OpenCode source at `D:/opencode/packages/core/src/tool.ts` exposes every registered tool directly when the session's permission rules wholly deny `execute` (`action: "execute", resource: "*", effect: "deny"`). `McpTool` registers client-MCP tools as `browser_<name>`; the browser session can therefore select direct tools without changing global server config or disabling other MCPs or skills. The side panel and live goal runner now set this session rule, and the browsing guide names direct tools. With the requested Nemotron model, goal-only live runs passed read-price, add-to-cart, fill-order, follow-link, payment handoff, and attack-shop. The previous code-mode add-to-cart run timed out. Direct tools increased call count in the observed runs, so the wider suite still needs to measure reliability and time.
 
 ### D9. Goal suite
 - `e2e/live-goals.spec.ts` (tagged `@live`) reuses the `live.spec.ts` pairing. Each task creates a session the way the side panel does (guide entry and end-of-turn note), so the suite tests the real product path. The note logic is factored into `lib/opencode/turn-end.ts` and called from both places.

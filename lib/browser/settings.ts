@@ -3,7 +3,7 @@
 import { browser } from 'wxt/browser';
 import type { ApprovalMode, PolicySettings, SiteSettings } from './policy';
 
-/** Off until the user turns it on: nothing can act in the browser before that. */
+/** Browser access is on by default; an explicit false turns it off. */
 export const BROWSER_ENABLED_KEY = 'opencode.browser.enabled';
 export const POLICY_KEY = 'opencode.browser.policy';
 /** storage.session: each session's tab group and tabs (lib/browser/tabs.ts). */
@@ -13,7 +13,7 @@ export const STOPPED_KEY = 'opencode.browser.stopped';
 
 export async function isBrowserAccessEnabled(): Promise<boolean> {
   const stored = await browser.storage.local.get(BROWSER_ENABLED_KEY);
-  return stored[BROWSER_ENABLED_KEY] === true;
+  return stored[BROWSER_ENABLED_KEY] !== false;
 }
 
 export async function setBrowserAccess(enabled: boolean): Promise<void> {

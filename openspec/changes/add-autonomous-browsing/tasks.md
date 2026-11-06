@@ -42,12 +42,12 @@ Test levels follow `add-browser-agent` D14. Live steps need `OPENCODE_LIVE=1`, a
 
 - [x] 6.1 Create `lib/browser/completion.ts`, which keeps per-session debt fed from the `withSafety` wrapper: created by `effect: 'none'` or a delivery-uncertain failure, cleared by a read of the tab or a later changed effect on it, and dropped on tab close with a note. Verify with unit tests for each creation and clearing rule.
 - [x] 6.2 Add the `done` tool and the `UNVERIFIED` code: it refuses `success` with named debts, downgrades to `partial` after two refusals, accepts `partial`/`failed`, and clears debt and counters. Add a `done` label in `lib/opencode/tool-info.ts`. Verify with unit tests and a tool-info test.
-- [ ] 6.3 Extend `LoopGuard` with per-target no-effect counts, a nudge at 2 and `NO_EFFECT` at 3 (a new code). The refusal is lifted by an observation of the tab, and the count is reset by a visible effect. Verify with unit tests and an e2e spec on a dead button: third click refused, read unlocks it.
+- [x] 6.3 Extend `LoopGuard` with per-target no-effect counts, a nudge at 2 and `NO_EFFECT` at 3 (a new code). The refusal is lifted by an observation of the tab, and the count is reset by a visible effect. Verify with unit tests and an e2e spec on a dead button: third click refused, read unlocks it.
 - [ ] 6.4 Create `lib/opencode/turn-end.ts`. When a turn has a page action and no completed `done`, it calls `session.synthetic({ text, description, delivery: 'queue', resume: true })` once per user message, and never after Stop. Call it from `chat-screen.tsx` on idle. Render `synthetic` messages in `history-view` as an extension note. Verify with unit tests for the trigger rules, a component test for the note's rendering, and a live Vitest test that the session resumes and calls `done`.
 
 ## 7. Direct tool exposure (design D8)
 
-- [ ] 7.1 Look for an opencode 2.2.5 setting that lists client-MCP tools as top-level tools (config schema from `config.get`, server docs or changelog). Record the finding under D8 in `design.md`. If one exists, add a test run of the goal suite with it on, and note the result in the report. Verify by reading the updated D8.
+- [x] 7.1 Look for an opencode 2.2.5 setting that lists client-MCP tools as top-level tools (config schema from `config.get`, server docs or changelog). Record the finding under D8 in `design.md`. If one exists, add a test run of the goal suite with it on, and note the result in the report. Verify by reading the updated D8.
 
 ## 8. Measure and finish
 

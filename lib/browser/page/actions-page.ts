@@ -24,6 +24,8 @@ export type TargetInfo = {
   /** Whether a click here submits a form. */
   submits: boolean;
   inForm: boolean;
+  /** A link's resolved destination, for the pre-click site gate. */
+  url?: string;
 };
 
 const describe = (el: Element): string => {
@@ -119,6 +121,7 @@ export function locate(registry: ElementRegistry, doc: Document, n: number, chec
     secret: secretKind(el),
     submits: submits(el),
     inForm: !!el.closest('form'),
+    ...(el.tagName === 'A' && (el as HTMLAnchorElement).href ? { url: (el as HTMLAnchorElement).href } : {}),
   };
 }
 

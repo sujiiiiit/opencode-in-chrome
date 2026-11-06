@@ -1,7 +1,7 @@
 // The browsing guide (spec browser/agent-guidance, design D1): fixed working rules every
 // session that uses the browser tools gets as an opencode per-session instruction entry, so
 // the model can finish a task from a plain goal. Adapted from Nanobrowser's agent prompt
-// (research_notes/nanobrowser-reference.md) for our tools and opencode's code mode.
+// (research_notes/nanobrowser-reference.md) for our direct browser tools.
 import type { OpenCodeClient } from '../opencode/client';
 import { browser } from 'wxt/browser';
 import { sessionValue } from './chrome';
@@ -10,10 +10,11 @@ import { isBrowserAccessEnabled } from './settings';
 /** The instruction entry key in a session. */
 export const GUIDE_KEY = 'browser';
 
-/** Hide only browser skills that route this panel's agent to a different browser bridge. */
+/** Browser sessions expose every registered tool directly; other MCPs and skills stay available. */
 export const CONFLICTING_BROWSER_SKILL_PERMISSIONS = [
   { action: 'skill', resource: 'chrome-browser', effect: 'deny' },
   { action: 'skill', resource: 'built-in-browser', effect: 'deny' },
+  { action: 'execute', resource: '*', effect: 'deny' },
 ] as const;
 
 export async function browserSessionPermissions() {
@@ -22,21 +23,21 @@ export async function browserSessionPermissions() {
 
 export const BROWSER_GUIDE = `# Working in the user's browser
 
-You can control the user's Chrome through the browser tools. The only callable tool name for browser work is \`execute\`. Put JavaScript such as \`return await tools.browser.tabs_context()\` in its \`code\` argument. \`tools.browser.tabs_context\` is a JavaScript API inside \`execute\`, never a tool name to call directly. Each call returns text.
+You can control the user's Chrome through direct browser tools named \`browser_tabs_context\`, \`browser_read_page\`, \`browser_computer\`, and so on. Call these tools by name with their schema arguments. Each call returns text.
 
 ## How to work
 - Work only in this session's tabs. Every result ends with a <browser-state> block: your tabs, the current one, open dialogs, tabs that changed without you, and actions you have not verified. "This page" means the current tab.
 - The web page beside the side panel joins a new chat automatically. Call tabs_context first to see it. Listing tabs does not require a separate consent question; browser tools handle site and action approvals.
 - Observe before you act on a page you have not seen or that has changed: \`read_page\` (or \`find\` for one element), then act on the refs it shows, such as [e12]. Refs from before a page changed are no longer valid.
 - For any task that clicks, types or changes a page, call \`read_page\` first because it supplies refs. \`get_page_text\` supplies text without actionable refs. Use \`computer\` or \`form_input\` on those refs; do not use \`javascript\` for ordinary page interaction or to bypass an approval.
-- Act with \`computer\` (left_click, type, key, scroll, ...) on a ref, or \`form_input\` to set a field, select, checkbox or radio. Use the page's own controls (buttons, filters, sort menus, date fields), the way a person would.
+- Act with \`browser_computer\` (left_click, type, key, scroll, ...) on a ref, or \`browser_form_input\` to set a field, select, checkbox or radio. A combobox or select whose options appear in read_page should be set directly with browser_form_input on the combobox ref and the option's value (for example {ref:"e2",value:"done",action_summary:"Filters to done tasks"}); do not click its option text or use JavaScript. Use the page's own controls (buttons, filters, sort menus, date fields).
 - Read each result. An action's result shows what changed on the page (lines added with +, removed with -), a navigation or a new tab, or "No visible change". You rarely need to read the whole page again after an action whose result shows its change.
 - "No visible change" means the action may not have worked: check the page before you try again, and try another way rather than repeating the same call.
 - After an error, read the page before you retry: repeating an action that was delivered could repeat its effect.
-- Prefer one clear step at a time on a page that changes. Several reads can go in one code block; stop the block after an action that changes the page.
-- \`read_page\` shows the part of the page around the viewport and says how many elements are above and below; scroll, use \`find\`, or pass window: "page" to see more.
+- Prefer one clear step at a time on a page that changes. Several reads can run together; observe again after an action that changes the page.
+- \`browser_read_page\` shows the part of the page around the viewport and says how many elements are above and below; scroll, use \`browser_find\` if offered, or pass window: "page" to see more. For scrolling up, set scroll_direction:"up" and a positive scroll_amount.
 - Keep going until the task is done: never end a reply only to say what you will do next. Make the call.
-- When you need information from the user, call \`ask_user({kind:"input",message:"..."})\` through \`execute\`. For sign-in, CAPTCHA or another step only the user can do, call \`ask_user({kind:"takeover",message:"..."})\`. Its schema has just kind and message; do not call OpenCode's built-in \`question\` for browser handoffs.
+- When you need information from the user, call \`browser_ask_user\` with \`{kind:"input",message:"..."}\`. For sign-in, CAPTCHA or another step only the user can do, use kind \`takeover\`. Do not call OpenCode's built-in \`question\` for browser handoffs.
 
 ## Finishing
 - When the task needed page actions, finish with \`done\`: outcome "success" only when you have seen the result of every action you took (the <browser-state> block lists the ones you have not), otherwise "partial" or "failed". Then give the summary as your final reply.
@@ -49,7 +50,7 @@ You can control the user's Chrome through the browser tools. The only callable t
 
 ## What the user decides
 - Some actions ask the user first (submitting, sending, deleting, buying). A declined action or a blocked site is the user's answer, not an error to work around: continue without it, or ask the user.
-- Payments, signing in, passwords, card numbers, one-time codes and CAPTCHAs are the user's steps. Prepare everything around them, then stop and tell the user exactly what to do. Never type those values yourself.`;
+- Payments, signing in, passwords, card numbers, one-time codes and CAPTCHAs are the user's steps. For payment, do not ask the user to send card details in chat and do not wait in ask_user; finish by telling the user to complete checkout themselves. For sign-in or CAPTCHA, use browser_ask_user with takeover when you need to continue afterwards. Never type secret values yourself.`;
 
 /**
  * The guide's short form, always carried in the `tabs_context` description, so a session whose
@@ -114,7 +115,7 @@ export async function prepareBrowserSession(client: OpenCodeClient, sessionID: s
   const [tab] = await browser.tabs.query({ active: true, lastFocusedWindow: true });
   if (tab?.id === undefined || !/^https?:/.test(tab.url ?? '')) return;
   await browser.runtime.sendMessage({ type: 'opencode.browser.share', sessionID, tabId: tab.id, move: true });
-  return `The user's current browser tab is already open in this chat: tab ${tab.id}, ${JSON.stringify(tab.title ?? '')}, ${JSON.stringify(tab.url)}. Your first tool call must be execute with code "return await tools.browser.tabs_context()". Do not call tools.browser.tabs_context as a tool name. Then read this tab before searching the web or opening another tab.`;
+  return `The user's current browser tab is already open in this chat: tab ${tab.id}, ${JSON.stringify(tab.title ?? '')}, ${JSON.stringify(tab.url)}. Your first tool call must be browser_tabs_context. Then call browser_read_page on this tab before searching the web or opening another tab.`;
 }
 
 /** Wait for tool registration before a model turn when browser access is enabled. */

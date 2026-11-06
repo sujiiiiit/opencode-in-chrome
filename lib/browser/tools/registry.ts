@@ -86,6 +86,18 @@ function errorResult(code: ErrorCode, message: string): ClientMcpToolResult {
   return { content: [{ type: 'text', text: `${code}: ${message}` }], isError: true };
 }
 
+async function errorWithFooter(code: ErrorCode, message: string, sessionID: string, hooks: RegistryHooks, args: Record<string, unknown>): Promise<ClientMcpToolResult> {
+  const footer = await hooks.footer?.(sessionID, typeof args.tabId === 'number' ? args.tabId : undefined).catch(() => undefined);
+  return { content: [{ type: 'text', text: `${code}: ${message}${footer ? `\n\n${footer}` : ''}` }], isError: true };
+}
+
+async function failedTool(error: unknown, def: ToolDef, sessionID: string, hooks: RegistryHooks, args: Record<string, unknown>): Promise<ClientMcpToolResult> {
+  if (error instanceof ToolError) return errorWithFooter(error.code, error.message, sessionID, hooks, args);
+  hooks.onInternalError?.(def.name, error);
+  const detail = error instanceof Error && error.message ? ` (${error.message})` : '';
+  return errorWithFooter('INTERNAL', `The browser tool failed unexpectedly${detail}. Try again, or try a different approach.`, sessionID, hooks, args);
+}
+
 const typeOf = (value: unknown): string => {
   if (Array.isArray(value)) return 'array';
   if (Number.isInteger(value)) return 'integer';
@@ -153,15 +165,12 @@ export async function runTool(
   hooks.onCall?.(sessionID);
   await hooks.beforeCall?.(sessionID).catch(() => undefined);
   const problem = validate(def.inputSchema, args);
-  if (problem) return errorResult('INVALID_INPUT', problem);
+  if (problem) return errorWithFooter('INVALID_INPUT', problem, sessionID, hooks, args);
   let output: ToolOutput;
   try {
     output = await def.handler(args, { sessionID });
   } catch (error) {
-    if (error instanceof ToolError) return errorResult(error.code, error.message);
-    hooks.onInternalError?.(def.name, error);
-    const detail = error instanceof Error && error.message ? ` (${error.message})` : '';
-    return errorResult('INTERNAL', `The browser tool failed unexpectedly${detail}. Try again, or try a different approach.`);
+    return failedTool(error, def, sessionID, hooks, args);
   }
   const text = [...output.text];
   const footer = await hooks.footer?.(sessionID, output.tabId).catch(() => undefined);

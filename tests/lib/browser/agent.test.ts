@@ -30,15 +30,13 @@ const start = () =>
   });
 
 describe('startBrowserAgent', () => {
-  it('stays off until browser access is turned on, then connects', async () => {
+  it('connects by default and stays off after the user turns browser access off', async () => {
     agent = start();
-    await new Promise((r) => setTimeout(r, 300));
-    expect(fake.ticketRequests).toHaveLength(0);
-    expect(agent.bridge.state).toBe('stopped');
-
-    await setBrowserAccess(true);
     const server = await fake.waitForConnection();
     expect(server.tools.map((t) => t.name)).toEqual(['tabs_context']);
+    await setBrowserAccess(false);
+    await vi.waitFor(() => expect(server.open).toBe(false));
+    expect(agent.bridge.state).toBe('stopped');
   });
 
   it('closes the connection when browser access is turned off', async () => {

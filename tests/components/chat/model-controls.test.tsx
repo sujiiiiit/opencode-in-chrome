@@ -1,7 +1,9 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { fakeBrowser } from 'wxt/testing/fake-browser';
 import { ChatScreen } from '@/components/chat/chat-screen';
+import { BROWSER_ENABLED_KEY } from '@/lib/browser/settings';
 import { modelShortcut } from '@/components/chat/model/use-models';
 import type { Connection } from '@/lib/opencode/connection';
 import { fakeOpencode, type FakeOpencode } from '@/tests/support/queue-server';
@@ -18,7 +20,8 @@ const connection: Connection = {
 
 // React reports invalid DOM nesting as an error that "will cause a hydration error"; none may occur.
 let consoleError: ReturnType<typeof vi.spyOn>;
-beforeEach(() => {
+beforeEach(async () => {
+  await fakeBrowser.storage.local.set({ [BROWSER_ENABLED_KEY]: false });
   consoleError = vi.spyOn(console, 'error');
 });
 afterEach(() => {

@@ -110,7 +110,7 @@ async function shareTab(env: RunEnv, sessionID: string, user: Page): Promise<str
   } finally {
     await panel.close();
   }
-  return `The user's current browser tab is already open in this chat: tab ${tabId}, ${JSON.stringify(await user.title())}, ${JSON.stringify(href)}. Your first tool call must be execute with code "return await tools.browser.tabs_context()". Do not call tools.browser.tabs_context as a tool name. Then read this tab before searching the web or opening another tab.`;
+  return `The user's current browser tab is already open in this chat: tab ${tabId}, ${JSON.stringify(await user.title())}, ${JSON.stringify(href)}. Your first tool call must be browser_tabs_context. Then call browser_read_page on this tab before searching the web or opening another tab.`;
 }
 
 /**

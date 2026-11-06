@@ -5,7 +5,7 @@
 import { writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { startOpencodeServe, type LiveServer } from '../tests/live/opencode-serve';
-import { goalReport, type TaskRuns } from './goals/report';
+import { goalReport, runPassed, type TaskRuns } from './goals/report';
 import { isFatalRunError, runGoal, type GoalModel } from './goals/runner';
 import { GOAL_HOOKS, GOAL_HOOKS_LABEL } from './goals/hooks';
 import { GOAL_TASKS } from './goals/tasks';
@@ -45,7 +45,7 @@ test('@live goal-only browsing tasks', async ({ sw, context, pages, extensionId 
     const runs = [];
     for (let i = 0; i < RUNS && !stopped; i++) {
       const run = await runGoal(task, env);
-      console.info('[goal]', task.id, i + 1, task.grade(run) ? 'pass' : 'fail', JSON.stringify({ answer: run.answer.slice(0, 160), state: run.state, outcome: run.outcome, calls: run.calls.length, error: run.error }));
+      console.info('[goal]', task.id, i + 1, runPassed(task, run) ? 'pass' : 'fail', JSON.stringify({ answer: run.answer.slice(0, 160), state: run.state, outcome: run.outcome, calls: run.calls.length, error: run.error }));
       runs.push(run);
       // A quota or auth failure fails every later run the same way: stop and say so.
       if (isFatalRunError(run.error)) stopped = `${task.id} run ${i + 1}: ${run.error}`;

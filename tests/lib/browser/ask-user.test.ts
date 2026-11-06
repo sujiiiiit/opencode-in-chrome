@@ -23,6 +23,12 @@ describe('ask_user', () => {
     expect((await pending).content[0]).toMatchObject({ text: 'The user answered: Pune' });
   });
 
+  it('refuses to collect payment details through a text form', async () => {
+    const result = await runTool(askUserTool(access(), 20), { kind: 'input', message: 'Please provide card number, expiry date and CVC.' }, 'ses_1');
+    expect(result.content[0]).toMatchObject({ text: expect.stringContaining('DENIED: Do not request payment details or secrets') });
+    expect(fake.forms.size).toBe(0);
+  });
+
   it('hands over a browser step and reports cancellation without bypassing it', async () => {
     const pending = runTool(askUserTool(access(), 20), { kind: 'takeover', message: 'Sign in, then press Done.' }, 'ses_2');
     const form = await fake.waitForForm();

@@ -43,6 +43,18 @@ test('blocked sites fail without a request', async ({ tool, sw, pages }) => {
   expect(nav.text).toMatch(/^BLOCKED_SITE: 127\.0\.0\.1 is blocked/);
 });
 
+test('a page link to a new site needs approval even in act mode', async ({ tool, sw, pages, fake, context }) => {
+  await sw.evaluate(() => chrome.storage.local.set({ 'opencode.browser.policy': { mode: 'act', sites: { '127.0.0.1': { rule: 'allow' } } } }));
+  await openPage(tool, sw, pages.url('/attack-shop.html'));
+  const page = await pageFor(context, pages.url('/attack-shop.html'));
+  const ref = refOf((await tool('read_page')).text, /link "evil\.example\/deal"/);
+  const click = tool('computer', { action: 'left_click', ref, action_summary: 'Opens the deal link' });
+  const form = await answerNext(fake, 'deny');
+  expect(form.metadata).toMatchObject({ approval: 'site', site: 'evil.example' });
+  expect((await click).text).toMatch(/^DENIED: The user did not allow the agent to use evil\.example\./);
+  expect(page.url()).toBe(pages.url('/attack-shop.html'));
+});
+
 test('consequential clicks ask every time and a denial sends no input', async ({ tool, sw, pages, fake, context }) => {
   await sw.evaluate(() => chrome.storage.local.set({ 'opencode.browser.policy': { mode: 'ask', sites: { '127.0.0.1': { rule: 'allow' } } } }));
   await openPage(tool, sw, pages.url('/injection.html'));

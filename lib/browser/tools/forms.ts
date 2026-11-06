@@ -66,7 +66,7 @@ export function formTools(deps: FormDeps): ToolDef[] {
     {
       name: 'form_input',
       description:
-        'Fill a form field by ref: text inputs and textareas (string), selects (option value or text), checkboxes and radios (true/false), ' +
+        'Fill a form field by ref: text inputs and textareas (string), selects/comboboxes (option value or text from read_page; do not click the dropdown first), checkboxes and radios (true/false), ' +
         'editable regions (string). Page frameworks see the change. Reports the previous and new value. Needs action_summary.',
       inputSchema: {
         type: 'object',

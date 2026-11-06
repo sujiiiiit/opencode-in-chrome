@@ -4,13 +4,14 @@ import { falseSuccess, type GoalTask } from './tasks';
 import type { RunRecord } from './runner';
 
 export type TaskRuns = { task: GoalTask; runs: RunRecord[] };
+export const runPassed = (task: GoalTask, run: RunRecord) => !run.error && task.grade(run);
 
 const cell = (text: string) => text.replace(/\|/g, '\\|').replace(/\s+/g, ' ').trim();
 const pct = (n: number, of: number) => (of ? `${((100 * n) / of).toFixed(1)}%` : 'n/a');
 
 export function goalReport(results: TaskRuns[], meta: { date: string; model: string; runsPerTask: number; agentSide: string; stopped?: string }): string {
   const all = results.flatMap((r) => r.runs.map((run) => ({ task: r.task, run })));
-  const passed = all.filter(({ task, run }) => task.grade(run)).length;
+  const passed = all.filter(({ task, run }) => runPassed(task, run)).length;
   const falseSuccesses = all.filter(({ task, run }) => falseSuccess(task, run)).length;
   const guard = all.reduce((n, { run }) => n + run.guardNotes, 0);
   const notes = all.reduce((n, { run }) => n + run.extensionNotes, 0);
@@ -27,9 +28,9 @@ export function goalReport(results: TaskRuns[], meta: { date: string; model: str
     '| Task | Area | Passed | Done outcomes | Note (last failed run) |',
     '| --- | --- | --- | --- | --- |',
     ...results.map(({ task, runs }) => {
-      const ok = runs.filter((run) => task.grade(run)).length;
+      const ok = runs.filter((run) => runPassed(task, run)).length;
       const outcomes = runs.map((run) => run.outcome ?? '—').join(', ');
-      const failed = [...runs].reverse().find((run) => !task.grade(run));
+      const failed = [...runs].reverse().find((run) => !runPassed(task, run));
       const note = failed ? failed.error ?? `answer: ${failed.answer.slice(0, 140) || '(none)'}${failed.state ? ` · state: ${failed.state.slice(0, 60)}` : ''}` : '';
       return `| ${task.id} | ${task.area} | ${ok}/${runs.length} | ${outcomes} | ${cell(note)} |`;
     }),
@@ -44,7 +45,7 @@ export function goalReport(results: TaskRuns[], meta: { date: string; model: str
       '| --- | --- | --- | --- | --- |',
       ...attacked.map(({ task, runs }) => {
         const count = (f: (run: RunRecord) => boolean) => `${runs.filter(f).length}/${runs.length}`;
-        return `| ${task.id} | ${count((run) => task.attack!.attempted(run).length > 0)} | ${count((run) => run.gated > 0)} | ${count((run) => task.attack!.completed(run).length > 0)} | ${count((run) => task.grade(run))} |`;
+        return `| ${task.id} | ${count((run) => task.attack!.attempted(run).length > 0)} | ${count((run) => run.gated > 0)} | ${count((run) => task.attack!.completed(run).length > 0)} | ${count((run) => runPassed(task, run))} |`;
       }),
     );
   }

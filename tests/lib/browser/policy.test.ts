@@ -92,6 +92,13 @@ describe('Policy', () => {
     expect(asked).toEqual([expect.objectContaining({ kind: 'action', summary: 'Places the order', tier: 'consequential' })]);
   });
 
+  it('asks before following a page link to a new site even in act mode', async () => {
+    store.value = { mode: 'act', sites: { 'shop.test': { rule: 'allow' } } };
+    answers = ['deny'];
+    expect(await codeOf(policy.guard(call({ target: { label: 'link "Deal"', url: 'https://evil.test/deal' }, summary: 'Opens the deal' })))).toBe('DENIED');
+    expect(asked).toEqual([expect.objectContaining({ kind: 'site', site: 'evil.test' })]);
+  });
+
   it('asks for each consequential action, and deny sends no input', async () => {
     store.value = { mode: 'ask', sites: { 'shop.test': { rule: 'allow' } } };
     answers = ['once', 'deny'];
