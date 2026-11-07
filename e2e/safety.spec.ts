@@ -38,7 +38,7 @@ test('a new site needs the user once per session, and "always" remembers it', as
 
 test('blocked sites fail without a request', async ({ tool, sw, pages }) => {
   await sw.evaluate(() => chrome.storage.local.set({ 'opencode.browser.policy': { mode: 'ask', sites: { '127.0.0.1': { rule: 'block' } } } }));
-  await tool('tabs_context', { createIfEmpty: true });
+  await tool('tabs_create');
   const nav = await tool('navigate', { url: pages.url('/form.html') });
   expect(nav.text).toMatch(/^BLOCKED_SITE: 127\.0\.0\.1 is blocked/);
 });

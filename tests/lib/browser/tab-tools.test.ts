@@ -24,13 +24,37 @@ const call = async (name: string, args: Record<string, unknown> = {}, session = 
 
 describe('tab tools', () => {
   it('tabs_context explains how to start when empty and lists tabs once created', async () => {
-    expect((await call('tabs_context')).text).toMatch(/no tabs.*createIfEmpty: true/);
-    const created = await call('tabs_context', { createIfEmpty: true });
+    expect((await call('tabs_context')).text).toMatch(/no tabs.*tabs_share/);
+    await call('tabs_create');
+    const created = await call('tabs_context');
     const id = [...chrome.tabs.keys()][0];
     expect(created.text).toContain(`Tabs in this session (current: ${id}):\n- ${id} "" about:blank`);
     expect(created.text).toContain(`<browser-state>
 current tab: ${id} "(untitled)" "about:blank" · rev 0
 </browser-state>`);
+  });
+
+  it('lists existing user tabs without creating one and shares a selected web tab', async () => {
+    const user = chrome.addUserTab('https://mail.example.com/');
+    const other = chrome.addUserTab('https://docs.example.com/');
+    const listed = await call('tabs_context');
+    expect(listed.text).toContain(`  ${user.id} "https://mail.example.com/" https://mail.example.com/`);
+    expect(listed.text).toContain(`  ${other.id} "https://docs.example.com/" https://docs.example.com/`);
+    expect(chrome.tabs.size).toBe(2);
+    const shared = await call('tabs_share', { tabId: user.id });
+    expect(shared.isError).toBe(false);
+    expect((await scope.context('ses_1')).tabs.map((tab) => tab.id)).toEqual([user.id]);
+    expect((await call('tabs_context')).text).toContain(`  ${other.id} "https://docs.example.com/"`);
+  });
+
+  it('attaches a browser page for navigation but refuses a tab owned by another chat', async () => {
+    const internal = chrome.addUserTab('chrome://newtab/');
+    expect((await call('tabs_share', { tabId: internal.id })).text).toMatch(/Navigate it to a website/);
+    expect((await scope.context('ses_1')).tabs.map((tab) => tab.id)).toContain(internal.id);
+    expect(await codeOf(requirePage(scope, 'ses_1', internal.id))).toBe('RESTRICTED_PAGE');
+    const user = chrome.addUserTab('https://mail.example.com/');
+    await scope.share('ses_other', user.id!);
+    expect((await call('tabs_share', { tabId: user.id })).text).toMatch(/^NOT_IN_GROUP:/);
   });
 
   it('tabs_create opens a URL with https assumed', async () => {
@@ -40,7 +64,7 @@ current tab: ${id} "(untitled)" "about:blank" · rev 0
   });
 
   it('tabs_close refuses a tab outside the group with NOT_IN_GROUP', async () => {
-    await call('tabs_context', { createIfEmpty: true });
+    await call('tabs_create');
     const user = chrome.addUserTab('https://mail.example.com/');
     const result = await call('tabs_close', { tabId: user.id });
     expect(result.isError).toBe(true);
@@ -48,7 +72,7 @@ current tab: ${id} "(untitled)" "about:blank" · rev 0
   });
 
   it('tabs_close of the last tab says the group is gone', async () => {
-    await call('tabs_context', { createIfEmpty: true });
+    await call('tabs_create');
     const id = [...chrome.tabs.keys()][0];
     expect((await call('tabs_close', { tabId: id })).text).toMatch(/no tabs left/);
     expect(chrome.tabs.size).toBe(0);

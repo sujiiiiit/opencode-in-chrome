@@ -152,6 +152,8 @@ function settle(t: Timeline, event: ServerEvent, d: Record<string, unknown>): Ti
 }
 
 function addModelSwitch(t: Timeline, event: ServerEvent): Timeline {
+  // Choosing the first prompt's model is setup, not a change between user turns.
+  if (t.turns.length === 0 && t.pending.length === 0) return t;
   const id = (event.id ?? `model-${event.created ?? Date.now()}`).replace(/^evt_/, 'msg_');
   const notice = modelSwitch(id, event.data);
   if (!notice || t.switches.some((item) => item.id === id) || t.turns.some((turn) => turn.switches?.some((item) => item.id === id))) return t;
@@ -235,12 +237,12 @@ function closeWithIdle(turn: Turn, idle: Record<string, unknown>): Turn {
  */
 export function timelineFromSnapshot(
   sessionID: string,
-  snapshot: { messages: unknown; inbox: unknown; running: boolean },
+  snapshot: { messages: unknown; inbox: unknown; running: boolean; hasEarlier?: boolean },
 ): Timeline {
   const messages = Array.isArray(snapshot.messages) ? snapshot.messages : [];
   const { turns, idleAt, sinceIdle, switches } = messages.reduce(
     (acc: SnapshotAcc, m: unknown) => readSnapshotMessage(acc, m, sessionID),
-    { turns: [], switches: [], idleAt: null, sinceIdle: false },
+    { turns: [], switches: [], idleAt: null, sinceIdle: false, showLeadingSwitches: snapshot.hasEarlier === true },
   );
   const last = turns.at(-1);
   const running = snapshot.running && sinceIdle;
@@ -250,7 +252,7 @@ export function timelineFromSnapshot(
   return syncInbox(base, snapshot.inbox);
 }
 
-type SnapshotAcc = { turns: Turn[]; switches: ModelSwitch[]; idleAt: number | null; sinceIdle: boolean };
+type SnapshotAcc = { turns: Turn[]; switches: ModelSwitch[]; idleAt: number | null; sinceIdle: boolean; showLeadingSwitches: boolean };
 
 type SnapshotMessage = Record<string, unknown> & { id: string; type: string };
 
@@ -269,6 +271,7 @@ const SNAPSHOT_READERS: Record<string, (acc: SnapshotAcc, m: SnapshotMessage, se
     return { ...acc, switches: [], sinceIdle: true };
   },
   'model-switched': (acc, m) => {
+    if (!acc.showLeadingSwitches && acc.turns.length === 0) return acc;
     const notice = modelSwitch(m.id, m);
     return notice ? { ...acc, switches: [...acc.switches, notice] } : acc;
   },
@@ -311,11 +314,12 @@ export function prependHistory(
   t: Timeline,
   older: unknown[],
   orphans: unknown[],
+  hasEarlier = false,
 ): { timeline: Timeline; orphans: unknown[] } {
   const messages = [...older, ...orphans];
   const { turns, switches } = messages.reduce(
     (acc: SnapshotAcc, m: unknown) => readSnapshotMessage(acc, m, t.sessionID),
-    { turns: [], switches: [], idleAt: null, sinceIdle: false },
+    { turns: [], switches: [], idleAt: null, sinceIdle: false, showLeadingSwitches: hasEarlier },
   );
   const known = new Set(t.turns.map((turn) => turn.id));
   const earlier = turns.filter((turn) => !known.has(turn.id));

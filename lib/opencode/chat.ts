@@ -137,9 +137,9 @@ function parseAck(ack: unknown, local: LocalPrompt): PendingPrompt {
 /** The panel's own copy of the files, else the echo's: it carries the same bytes again. */
 const ackFiles = (local: LocalPrompt, payload: Record<string, unknown>) => local.files ?? parseSentFiles(payload.files);
 
-/** A steer's request: the text, plus its attachments when there are any. */
-function promptBody(sessionID: string, local: LocalPrompt, files: readonly PromptFile[] = [], browserContext?: string) {
-  const body = { sessionID, id: local.id, text: browserContext ? `${browserContext}\n\nUser request: ${local.text}` : local.text, delivery: 'steer' as const };
+/** A steer's request: exactly the user's text, plus its attachments when there are any. */
+function promptBody(sessionID: string, local: LocalPrompt, files: readonly PromptFile[] = []) {
+  const body = { sessionID, id: local.id, text: local.text, delivery: 'steer' as const };
   return files.length ? { ...body, files } : body;
 }
 
@@ -231,7 +231,7 @@ export class ChatSession extends Store<ChatState> {
   private sessionID: string | null;
   private preparedSession = false;
   private createdUnannounced = false;
-  private firstBrowserContext: string | undefined;
+  private browserOpening: Promise<void> | null = null;
   /** Events that arrive while a snapshot is in flight; replayed on top of it. */
   private buffer: ServerEvent[] | null = null;
   /** Cursor to the page before the oldest loaded message. */
@@ -450,7 +450,7 @@ export class ChatSession extends Store<ChatState> {
       const { messages, next } = readPage(page);
       this.restoreDurable(messages);
       const running = isRecord(active) && isRecord((active as Record<string, unknown>)[sessionID]);
-      this.adopt(timelineFromSnapshot(sessionID, { messages, inbox, running }), messages, next);
+      this.adopt(timelineFromSnapshot(sessionID, { messages, inbox, running, hasEarlier: next !== null }), messages, next);
     } finally {
       const pending = this.buffer ?? [];
       this.buffer = null;
@@ -488,7 +488,7 @@ export class ChatSession extends Store<ChatState> {
         { signal: this.signal },
       );
       const { messages, next } = readPage(page);
-      const { timeline, orphans } = prependHistory(this.state.timeline!, messages, this.orphans);
+      const { timeline, orphans } = prependHistory(this.state.timeline!, messages, this.orphans, next !== null);
       this.older = next;
       this.orphans = orphans;
       this.set({ timeline, hasEarlier: next !== null });
@@ -544,10 +544,20 @@ export class ChatSession extends Store<ChatState> {
     return { sessionID: session.id, created: true };
   }
 
+  /** Attach the panel's web tab before the first prompt, creating the chat if needed. */
+  openBrowserSession(): Promise<void> {
+    if (this.browserOpening) return this.browserOpening;
+    if (this.disposed || this.state.phase !== 'ready' || this.state.submitting) return Promise.resolve();
+    const opening = this.ensureSession(undefined).then(() => undefined).catch((error) => {
+      if (!this.disposed && !this.unauthorized(error)) this.set({ notice: describeError(error) });
+    });
+    this.browserOpening = opening.finally(() => { this.browserOpening = null; });
+    return this.browserOpening;
+  }
+
   private async prepareCurrentSession(selection: Selection | undefined): Promise<void> {
     if (this.preparedSession || !this.sessionID) return;
-    const context = await this.options.prepare?.(this.client, this.sessionID);
-    if (typeof context === 'string') this.firstBrowserContext = context;
+    await this.options.prepare?.(this.client, this.sessionID);
     this.preparedSession = true;
     if (this.createdUnannounced) {
       this.options.onCreated?.(this.sessionID, selection);
@@ -610,15 +620,15 @@ export class ChatSession extends Store<ChatState> {
     const local = this.localForSubmit(id, text, files);
     if (!local) return false;
     try {
+      await this.browserOpening;
       const { sessionID, created } = await this.ensureSession(selection);
       if (selection && !created) await this.applySelection(sessionID, selection);
       await this.options.beforePrompt?.();
       const ack: unknown = await this.client.session.prompt(
-        promptBody(sessionID, local, files, this.firstBrowserContext) as never,
+        promptBody(sessionID, local, files) as never,
         { signal: this.signal },
       );
       this.admit(ack, local);
-      this.firstBrowserContext = undefined;
       return true;
     } catch (error) {
       if (!this.disposed && !this.unauthorized(error)) this.set({ notice: describeError(error) });

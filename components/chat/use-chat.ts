@@ -13,7 +13,7 @@ import type { Selection } from '@/lib/opencode/models/selection';
 import type { PromptBoxHandle } from './prompt-box/prompt-box';
 import { launchSendFlight } from './send-flight';
 import { useAttachedImages } from './use-attachments';
-import { browserSessionPermissions, ensureBrowserToolsReady, prepareBrowserSession } from '@/lib/browser/guidance';
+import { activePanelTab, browserSessionPermissions, ensureBrowserToolsReady, prepareBrowserSession } from '@/lib/browser/guidance';
 
 const noopSubscribe = () => () => undefined;
 
@@ -42,20 +42,24 @@ export function useEventHub(connection: Connection, onUnauthorized: () => void):
 }
 
 /** Which chat to show: a stored session, or a new one (null). `key` remounts the same target. */
-type Target = { sessionID: string | null; key: number };
+type Target = { sessionID: string | null; key: number; attachOnOpen: boolean };
 
 export const DELETED_NOTICE = 'That chat was deleted. Starting a new one.';
 
 /** Remembers the open chat for the next panel open; best effort. */
-function rememberChat(baseUrl: string, sessionID: string | null): void {
-  void saveActiveChat(baseUrl, sessionID).catch(() => undefined);
+function rememberChat(baseUrl: string, sessionID: string | null, tabId?: number): void {
+  void saveActiveChat(baseUrl, sessionID, tabId).catch(() => undefined);
 }
 
 /** Resumes the chat the panel showed last on this server (null: a new chat) once storage answers. */
-function useLastChat(baseUrl: string, resume: (sessionID: string | null) => void) {
+function useLastChat(baseUrl: string, resume: (sessionID: string | null) => void, tabId?: number) {
   useEffect(() => {
     let cancelled = false;
-    void loadActiveChat(baseUrl)
+    const owner = tabId === undefined
+      ? Promise.resolve(undefined)
+      : browser.runtime.sendMessage({ type: 'opencode.browser.session-for-tab', tabId })
+        .then((reply: { sessionID?: string }) => reply?.sessionID).catch(() => undefined);
+    void owner.then((sessionID) => sessionID ?? loadActiveChat(baseUrl, tabId))
       .catch(() => null)
       .then((sessionID) => {
         if (!cancelled) resume(sessionID);
@@ -63,7 +67,7 @@ function useLastChat(baseUrl: string, resume: (sessionID: string | null) => void
     return () => {
       cancelled = true;
     };
-  }, [baseUrl, resume]);
+  }, [baseUrl, resume, tabId]);
 }
 
 type ChatHandlers = {
@@ -73,7 +77,7 @@ type ChatHandlers = {
 };
 
 /** The ChatSession for a target, rebuilt when the target changes; handlers are read through a ref. */
-function useChatStore(connection: Connection, hub: EventHub | null, target: Target | null, handlers: RefObject<ChatHandlers>) {
+function useChatStore(connection: Connection, hub: EventHub | null, target: Target | null, handlers: RefObject<ChatHandlers>, tabId?: number) {
   const [chat, setChat] = useState<ChatSession | null>(null);
   useEffect(() => {
     if (!hub || !target) return;
@@ -82,16 +86,20 @@ function useChatStore(connection: Connection, hub: EventHub | null, target: Targ
       events: hub,
       sessionID: target.sessionID ?? undefined,
       onCreated: (sessionID, selection) => handlers.current.onCreated(sessionID, selection),
-      prepare: prepareBrowserSession,
+      prepare: (client, sessionID) => prepareBrowserSession(client, sessionID, tabId),
       sessionPermissions: browserSessionPermissions,
       beforePrompt: ensureBrowserToolsReady,
       onMissing: () => handlers.current.onMissing(),
       onUnauthorized: () => handlers.current.onUnauthorized(),
     });
     setChat(session);
-    void session.load();
+    void session.load().then(async () => {
+      if (session.getState().phase !== 'ready' || !target.attachOnOpen) return;
+      if (!(await activePanelTab(tabId)) || !(await browserSessionPermissions())) return;
+      await session.openBrowserSession();
+    }).catch(() => undefined);
     return () => session.dispose();
-  }, [connection, hub, target, handlers]);
+  }, [connection, hub, target, handlers, tabId]);
   const state = useSyncExternalStore(chat?.subscribe ?? noopSubscribe, chat?.getState ?? (() => INITIAL_CHAT_STATE));
   return { chat, state };
 }
@@ -107,6 +115,7 @@ export function useChatSession(
   onUnauthorized: () => void,
   /** The new chat's first send created its session, with this selection. */
   onCreated?: (sessionID: string, selection?: Selection) => void,
+  tabId?: number,
 ) {
   const { baseUrl } = connection;
   const [target, setTarget] = useState<Target | null>(null);
@@ -116,34 +125,34 @@ export function useChatSession(
   const [notice, setNotice] = useState<string | null>(null);
 
   const show = useCallback(
-    (sessionID: string | null) => {
+    (sessionID: string | null, attachOnOpen = true) => {
       setActiveID(sessionID);
-      setTarget((current) => ({ sessionID, key: (current?.key ?? 0) + 1 }));
-      rememberChat(baseUrl, sessionID);
+      setTarget((current) => ({ sessionID, key: (current?.key ?? 0) + 1, attachOnOpen }));
+      rememberChat(baseUrl, sessionID, tabId);
     },
-    [baseUrl],
+    [baseUrl, tabId],
   );
 
   const resume = useCallback((sessionID: string | null) => {
     setActiveID(sessionID);
-    setTarget({ sessionID, key: 0 });
+    setTarget({ sessionID, key: 0, attachOnOpen: true });
   }, []);
-  useLastChat(baseUrl, resume);
+  useLastChat(baseUrl, resume, tabId);
 
   const handlers = useLatest<ChatHandlers>({
     // The first send created the session: follow it and remember it for the next panel open.
     onCreated: (sessionID, selection) => {
       onCreated?.(sessionID, selection);
       setActiveID(sessionID);
-      rememberChat(baseUrl, sessionID);
+      rememberChat(baseUrl, sessionID, tabId);
     },
     onMissing: () => {
       setNotice(DELETED_NOTICE);
-      show(null);
+      show(null, false);
     },
     onUnauthorized,
   });
-  const { chat, state } = useChatStore(connection, hub, target, handlers);
+  const { chat, state } = useChatStore(connection, hub, target, handlers, tabId);
 
   const open = useCallback(
     (sessionID: string) => {
@@ -154,7 +163,7 @@ export function useChatSession(
   );
   const newChat = useCallback(() => {
     setNotice(null);
-    show(null);
+    show(null, false);
   }, [show]);
   const dismissNotice = useCallback(() => {
     setNotice(null);

@@ -1,4 +1,4 @@
-// tabs_context, tabs_create, tabs_close (spec browser/tab-scope).
+// tabs_context, tabs_share, tabs_create, tabs_close (spec browser/tab-scope).
 import { isRestrictedUrl, type TabInfo, type TabScope } from '../tabs';
 import { ToolError, type ToolDef } from './registry';
 import { GUIDE_SHORT } from '../guidance';
@@ -20,23 +20,38 @@ export function tabTools(scope: TabScope, hooks: TabToolHooks = {}): ToolDef[] {
     {
       name: 'tabs_context',
       description:
-        "List this chat session's browser tabs (ids, titles, URLs) and which one is current. Call it first. " +
-        'With createIfEmpty: true it opens a tab group with one blank tab when the session has none. ' +
-        "The agent can only see and act on tabs listed here, never the user's other tabs. " +
+        "List all open Chrome tabs by title and URL, distinguishing this chat's tabs from other tabs. Call it first. " +
+        'This tool never creates a tab; use tabs_create only when the task needs a new tab. ' +
+        "Other tabs are read-only until tabs_share adds one to this chat. Blank and browser pages can be attached for navigation, but cannot be read or clicked. Page actions can use only this chat's tabs. " +
         GUIDE_SHORT,
-      inputSchema: {
-        type: 'object',
-        properties: { createIfEmpty: { type: 'boolean', description: 'Create a tab group with a blank tab if there is none.' } },
-      },
-      async handler(args, { sessionID }) {
-        const ctx = await scope.context(sessionID, args.createIfEmpty === true);
-        if (ctx.tabs.length === 0) {
-          return { text: ['This session has no tabs. Call tabs_context with createIfEmpty: true, or tabs_create, or navigate to a URL.'] };
-        }
+      inputSchema: { type: 'object', properties: {} },
+      async handler(_args, { sessionID }) {
+        const ctx = await scope.context(sessionID);
+        const other = await scope.otherTabs(sessionID);
+        const ownText = ctx.tabs.length
+          ? `Tabs in this session (current: ${ctx.currentTabId}):\n${ctx.tabs.map(line).join('\n')}`
+          : 'This session has no tabs. Use tabs_share for an existing tab, or tabs_create if the task needs a new tab.';
+        const otherText = other.length
+          ? `Other open Chrome tabs (titles and URLs only; use tabs_share to attach one):\n${other.map((tab) => `  ${tab.id} ${JSON.stringify(tab.title)} ${tab.url}${isRestrictedUrl(tab.url) ? ' (navigate to a website before reading or clicking)' : ''}`).join('\n')}`
+          : 'No other Chrome tabs are open.';
         return {
-          text: [`Tabs in this session (current: ${ctx.currentTabId}):\n${ctx.tabs.map(line).join('\n')}`],
+          text: [`${ownText}\n\n${otherText}`],
           tabId: ctx.currentTabId,
         };
+      },
+    },
+    {
+      name: 'tabs_share',
+      description: 'Attach an existing tab from tabs_context to this chat. Blank and browser pages can be navigated to a website, then read or acted on. Tabs owned by another chat stay there. Shared tabs remain open when released.',
+      inputSchema: { type: 'object', properties: { tabId: { ...tabIdProperty, description: 'An existing tab id from the other open Chrome tabs list.' } }, required: ['tabId'] },
+      async handler(args, { sessionID }) {
+        const tabId = args.tabId as number;
+        const own = await scope.context(sessionID);
+        if (own.tabs.some((tab) => tab.id === tabId)) return { text: [`Tab ${tabId} is already in this chat.`], tabId };
+        const tab = (await scope.otherTabs(sessionID)).find((entry) => entry.id === tabId);
+        if (!tab) throw new ToolError('NO_TAB', `Tab ${tabId} is no longer open. Call tabs_context again.`);
+        await scope.share(sessionID, tabId);
+        return { text: [`Shared tab ${tabId} ${JSON.stringify(tab.title)} ${tab.url} with this chat.${isRestrictedUrl(tab.url) ? ' Navigate it to a website before reading or clicking.' : ''}`], tabId };
       },
     },
     {
@@ -64,7 +79,7 @@ export function tabTools(scope: TabScope, hooks: TabToolHooks = {}): ToolDef[] {
         return {
           text: [
             remaining === 0
-              ? `Closed tab ${String(args.tabId)}. The session has no tabs left; tabs_context with createIfEmpty: true starts a new group.`
+              ? `Closed tab ${String(args.tabId)}. The session has no tabs left; use tabs_share for an existing tab or tabs_create for a new tab.`
               : `Closed tab ${String(args.tabId)}. ${remaining} tab(s) remain.`,
           ],
         };

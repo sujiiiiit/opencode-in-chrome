@@ -25,10 +25,11 @@ const tool = (id: string, name: string, extra: Partial<ReplyToolPart> = {}): Rep
   content: [],
   ...extra,
 });
-const reply = (status: ReplyStatus, parts: ReplyPart[]): ReplyState => ({
+const reply = (status: ReplyStatus, parts: ReplyPart[], extra: Partial<ReplyState> = {}): ReplyState => ({
   sessionID: SESSION_ID,
   status,
   steps: [{ id: 's1', parts }],
+  ...extra,
 });
 
 const group = () => document.querySelector<HTMLElement>('[data-slot="work-group"]')!;
@@ -37,6 +38,20 @@ const groupHeader = () => within(group()).getAllByRole('button')[0]!;
 const answer = () => document.querySelector<HTMLElement>('[data-slot="assistant-reply"]')!;
 
 describe('AssistantReply', () => {
+  it('renders a model error as muted italic streamed reply text', () => {
+    render(
+      <AssistantReply
+        reply={reply('failed', [], { error: { type: 'provider', message: 'Usage limit reached.' } })}
+      />,
+    );
+    const error = document.querySelector<HTMLElement>('[data-slot="assistant-error"]')!;
+    expect(error).toHaveTextContent('Model error: Usage limit reached.');
+    expect(error).toHaveClass('italic');
+    expect(error.querySelector('.reply-md')).toHaveClass('text-text-secondary');
+    expect(error.querySelector('[data-sd-animate]')).not.toBeNull();
+    expect(error.querySelector('p')).not.toHaveClass('rounded-lg', 'bg-destructive/10', 'text-destructive');
+  });
+
   it('shows Thinking while a running reply has nothing yet, in the header the first part then takes over', async () => {
     const view = render(<AssistantReply reply={reply('running', [])} />);
     const header = groupHeader();

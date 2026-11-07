@@ -41,3 +41,5 @@ pnpm dev
 ```
 
 Only one process can listen on the configured debugging port at a time.
+
+For reusable CDP commands, recovery, and first pairing, see [the development browser guide](docs/dev-browser-cdp.md).

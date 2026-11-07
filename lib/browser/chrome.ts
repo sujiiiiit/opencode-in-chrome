@@ -8,6 +8,7 @@ import type { KeyValue, TabApi } from './tabs';
 export function chromeTabApi(): TabApi {
   return {
     get: (tabId) => browser.tabs.get(tabId),
+    list: () => browser.tabs.query({}),
     create: (props) => browser.tabs.create(props),
     remove: (tabId) => browser.tabs.remove(tabId),
     group: (options) =>

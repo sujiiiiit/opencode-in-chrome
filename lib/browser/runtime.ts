@@ -210,6 +210,7 @@ type PanelMessage =
   | { type: 'opencode.browser.stop' }
   | { type: 'opencode.browser.resume' }
   | { type: 'opencode.browser.status'; sessionID?: string }
+  | { type: 'opencode.browser.session-for-tab'; tabId: number }
   | { type: 'opencode.browser.share'; sessionID: string; tabId: number; move?: boolean }
   | { type: 'opencode.browser.unshare'; sessionID: string; tabId: number };
 
@@ -241,6 +242,7 @@ function isPanelSender(sender: { id?: string; url?: string }, ownPages: string):
 async function handlePanelMessage(m: PanelMessage, deps: { scope: TabScope; policy: Policy; debuggers: DebuggerSessions }) {
   if (m.type === 'opencode.browser.stop') return stopBrowser(deps);
   if (m.type === 'opencode.browser.resume') return resumeBrowser(deps.policy);
+  if (m.type === 'opencode.browser.session-for-tab') return { sessionID: await deps.scope.sessionOf(m.tabId) };
   return handleTabPanelMessage(m, deps);
 }
 

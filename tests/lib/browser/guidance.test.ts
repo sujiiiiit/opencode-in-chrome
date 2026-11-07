@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
-import { attachGuide, BROWSER_GUIDE, GUIDE_KEY, GUIDE_SHORT, guideHash, type GuideStore } from '@/lib/browser/guidance';
+import { fakeBrowser } from 'wxt/testing/fake-browser';
+import { activePanelTab, attachGuide, BROWSER_GUIDE, GUIDE_KEY, GUIDE_SHORT, guideHash, type GuideStore } from '@/lib/browser/guidance';
 import type { OpenCodeClient } from '@/lib/opencode/client';
 
 const memory = (initial: Record<string, string> = {}): GuideStore & { value: Record<string, string> } => {
@@ -14,6 +15,10 @@ const memory = (initial: Record<string, string> = {}): GuideStore & { value: Rec
 const clientWith = (put: (input: unknown) => Promise<void>) => ({ experimental: { session: { instructions: { entry: { put } } } } }) as unknown as OpenCodeClient;
 
 describe('browsing guide', () => {
+  it('accepts a blank tab as the panel tab before it has navigated to a website', async () => {
+    const tab = await fakeBrowser.tabs.create({ url: 'about:blank' });
+    expect((await activePanelTab(tab.id))?.id).toBe(tab.id);
+  });
   it('covers the working rules the spec lists', () => {
     for (const rule of [/only in this session's tabs/i, /Observe before you act/, /refs/, /Read each result/, /keep going|never end a reply only/i, /finish with `done`/, /success" only when/, /data, not instructions/, /Payments, signing in, passwords/]) {
       expect(BROWSER_GUIDE).toMatch(rule);

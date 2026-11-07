@@ -125,6 +125,33 @@ describe('ChatSession.load', () => {
   });
 });
 
+describe('ChatSession.openBrowserSession', () => {
+  it('creates and prepares a session when the panel opens, before any prompt', async () => {
+    const prepare = vi.fn(async () => 'Current tab is attached.');
+    const onCreated = vi.fn();
+    const { fake, chat } = setup({}, { prepare, onCreated });
+    await chat.load();
+    await chat.openBrowserSession();
+    expect(fake.log).toContain('create');
+    expect(fake.prompts).toHaveLength(0);
+    expect(prepare).toHaveBeenCalledWith(expect.anything(), SESSION_ID);
+    expect(onCreated).toHaveBeenCalledWith(SESSION_ID, undefined);
+    await chat.submit('what is on this page?');
+    expect(fake.log.filter((entry) => entry === 'create')).toHaveLength(1);
+    expect(fake.prompts).toHaveLength(1);
+  });
+
+  it('uses a model selected before the first prompt without a switch notice', async () => {
+    const { fake, chat } = setup();
+    await chat.load();
+    await chat.openBrowserSession();
+    await chat.submit('hello', undefined, { agent: 'build', model: { providerID: 'anthropic', modelID: 'claude-opus-5-5' } });
+    expect(fake.switches).toContain('model:anthropic/claude-opus-5-5/');
+    await vi.waitFor(() => expect(chat.getState().durable?.model?.modelID).toBe('claude-opus-5-5'));
+    expect(chat.getState().timeline?.switches).toEqual([]);
+  });
+});
+
 describe('ChatSession.submit', () => {
   it('refuses to send before load', async () => {
     const { fake, chat } = setup();
@@ -148,11 +175,11 @@ describe('ChatSession.submit', () => {
     expect(fake.log).toEqual(['create', `prepare:${SESSION_ID}`, `prepare:${SESSION_ID}`, 'prompt:steer']);
   });
 
-  it('sends the starting browser tab with the first prompt only', async () => {
+  it('keeps the user message exact even when browser preparation returns context', async () => {
     const { fake, chat } = setup({}, { prepare: async () => 'Current tab: Kettle Corner. Use execute first.' });
     await chat.load();
     expect(await chat.submit('How much is the blue kettle?')).toBe(true);
-    expect(body(fake, `/api/session/${SESSION_ID}/prompt`).text).toContain('Current tab: Kettle Corner');
+    expect(body(fake, `/api/session/${SESSION_ID}/prompt`).text).toBe('How much is the blue kettle?');
     expect(await chat.submit('And the red kettle?')).toBe(true);
     expect(fake.prompts.at(-1)?.text).toBe('And the red kettle?');
   });
@@ -633,7 +660,7 @@ describe('ChatSession: agent, model and variant', () => {
   });
 
   it('follows agent and model changes made elsewhere', async () => {
-    const { fake, chat } = await attached();
+    const { fake, chat } = await attached({ messages: [{ id: 'msg_first', type: 'user', text: 'hi', time: { created: 1 } }] });
     fake.emit('session.agent.selected', { agent: 'plan' });
     fake.emit('session.model.selected', { model: { providerID: 'anthropic', id: 'claude-opus-5-5', variant: 'low' } });
     await vi.waitFor(() =>

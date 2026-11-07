@@ -6,6 +6,7 @@
   "type": "module",
   "scripts": {
     "dev": "wxt",
+    "dev:cdp": "node scripts/dev-cdp.mjs",
     "dev:firefox": "wxt -b firefox --mv2",
     "build": "wxt build",
     "build:firefox": "wxt build -b firefox --mv2",

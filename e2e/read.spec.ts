@@ -36,7 +36,7 @@ test('read_page stitches same-origin and cross-origin iframes under their iframe
 });
 
 test('read_page fails on browser pages and narrows to a subtree by ref', async ({ tool, sw, pages }) => {
-  await tool('tabs_context', { createIfEmpty: true });
+  await tool('tabs_create');
   const blank = await tool('read_page');
   expect(blank.text).toMatch(/^RESTRICTED_PAGE: /);
   await openPage(tool, sw, pages.url('/frames.html'));

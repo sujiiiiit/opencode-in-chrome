@@ -19,6 +19,7 @@ export type TabInfo = { id: number; title: string; url: string };
 /** The Chrome calls this module needs, injectable for tests. */
 export type TabApi = {
   get(tabId: number): Promise<Tab>;
+  list(): Promise<Tab[]>;
   create(props: { url?: string; windowId?: number; active?: boolean; openerTabId?: number }): Promise<Tab>;
   remove(tabId: number): Promise<void>;
   group(options: { tabIds: number[]; groupId?: number; createProperties?: { windowId?: number } }): Promise<number>;
@@ -61,7 +62,7 @@ export function isRestrictedUrl(url: string | undefined): boolean {
 }
 
 export function groupTitle(sessionID: string): string {
-  return `Opencode ${sessionID.slice(-4)}`;
+  return 'Opencode';
 }
 
 const info = (tab: Tab): TabInfo => ({
@@ -146,6 +147,15 @@ export class TabScope {
     });
   }
 
+  /** Chrome tabs outside this chat, for read-only discovery before the user asks to work in one. */
+  otherTabs(sessionID: string): Promise<TabInfo[]> {
+    return this.locked(async (state) => {
+      await this.liveTabs(state, sessionID);
+      const own = new Set(state[sessionID]?.tabIds ?? []);
+      return (await this.api.list()).filter((tab) => tab.id !== undefined && !own.has(tab.id)).map(info);
+    });
+  }
+
   /** `tabs_create`: a new background tab in the session's group (creating the group). */
   create(sessionID: string, url = BLANK): Promise<TabInfo> {
     return this.locked(async (state) => {
@@ -207,7 +217,19 @@ export class TabScope {
       const owner = this.ownerIn(state, tabId);
       if (owner && owner !== sessionID) {
         if (!move) throw new ToolError('NOT_IN_GROUP', 'That tab already belongs to another session.');
+        await this.liveTabs(state, owner);
         const previous = state[owner]!;
+        if (!state[sessionID]) {
+          // A new chat on the same browser group takes over that group. No Chrome
+          // tab or group operation is needed, so its visible group stays put.
+          state[sessionID] = {
+            ...previous,
+            tabIds: [...previous.tabIds.filter((id) => id !== tabId), tabId],
+            shared: [...previous.shared],
+          };
+          delete state[owner];
+          return info(tab);
+        }
         previous.tabIds = previous.tabIds.filter((id) => id !== tabId);
         previous.shared = previous.shared.filter((id) => id !== tabId);
         if (previous.tabIds.length === 0) delete state[owner];
@@ -215,6 +237,7 @@ export class TabScope {
       const entry = state[sessionID];
       if (entry) {
         await this.api.group({ tabIds: [tabId], groupId: entry.groupId });
+        await this.api.updateGroup(entry.groupId, { title: groupTitle(sessionID), color: 'orange' });
         entry.tabIds = [...entry.tabIds.filter((t) => t !== tabId), tabId];
         if (!entry.shared.includes(tabId)) entry.shared.push(tabId);
       } else {

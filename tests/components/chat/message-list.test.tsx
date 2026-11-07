@@ -423,8 +423,48 @@ describe('MessageList: scrolling', () => {
     scrollTo(viewport, 100);
     content.height = 1100;
     rerender(<MessageList turns={turns} pending={[steer('p1', 'next', 'steering')]} />);
+    expect(viewport.scrollTop).toBe(900);
+    expect(screen.queryByRole('button', { name: 'Scroll to bottom' })).toBeNull();
     frame(performance.now() + 240);
     expect(viewport.scrollTop).toBe(900);
+  });
+
+  it('keeps a sent prompt at the true bottom through late layout, until the reader scrolls up', () => {
+    const callbacks: ResizeObserverCallback[] = [];
+    vi.stubGlobal('ResizeObserver', class {
+      constructor(callback: ResizeObserverCallback) { callbacks.push(callback); }
+      observe() {}
+      disconnect() {}
+    });
+    const turns = [first];
+    const { rerender } = render(<MessageList turns={turns} pending={[]} />);
+    const content = { height: 1000 };
+    const viewport = sized(content);
+    scrollTo(viewport, 100);
+    content.height = 1100;
+    rerender(<MessageList turns={turns} pending={[steer('p1', 'next', 'starting')]} />);
+    expect(viewport.scrollTop).toBe(900);
+
+    content.height = 1124;
+    act(() => callbacks.forEach((callback) => callback([], {} as ResizeObserver)));
+    expect(viewport.scrollTop).toBe(924);
+
+    scrollTo(viewport, 200);
+    content.height = 1148;
+    act(() => callbacks.forEach((callback) => callback([], {} as ResizeObserver)));
+    expect(viewport.scrollTop).toBe(200);
+  });
+
+  it('hides the bottom button when only empty follow space remains below', () => {
+    const turns = streaming('a');
+    const { rerender } = render(<MessageList turns={turns} pending={[]} />);
+    const viewport = sized({ height: 1000 });
+    rerender(<MessageList turns={[...turns]} pending={[]} />);
+    scrollTo(viewport, 100);
+    expect(screen.getByRole('button', { name: 'Scroll to bottom' })).toBeInTheDocument();
+    scrollTo(viewport, 700);
+    expect(screen.queryByRole('button', { name: 'Scroll to bottom' })).toBeNull();
+    expect(viewport.scrollTop).toBeLessThan(800);
   });
 
   it('raises a new message until the whole follow space shows below it', () => {
@@ -439,6 +479,22 @@ describe('MessageList: scrolling', () => {
     rerender(<MessageList turns={turns} pending={[steer('p1', 'next', 'steering')]} />);
     frame(performance.now() + 240);
     expect(viewport.scrollTop).toBe(820);
+  });
+
+  it('retargets a new message after its follow space renders', () => {
+    const frame = frames();
+    const turns = streaming('a');
+    const { rerender } = render(<MessageList turns={turns} pending={[]} />);
+    const viewport = sized({ height: 850 });
+    Object.defineProperty(viewport, 'scrollHeight', {
+      configurable: true,
+      get: () => 850 + Number.parseFloat(document.querySelector<HTMLElement>('[data-slot="stream-space"]')?.style.height || '0'),
+    });
+
+    rerender(<MessageList turns={turns} pending={[steer('p1', 'next', 'steering')]} />);
+    frame(performance.now() + 240);
+
+    expect(viewport.scrollTop).toBe(788);
   });
 
   it('leaves a chat that fits with its follow space in place', () => {

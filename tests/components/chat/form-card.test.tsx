@@ -240,7 +240,8 @@ describe('FormCard: other forms', () => {
       { key: 'ok', type: 'boolean', title: 'Sure?' },
     ]);
     const name = current().getByRole('textbox', { name: 'Name' });
-    expect(name).toHaveAttribute('placeholder', 'Describe yuor answer');
+    expect(name).toHaveAttribute('placeholder', 'Describe your answer');
+    expect(name).toHaveClass('text-sm');
     await user.type(name, 'Ada');
     await user.click(screen.getByRole('button', { name: 'Next' }));
     await user.type(current().getByRole('spinbutton', { name: 'Count' }), '3');

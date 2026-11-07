@@ -9,6 +9,18 @@ export default defineBackground(() => {
   // Chromium (Chrome, Edge, Opera): open the side panel when the toolbar icon
   // is clicked. `sidePanel` is missing on Firefox.
   if (browser.sidePanel) {
+    // Clear a global panel left by an older build; tab-specific options below override it.
+    void browser.sidePanel.setOptions({ enabled: false })
+      .catch((error) => console.error('Failed to disable global side panel', error));
+    const configureTabPanel = (tabId: number) =>
+      browser.sidePanel.setOptions({ tabId, path: `sidepanel.html?tabId=${tabId}`, enabled: true })
+        .catch((error) => console.error('Failed to configure tab side panel', error));
+    browser.tabs.onCreated.addListener((tab) => {
+      if (tab.id !== undefined) void configureTabPanel(tab.id);
+    });
+    void browser.tabs.query({}).then((tabs) =>
+      Promise.all(tabs.filter((tab) => tab.id !== undefined).map((tab) => configureTabPanel(tab.id!))),
+    );
     browser.sidePanel
       .setPanelBehavior({ openPanelOnActionClick: true })
       .catch((error) => console.error('Failed to set side panel behavior', error));

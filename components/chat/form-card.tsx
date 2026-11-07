@@ -172,7 +172,8 @@ function TypedAnswer({ field, draft, onDraft, onEnter, labelledBy }: StepProps &
         type={field.type === 'string' ? 'text' : 'number'}
         aria-labelledby={labelledBy}
         value={typeof value === 'string' || typeof value === 'number' ? String(value) : ''}
-        placeholder={field.placeholder ?? 'Describe yuor answer'}
+        placeholder={field.placeholder ?? 'Describe your answer'}
+        className="text-sm"
         onChange={(event) => onDraft(setValue(draft, field, event.target.value))}
         onKeyDown={(event) => {
           if (event.key === 'Enter' && !event.nativeEvent.isComposing) {

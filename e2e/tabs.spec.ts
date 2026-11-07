@@ -1,7 +1,7 @@
 import { currentTab, expect, openPage, SESSION, test } from './fixtures';
 
-test('tabs_context creates a titled tab group with a blank background tab', async ({ tool, sw }) => {
-  const first = await tool('tabs_context', { createIfEmpty: true });
+test('tabs_create creates a titled tab group with a blank background tab', async ({ tool, sw }) => {
+  const first = await tool('tabs_create');
   expect(first.isError).toBeFalsy();
   const tabId = await currentTab(tool);
   const group = await sw.evaluate(async (id) => {
@@ -9,7 +9,69 @@ test('tabs_context creates a titled tab group with a blank background tab', asyn
     const info = await chrome.tabGroups.get(tab.groupId);
     return { title: info.title, color: info.color, url: tab.pendingUrl || tab.url };
   }, tabId);
-  expect(group).toEqual({ title: `Opencode ${SESSION.slice(-4)}`, color: 'orange', url: 'about:blank' });
+  expect(group).toEqual({ title: 'Opencode', color: 'orange', url: 'about:blank' });
+});
+
+test('each existing browser tab has its own side panel URL', async ({ sw, context, pages }) => {
+  expect(await sw.evaluate(() => chrome.runtime.getManifest().side_panel)).toBeUndefined();
+  await expect.poll(() => sw.evaluate(async () => (await chrome.sidePanel.getOptions({})).enabled)).toBe(false);
+  const user = await context.newPage();
+  await user.goto(pages.url('/form.html'));
+  const tabId = await sw.evaluate(
+    async (url) => (await chrome.tabs.query({})).find((tab: { url?: string }) => tab.url === url)!.id!,
+    pages.url('/form.html'),
+  );
+  await expect.poll(() => sw.evaluate(async (id) => chrome.sidePanel.getOptions({ tabId: id }), tabId))
+    .toMatchObject({ path: `sidepanel.html?tabId=${tabId}`, enabled: true });
+});
+
+test('a Chrome New Tab can join a chat group and navigate to a web page', async ({ tool, sw, pages }) => {
+  const tabId = await sw.evaluate(async () => (await chrome.tabs.create({ url: 'chrome://newtab/' })).id!);
+  const shared = await tool('tabs_share', { tabId });
+  expect(shared.isError).toBeFalsy();
+  expect(shared.text).toContain('Navigate it to a website');
+  expect((await tool('tabs_context')).text).toContain(`- ${tabId} `);
+  expect(await sw.evaluate(async (id) => (await chrome.tabGroups.get((await chrome.tabs.get(id)).groupId)).title, tabId)).toBe('Opencode');
+  const navigated = await tool('navigate', { tabId, url: pages.url('/form.html') });
+  expect(navigated.isError).toBeFalsy();
+  expect(await sw.evaluate(async (id) => (await chrome.tabs.get(id)).url, tabId)).toBe(pages.url('/form.html'));
+});
+
+test('a new chat takes over the same tab group without opening a tab', async ({ tool, sw, context, extensionId }) => {
+  const created = await tool('tabs_create');
+  const tabId = Number(/Created tab (\d+)/.exec(created.text)![1]);
+  const panelPage = await context.newPage();
+  await panelPage.goto(`chrome-extension://${extensionId}/sidepanel.html`);
+  const before = await sw.evaluate(async (id) => ({
+    groupId: (await chrome.tabs.get(id)).groupId,
+    count: (await chrome.tabs.query({})).length,
+  }), tabId);
+  const panel = await panelPage.evaluate(async (id) =>
+    chrome.runtime.sendMessage({ type: 'opencode.browser.share', sessionID: 'ses_e2e_new_chat', tabId: id, move: true }), tabId);
+  expect(panel.tab.id).toBe(tabId);
+  expect(await sw.evaluate(async (id) => ({
+    groupId: (await chrome.tabs.get(id)).groupId,
+    count: (await chrome.tabs.query({})).length,
+  }), tabId)).toEqual(before);
+  expect((await tool('tabs_context', {}, 'ses_e2e_new_chat')).text).toContain(`- ${tabId} `);
+});
+
+test('lists existing Chrome tabs without opening a blank tab, then shares one on request', async ({ tool, sw, context, pages }) => {
+  const user = await context.newPage();
+  await user.goto(pages.url('/form.html'));
+  const tabId = await sw.evaluate(
+    async (url) => (await chrome.tabs.query({})).find((tab: { url?: string }) => tab.url === url)!.id!,
+    pages.url('/form.html'),
+  );
+  const before = await sw.evaluate(async () => (await chrome.tabs.query({})).length);
+  const listed = await tool('tabs_context');
+  expect(listed.text).toContain(`  ${tabId} "Pizza order" ${pages.url('/form.html')}`);
+  expect(await sw.evaluate(async () => (await chrome.tabs.query({})).length)).toBe(before);
+  const shared = await tool('tabs_share', { tabId });
+  expect(shared.isError).toBeFalsy();
+  expect((await tool('tabs_context')).text).toContain(`- ${tabId} "Pizza order"`);
+  await tool('tabs_close', { tabId });
+  expect(user.isClosed()).toBe(false);
 });
 
 test('the debugger attaches when a web tab joins the session', async ({ tool, sw, pages }) => {
@@ -23,7 +85,7 @@ test('the debugger attaches when a web tab joins the session', async ({ tool, sw
 });
 
 test('sessions cannot touch user tabs or each other', async ({ tool, context, sw, pages }) => {
-  await tool('tabs_context', { createIfEmpty: true });
+  await tool('tabs_create');
   const user = await context.newPage();
   await user.goto(pages.url('/form.html'));
   const userTabId = await sw.evaluate(
@@ -43,12 +105,12 @@ test('closing the last tab removes the group', async ({ tool, sw }) => {
   const tabId = await currentTab(tool);
   const closed = await tool('tabs_close', { tabId });
   expect(closed.text).toMatch(/no tabs left/);
-  const groups = await sw.evaluate(() => chrome.tabGroups.query({ title: 'Opencode 0001' }));
+  const groups = await sw.evaluate(() => chrome.tabGroups.query({ title: 'Opencode' }));
   expect(groups).toHaveLength(0);
 });
 
 test('sharing a tab from the side panel moves it into the session group, and unsharing gives it back', async ({ tool, sw, context, pages, extensionId }) => {
-  await tool('tabs_context', { createIfEmpty: true });
+  await tool('tabs_create');
   const user = await context.newPage();
   await user.goto(pages.url('/form.html'));
   const tabId = await sw.evaluate(
@@ -63,8 +125,10 @@ test('sharing a tab from the side panel moves it into the session group, and uns
   );
   expect(shared.tab).toMatchObject({ id: tabId });
   expect((await tool('tabs_context')).text).toContain(`- ${tabId} "Pizza order"`);
+  expect(await panel.evaluate((id) => chrome.runtime.sendMessage({ type: 'opencode.browser.session-for-tab', tabId: id }), tabId))
+    .toEqual({ sessionID: SESSION });
   const groupTitle = await sw.evaluate(async (id) => (await chrome.tabGroups.get((await chrome.tabs.get(id)).groupId)).title, tabId);
-  expect(groupTitle).toBe(`Opencode ${SESSION.slice(-4)}`);
+  expect(groupTitle).toBe('Opencode');
 
   await panel.evaluate(({ id, session }) => chrome.runtime.sendMessage({ type: 'opencode.browser.unshare', sessionID: session, tabId: id }), {
     id: tabId,

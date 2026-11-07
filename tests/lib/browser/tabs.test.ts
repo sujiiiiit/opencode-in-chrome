@@ -112,9 +112,34 @@ describe('sharing and popups', () => {
   it('moves the current tab to a new chat when that chat starts', async () => {
     const user = chrome.addUserTab('https://docs.example.com/');
     await scope.share('ses_old', user.id!);
+    const groupId = (await scope.context('ses_old')).groupId;
     await scope.share('ses_new', user.id!, true);
     expect((await scope.context('ses_old')).tabs).toEqual([]);
     expect((await scope.context('ses_new')).tabs.map((tab) => tab.id)).toEqual([user.id]);
+    expect((await scope.context('ses_new')).groupId).toBe(groupId);
+    expect(chrome.groups.size).toBe(1);
+    expect(chrome.tabs.size).toBe(1);
+  });
+
+  it('keeps the whole existing group when a new chat takes over', async () => {
+    const first = chrome.addUserTab('https://docs.example.com/');
+    await scope.share('ses_old', first.id!);
+    const second = await scope.create('ses_old', 'https://mail.example.com/');
+    const groupId = (await scope.context('ses_old')).groupId;
+    await scope.share('ses_new', first.id!, true);
+    expect((await scope.context('ses_new')).tabs.map((tab) => tab.id)).toEqual([second.id, first.id]);
+    expect((await scope.context('ses_new')).groupId).toBe(groupId);
+    expect(chrome.groups.size).toBe(1);
+  });
+
+  it('renames an existing group when another tab joins it', async () => {
+    const first = chrome.addUserTab('https://docs.example.com/');
+    await scope.share('ses_old', first.id!);
+    const groupId = chrome.tabs.get(first.id!)!.groupId!;
+    chrome.groups.get(groupId)!.title = 'Opencode old';
+    const second = chrome.addUserTab('https://mail.example.com/');
+    await scope.share('ses_old', second.id!);
+    expect(chrome.groups.get(groupId)!.title).toBe('Opencode');
   });
 
   it('adopts a popup opened from an agent tab into its group', async () => {

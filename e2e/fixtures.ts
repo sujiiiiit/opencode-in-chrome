@@ -117,7 +117,11 @@ export function refOf(text: string, pattern: RegExp): string {
 
 /** The id of the session's current tab, from tabs_context. */
 export async function currentTab(tool: ToolCall, sessionID = SESSION): Promise<number> {
-  const result = await tool('tabs_context', { createIfEmpty: true }, sessionID);
+  let result = await tool('tabs_context', {}, sessionID);
+  if (!/current: \d+/.test(result.text)) {
+    await tool('tabs_create', {}, sessionID);
+    result = await tool('tabs_context', {}, sessionID);
+  }
   const match = /current: (\d+)/.exec(result.text);
   if (!match) throw new Error(`No current tab in: ${result.text}`);
   return Number(match[1]);

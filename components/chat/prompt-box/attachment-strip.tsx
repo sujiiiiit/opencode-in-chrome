@@ -17,7 +17,8 @@ type ThumbProps = { image: ImageAttachment; at: number; onOpen: (at: number) => 
 const Thumb = memo(function Thumb({ image, at, onOpen, onRemove }: ThumbProps) {
   return (
     <li className="group/thumb relative size-14 shrink-0 animate-thumb-in">
-      <PictureTile src={image.url} name={image.name} at={at} onOpen={onOpen} className="size-full" />
+      {/* The light theme border keeps a white or transparent picture from blending into the card. */}
+      <PictureTile src={image.url} name={image.name} at={at} onOpen={onOpen} className="size-full border border-border" />
       <Button
         variant="viewer"
         size="icon-xs"

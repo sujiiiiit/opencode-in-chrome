@@ -13,7 +13,13 @@ const FIRST_WORK = 'work:first';
 
 function ErrorLine({ text }: { text: string | null }) {
   if (!text) return null;
-  return <p className="rounded-lg bg-destructive/10 px-3 py-2 type-work wrap-anywhere text-destructive">{text}</p>;
+  return (
+    <div data-slot="assistant-error" className="italic">
+      <ReplyLive value>
+        <Markdown text={text} animate className="text-text-secondary" />
+      </ReplyLive>
+    </div>
+  );
 }
 
 /**

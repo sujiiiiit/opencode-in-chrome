@@ -40,6 +40,15 @@ async function startTurn(fake: FakeOpencode, user: ReturnType<typeof userEvent.s
 }
 
 describe('ChatScreen: sending and the submit button', () => {
+  it('keeps browser controls out of the composer', async () => {
+    await fakeBrowser.storage.local.set({ [BROWSER_ENABLED_KEY]: true });
+    mount();
+
+    expect(screen.queryByRole('button', { name: 'Share this tab with the chat' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Stop browser activity' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Resume browser' })).not.toBeInTheDocument();
+  });
+
   it('sends a message, clears the box and streams the reply', async () => {
     const { fake, user } = mount();
     await user.type(box(), 'hello{Enter}');

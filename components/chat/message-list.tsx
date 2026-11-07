@@ -146,6 +146,10 @@ function usePageTurn(turns: Turn[], pending: PendingMessage[]) {
   const [space, setSpace] = useState(0);
   const [awayFromBottom, setAwayFromBottom] = useState(false);
   const spaceRef = useRef(0);
+  const followAfterSpace = useRef(false);
+  // A newly sent prompt can grow after its first layout (attachments, fonts, follow space).
+  // Keep its scrollbar at the real bottom until the reply starts or the reader scrolls up.
+  const settleSentPrompt = useRef(false);
   const stream = useRef<{ id: string; length: number } | null>(null);
   const activeTurn = turns.at(-1);
   const streaming = useMemo(
@@ -170,9 +174,10 @@ function usePageTurn(turns: Turn[], pending: PendingMessage[]) {
 
   const syncSpace = (element: HTMLElement) => {
     const next = Math.round(Math.min(FOLLOW_SPACE_PX, element.clientHeight * MAX_FOLLOW_SHARE));
-    if (spaceRef.current === next) return;
+    if (spaceRef.current === next) return false;
     spaceRef.current = next;
     setSpace(next);
+    return true;
   };
 
   const cancelMotion = () => {
@@ -181,7 +186,8 @@ function usePageTurn(turns: Turn[], pending: PendingMessage[]) {
   };
 
   const syncAwayFromBottom = (element: HTMLElement) => {
-    setAwayFromBottom(bottom(element) - element.scrollTop > 1);
+    // The follow spacer is empty breathing room, not unread conversation.
+    setAwayFromBottom(contentEnd(element) > element.clientHeight + 1);
   };
 
   const follow = (element: HTMLElement, duration = SCROLL_MS) => {
@@ -189,7 +195,7 @@ function usePageTurn(turns: Turn[], pending: PendingMessage[]) {
     const target = bottom(element);
     if (motion.current && Math.abs(motion.current.target - target) < 1) return;
     cancelMotion();
-    if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches || Math.abs(target - element.scrollTop) < 1) {
+    if (duration === 0 || window.matchMedia?.('(prefers-reduced-motion: reduce)').matches || Math.abs(target - element.scrollTop) < 1) {
       lastSet.current = target;
       element.scrollTop = target;
       return;
@@ -247,6 +253,7 @@ function usePageTurn(turns: Turn[], pending: PendingMessage[]) {
       cancelMotion();
       // Scrolling up stops following; scrolling down to the end of the text resumes it.
       stick.current = moved >= 0 && contentEnd(element) <= element.clientHeight + STICK_PX;
+      if (moved < 0) settleSentPrompt.current = false;
     };
     const onIntent = () => {
       intentAt = performance.now();
@@ -277,7 +284,8 @@ function usePageTurn(turns: Turn[], pending: PendingMessage[]) {
     const content = ref.current;
     const observer = content && new ResizeObserver(() => {
       syncSpace(element);
-      considerTurn(element);
+      if (settleSentPrompt.current && stick.current && !stream.current) follow(element, 0);
+      else considerTurn(element);
       syncAwayFromBottom(element);
       previous.current.height = element.scrollHeight;
     });
@@ -302,17 +310,26 @@ function usePageTurn(turns: Turn[], pending: PendingMessage[]) {
   useLayoutEffect(() => {
     const element = viewport();
     if (!element) return;
-    syncSpace(element);
+    const spaceChanged = syncSpace(element);
     const edges = edgesOf(turns, pending);
     if (prepended(previous.current, edges, turns)) {
       cancelMotion();
       element.scrollTop += element.scrollHeight - previous.current.height;
     } else if (edges.last !== previous.current.last) {
-      // A new message rises until the whole follow space shows below it. A chat short enough
-      // to fit with that space has nothing to scroll, so it stays put.
-      follow(element);
+      // Sending a message takes the scrollbar to the true bottom immediately.
+      follow(element, 0);
+      setAwayFromBottom(false);
       stick.current = true;
+      settleSentPrompt.current = true;
+      // The follow space is rendered by the state update above. Re-run the destination once it
+      // exists, otherwise a just-sent message can stop short of the true bottom.
+      followAfterSpace.current = spaceChanged;
+    } else if (followAfterSpace.current && stick.current) {
+      followAfterSpace.current = false;
+      follow(element, 0);
+      setAwayFromBottom(false);
     } else if (stick.current) {
+      if (stream.current) settleSentPrompt.current = false;
       considerTurn(element);
     }
     previous.current = { ...edges, height: element.scrollHeight };
@@ -322,6 +339,7 @@ function usePageTurn(turns: Turn[], pending: PendingMessage[]) {
     const element = viewport();
     if (!element) return;
     stick.current = true;
+    settleSentPrompt.current = true;
     setAwayFromBottom(false);
     follow(element);
   };

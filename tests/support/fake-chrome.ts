@@ -19,6 +19,9 @@ export class FakeChrome implements TabApi {
     if (!tab) throw new Error(`No tab with id: ${id}`);
     return { ...tab };
   }
+  async list() {
+    return [...this.tabs.values()].map((tab) => ({ ...tab }));
+  }
   async create(props: { url?: string; windowId?: number; active?: boolean; openerTabId?: number }) {
     const tab: Tab = { id: this.nextTab++, url: props.url, title: '', windowId: props.windowId, active: props.active, groupId: -1 };
     this.tabs.set(tab.id!, tab);

@@ -32,12 +32,18 @@ const say = (text: string, assistantMessageID: string) => [
 const run = (events: ServerEvent[], start: Timeline = emptyTimeline(SESSION_ID)) => events.reduce(reduceTimeline, start);
 
 describe('reduceTimeline', () => {
+  it('does not label a model choice made before the first user message as a switch', () => {
+    const t = run([ev('session.model.selected', { model: { id: 'chosen', providerID: 'p' } }), enqueued('m1', 'hello'), delivered('m1')]);
+    expect(t.turns[0]?.switches).toBeUndefined();
+    expect(t.switches).toEqual([]);
+  });
+
   it('keeps a live model switch before the next delivered prompt', () => {
-    const switched = run([ev('session.model.selected', { model: { id: 'new', providerID: 'p' } })]);
+    const switched = run([enqueued('m0', 'first'), delivered('m0'), ev('session.model.selected', { model: { id: 'new', providerID: 'p' } })]);
     expect(switched.switches[0]?.model.modelID).toBe('new');
     const deliveredTurn = run([enqueued('m1', 'hello'), delivered('m1')], switched);
     expect(deliveredTurn.switches).toEqual([]);
-    expect(deliveredTurn.turns[0]?.switches).toEqual(switched.switches);
+    expect(deliveredTurn.turns[1]?.switches).toEqual(switched.switches);
   });
   it('tracks a prompt from the inbox into a turn and streams its reply', () => {
     const t = run([
@@ -287,6 +293,15 @@ describe('timelineFromSnapshot', () => {
       { id: 's2', type: 'model-switched', model }], inbox: [], running: false });
     expect(t.turns[1]?.switches?.[0]?.id).toBe('s1');
     expect(t.switches[0]?.id).toBe('s2');
+  });
+
+  it('hides initial model setup when rebuilding a first-turn snapshot', () => {
+    const model = { id: 'chosen', providerID: 'p' };
+    const messages = [{ id: 's0', type: 'model-switched', model }, user('m1', 'hello', 1)];
+    const first = timelineFromSnapshot(SESSION_ID, { messages, inbox: [], running: false });
+    expect(first.turns[0]?.switches).toBeUndefined();
+    const paged = timelineFromSnapshot(SESSION_ID, { messages, inbox: [], running: false, hasEarlier: true });
+    expect(paged.turns[0]?.switches?.[0]?.id).toBe('s0');
   });
 
   it('rebuilds finished turns, their replies and outcomes in chronological order', () => {

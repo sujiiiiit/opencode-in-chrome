@@ -24,7 +24,6 @@ import { Notice } from './notice';
 import { DropOverlay } from './drop-overlay';
 import { useFileDrop } from './use-file-drop';
 import { AttachMenu } from './prompt-box/attach-menu';
-import { BrowserControls } from './browser-controls';
 import { AttachmentStrip } from './prompt-box/attachment-strip';
 import { PromptBox, type PromptBoxHandle } from './prompt-box/prompt-box';
 import { useChatSession, useComposer, useEventHub, useHistory, useLatest } from './use-chat';
@@ -32,6 +31,7 @@ import { SubagentTabs } from './subagent-tabs';
 
 type Props = {
   connection: Connection;
+  tabId?: number;
   /** The server rejected our token (HTTP 401). */
   onUnauthorized: () => void;
 };
@@ -209,15 +209,13 @@ type ChatComposerProps = {
   /** A question the agent asks, shown in the box in place of the editor. */
   question: ReactNode;
   onOpenPicker: () => void;
-  /** The open chat's session, for sharing a tab with it (undefined before its first message). */
-  sessionID: string | undefined;
 };
 
 /**
  * The prompt box with its attach menu, attached images and model chips, and the drop zone that
  * covers the whole pane (the overlay is placed against the pane, its nearest positioned box).
  */
-function ChatComposer({ box, composer, models, active, question, onOpenPicker, sessionID }: ChatComposerProps) {
+function ChatComposer({ box, composer, models, active, question, onOpenPicker }: ChatComposerProps) {
   // History, sliding over the chat, takes no drops.
   const panelActive = useTabPanelActive();
   const dragging = useFileDrop(composer.addFiles, active && panelActive);
@@ -226,12 +224,7 @@ function ChatComposer({ box, composer, models, active, question, onOpenPicker, s
       <DropOverlay visible={dragging} />
       <PromptBox
         ref={box}
-        controls={
-          <>
-            <AttachMenu onFiles={composer.addFiles} />
-            <BrowserControls sessionID={sessionID} />
-          </>
-        }
+        controls={<AttachMenu onFiles={composer.addFiles} />}
         footer={models.store && <ComposerFooter models={models} onOpenPicker={onOpenPicker} />}
         attachments={<AttachmentStrip images={composer.images} onRemove={composer.removeImage} />}
         takeover={question}
@@ -267,7 +260,7 @@ function ChatPane({ connection, session, models, hub, onUnauthorized, active, on
       <TranscriptList chat={chat} state={state} models={models} />
       <div className="mx-auto w-full max-w-chat">
         <PaneNotice session={session} models={models} />
-        <ChatComposer box={box} composer={composer} models={models} active={active} question={paneQuestion(session)} onOpenPicker={picker.open} sessionID={activeID ?? undefined} />
+        <ChatComposer box={box} composer={composer} models={models} active={active} question={paneQuestion(session)} onOpenPicker={picker.open} />
       </div>
       {store && (
         <ModelPicker open={picker.picking} onOpenChange={picker.onOpenChange} store={store} state={models.state}
@@ -345,7 +338,7 @@ type View = 'chat' | 'history';
 /** How long the History panel's slide-out runs (see Tabs), so it stays rendered until gone. */
 const SLIDE_OUT_MS = 300;
 
-export function ChatScreen({ connection, onUnauthorized }: Props) {
+export function ChatScreen({ connection, tabId, onUnauthorized }: Props) {
   const [view, setView] = useState<View>('chat');
   const hub = useEventHub(connection, onUnauthorized);
   const models = useModelStore(connection, hub, onUnauthorized);
@@ -356,7 +349,7 @@ export function ChatScreen({ connection, onUnauthorized }: Props) {
     },
     [modelStore],
   );
-  const session = useChatSession(connection, hub, onUnauthorized, promote);
+  const session = useChatSession(connection, hub, onUnauthorized, promote, tabId);
   useModelSync(modelStore, session.activeID, session.state.durable);
   const history = useHistory(connection, hub, view === 'history', onUnauthorized);
   const { activeID, open, newChat } = session;

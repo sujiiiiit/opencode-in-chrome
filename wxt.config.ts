@@ -4,6 +4,13 @@ import { defineConfig } from 'wxt';
 
 // See https://wxt.dev/api/reference/wxt/interfaces/inlineconfig.html
 export default defineConfig({
+  hooks: {
+    'build:manifestGenerated': (wxt, manifest) => {
+      // WXT's sidepanel entrypoint adds a window-wide Chrome default. The panel is
+      // configured per tab in background.ts, so an unclicked tab must have no fallback.
+      if (wxt.config.browser !== 'firefox') delete manifest.side_panel;
+    },
+  },
   modules: ['@wxt-dev/module-react'],
   webExt: {
     // Keep one agent-accessible development browser instead of creating a
