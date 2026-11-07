@@ -60,7 +60,7 @@ function SubmitButton({
     <Tooltip label={label} disabled={inactive}>
       <Button
         type="button"
-        size="icon-sm"
+        size="icon"
         data-slot="submit"
         data-state={state}
         aria-label={label}
@@ -83,7 +83,7 @@ function SubmitButton({
  */
 function Toolbar(props: Pick<Props, 'controls' | 'stopping' | 'held' | 'disabled' | 'onSubmit' | 'onStop'>) {
   return (
-    <div className="pointer-events-none absolute inset-x-0 bottom-0 flex h-10 items-center justify-between gap-2 rounded-b-surface bg-background px-2 pt-1 pb-2">
+    <div className="pointer-events-none absolute inset-x-0 bottom-0 flex h-11 items-center justify-between gap-2 rounded-b-surface bg-background px-2 pt-1 pb-2">
       <div className="pointer-events-auto flex min-w-0 items-center overflow-x-auto no-scrollbar">{props.controls}</div>
       <div className="pointer-events-auto flex shrink-0 items-center gap-1.5">
         <SubmitButton
@@ -174,7 +174,7 @@ export function PromptBox({ ref, placeholder = PLACEHOLDER, ...props }: Props) {
                     spellCheck
                     dir="auto"
                     autoCapitalize="sentences"
-                    className="block min-h-24 w-full whitespace-pre-wrap break-words px-4 pt-3 pb-10 type-body text-text-primary caret-text-primary outline-none [unicode-bidi:plaintext]"
+                    className="block min-h-24 w-full whitespace-pre-wrap break-words px-4 pt-3 pb-11 type-body text-text-primary caret-text-primary outline-none [unicode-bidi:plaintext]"
                     onKeyDown={onKeyDown}
                     {...handlers}
                   />

@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode, type RefObject } from 'react';
 import { browser } from 'wxt/browser';
+import type { PermissionRequest } from '@opencode/client';
 import { Button } from '@/components/ui/button';
 import { DropdownMenu } from '@/components/ui/dropdown-menu';
 import { Icon } from '@/components/ui/icon';
+import { Tooltip, TooltipGroup, TooltipTrigger } from '@/components/ui/tooltip';
 import { Tabs, TabsContent, TabsContentWrapper, useTabPanelActive } from '@/components/ui/tabs';
 import { ChatSession, INITIAL_CHAT_STATE, pendingMessages, type ChatState } from '@/lib/opencode/chat';
 import type { Turn } from '@/lib/opencode/timeline';
@@ -11,7 +13,8 @@ import type { Connection } from '@/lib/opencode/connection';
 import type { EventHub } from '@/lib/opencode/events';
 import type { Selection } from '@/lib/opencode/models/selection';
 import { displayTitle, isUntitled } from '@/lib/opencode/sessions';
-import { ShellOutputProvider, useLingering } from './flow/live';
+import { ShellOutputProvider, useLingering, useNow } from './flow/live';
+import { formatDuration } from '@/lib/opencode/flow';
 import { MorphText } from './flow/morph-text';
 import { MarqueeTitle } from './marquee-title';
 import { HistoryView } from './history/history-view';
@@ -20,11 +23,12 @@ import { ModelControls } from './model/model-controls';
 import { ModelPicker } from './model/model-picker';
 import { ModelCatalogProvider } from './model/model-names';
 import { useModelShortcuts, useModelStore, useModelSync } from './model/use-models';
-import { FormCard } from './form-card';
+import { ApprovalChoices, FormCard } from './form-card';
 import { Notice } from './notice';
 import { DropOverlay } from './drop-overlay';
 import { useFileDrop } from './use-file-drop';
 import { AttachMenu } from './prompt-box/attach-menu';
+import { PermissionMenu } from './prompt-box/permission-menu';
 import { AttachmentStrip } from './prompt-box/attachment-strip';
 import { PromptBox, type PromptBoxHandle } from './prompt-box/prompt-box';
 import { useChatSession, useComposer, useEventHub, useHistory, useLatest } from './use-chat';
@@ -73,12 +77,12 @@ function openSettings() {
 }
 
 function HistoryButton({ activity, onClick }: { activity: 'running' | 'unseen' | null; onClick: () => void }) {
-  const description = activity === 'running' ? 'Other chats running' : activity === 'unseen' ? 'Unseen chat results' : undefined;
+  const description = activity === 'running' ? 'Chats running' : activity === 'unseen' ? 'Unseen chat results' : undefined;
   return (
-    <Button variant="ghost" size="icon-lg" className="relative" aria-label="History" aria-description={description} title="History" onClick={onClick}>
-      {activity === 'running' ? <Icon name="loader-circle" className="animate-spin" /> : <Icon name="history" />}
+    <TooltipTrigger label="History"><Button variant="ghost" size="icon-lg" className="relative" aria-label="History" aria-description={description} onClick={onClick}>
+      {activity === 'running' ? <Icon name="loader-circle" strokeWidth={1.5} className="size-4 origin-center animate-spin [transform-box:view-box]" /> : <Icon name="history" />}
       {activity === 'unseen' && <span className="absolute top-1 right-1 size-2 rounded-full bg-primary" aria-hidden="true" />}
-    </Button>
+    </Button></TooltipTrigger>
   );
 }
 
@@ -118,22 +122,22 @@ function ChatHeader({
 
   return (
     <header className="mx-auto flex w-full max-w-chat shrink-0 items-center gap-2 pl-4 pr-2 py-1.5">
-      <MarqueeTitle title={title} className="flex-1 text-sm text-text-primary">
+      <MarqueeTitle title={title} showTitle={!activeID} className="flex-1 text-sm text-text-primary">
         {activeID ? (
-          <button type="button" className="block w-full cursor-pointer text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px]" aria-label={copied ? 'Session ID copied' : 'Copy session ID'} title={copied ? 'Session ID copied' : 'Copy session ID'} onClick={copySessionID}>
+          <Tooltip label={copied ? 'Session ID copied' : 'Copy session ID'} side="bottom" closeOnClick={false}><button type="button" className="block w-full cursor-pointer text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px]" aria-label={copied ? 'Session ID copied' : 'Copy session ID'} onClick={copySessionID}>
             <MorphText id={id} text={title} textSlot="chat-title" />
-          </button>
+          </button></Tooltip>
         ) : <MorphText id={id} text={title} textSlot="chat-title" />}
       </MarqueeTitle>
-      {copied && <span role="status" className="text-xs text-text-secondary">Session ID copied</span>}
+      {copied && <span role="status" className="sr-only">Session ID copied</span>}
       <div className="flex items-center gap-0.5">
-        <Button variant="ghost" size="icon-lg" aria-label="Settings" title="Settings" onClick={openSettings}>
+        <TooltipTrigger label="Settings"><Button variant="ghost" size="icon-lg" aria-label="Settings" onClick={openSettings}>
           <Icon name="settings" />
-        </Button>
+        </Button></TooltipTrigger>
         <HistoryButton activity={historyActivity} onClick={onHistory} />
-        <Button variant="ghost" size="icon-lg" aria-label="New chat" title="New chat" onClick={onNewChat}>
+        <TooltipTrigger label="New chat"><Button variant="ghost" size="icon-lg" aria-label="New chat" onClick={onNewChat}>
           <Icon name="new-chat" />
-        </Button>
+        </Button></TooltipTrigger>
       </div>
     </header>
   );
@@ -193,16 +197,38 @@ function ComposerFooter({ models }: { models: Models }) {
  * The question the running turn is asking (the oldest, when several wait), asked inside the
  * prompt box. Keyed by form, so the next one starts from its own first page and defaults.
  */
-function paneQuestion({ chat, state }: ReturnType<typeof useChatSession>): ReactNode {
+function PermissionCard({ permission, chat, rootID }: { permission: PermissionRequest; chat: ChatSession | null; rootID?: string }) {
+  return (
+    <section aria-label="OpenCode permission" className="flex flex-col gap-2 px-1 pt-3.5 pb-3">
+      <h2 className="px-3 type-body font-semibold text-text-primary">Allow {permission.action}?</h2>
+      {permission.sessionID !== rootID && <p className="px-3 text-xs text-text-secondary">Subagent request</p>}
+      {permission.message && <p className="px-3 type-body text-text-secondary">{permission.message}</p>}
+      {permission.resources.map((resource) => <p key={resource} className="break-all px-3 text-sm text-text-secondary">{resource}</p>)}
+      {!!permission.save?.length && <p className="break-all px-3 text-xs text-text-tertiary">Allow always saves for: {permission.save.join(', ')}</p>}
+      <ApprovalChoices options={[
+        { value: 'once', label: 'Allow once' },
+        ...(permission.save?.length ? [{ value: 'always', label: 'Allow always' }] : []),
+        { value: 'reject', label: 'Deny' },
+      ]} onChoose={(value) => chat?.answerPermission(permission, value as 'once' | 'always' | 'reject')} />
+    </section>
+  );
+}
+
+function paneQuestion({ chat, state }: Pick<ReturnType<typeof useChatSession>, 'chat' | 'state'>): ReactNode {
+  const permission = state.permissions?.[0];
+  if (permission) return <PermissionCard permission={permission} chat={chat} rootID={state.timeline?.sessionID} />;
   const form = state.forms[0];
   if (!form) return null;
   return (
+    <div>
+    {form.sessionID !== state.timeline?.sessionID && <p className="px-4 pt-3 text-xs text-text-secondary">Subagent request</p>}
     <FormCard
       key={form.id}
       form={form}
       onAnswer={(id, answer) => chat?.answerForm(id, answer)}
       onCancel={(id) => chat?.cancelForm(id)}
     />
+    </div>
   );
 }
 
@@ -246,7 +272,7 @@ function ChatComposer({ box, composer, models, active, question }: ChatComposerP
       <DropOverlay visible={dragging} />
       <PromptBox
         ref={box}
-        controls={<AttachMenu onFiles={composer.addFiles} />}
+        controls={<><AttachMenu onFiles={composer.addFiles} /><PermissionMenu /></>}
         footer={<ComposerFooter models={models} />}
         attachments={<AttachmentStrip images={composer.images} onRemove={composer.removeImage} />}
         takeover={question}
@@ -293,9 +319,9 @@ function ChatPane({ connection, session, models, hub, onUnauthorized, active, on
   return (
     <DropdownMenu open={picker.picking} onOpenChange={picker.onOpenChange}>
     <div className="relative flex h-full min-h-0 flex-col">
-      <ChatHeader title={title} activeID={activeID} onHistory={onHistory} onNewChat={onNewChat} historyActivity={historyActivity} />
-      <ConnectionBanners connection={connection} />
-      <SessionBranch activeID={activeID} hub={hub} connection={connection} models={models} onUnauthorized={onUnauthorized}>
+      <SessionBranch activeID={activeID} hub={hub} connection={connection} models={models} onUnauthorized={onUnauthorized} chat={chat} state={state}>
+        <ChatHeader title={title} activeID={activeID} onHistory={onHistory} onNewChat={onNewChat} historyActivity={historyActivity} />
+        <ConnectionBanners connection={connection} />
         {transcript}
       </SessionBranch>
     </div>
@@ -324,21 +350,23 @@ function TranscriptList({ chat, state, models }: { chat: ChatSession | null; sta
   );
 }
 
-function SessionBranch({ activeID, hub, connection, models, onUnauthorized, children }: {
+function SessionBranch({ activeID, hub, connection, models, onUnauthorized, children, chat, state }: {
   activeID: string | null; hub: EventHub | null; connection: Connection; models: Models; onUnauthorized: () => void;
+  chat: ChatSession | null; state: ChatState;
   children: ReactNode;
 }) {
   if (!activeID || !hub) return children;
   return (
-    <SubagentTabs rootID={activeID}
-      renderChild={(id) => <SubagentTranscript key={id} sessionID={id} connection={connection} hub={hub} models={models} onUnauthorized={onUnauthorized} />}>
+    <SubagentTabs rootID={activeID} pendingSessionIDs={[...state.permissions.map((p) => p.sessionID), ...state.forms.map((f) => f.sessionID)]}
+      renderChild={(id) => <SubagentTranscript key={id} sessionID={id} connection={connection} hub={hub} models={models} onUnauthorized={onUnauthorized} requestChat={chat} requestState={state} />}>
       <div className="flex h-full min-h-0 flex-col">{children}</div>
     </SubagentTabs>
   );
 }
 
-function SubagentTranscript({ sessionID, connection, hub, models, onUnauthorized }: {
+function SubagentTranscript({ sessionID, connection, hub, models, onUnauthorized, requestChat, requestState }: {
   sessionID: string; connection: Connection; hub: EventHub; models: Models; onUnauthorized: () => void;
+  requestChat: ChatSession | null; requestState: ChatState;
 }) {
   const [chat, setChat] = useState<ChatSession | null>(null);
   useEffect(() => {
@@ -352,6 +380,48 @@ function SubagentTranscript({ sessionID, connection, hub, models, onUnauthorized
     <div className="flex h-full min-h-0 flex-col">
       <TranscriptList chat={chat} state={state} models={models} />
       {state.error && <Notice text={state.error} />}
+      {state.notice && <Notice text={state.notice} onDismiss={() => chat?.dismissNotice()} />}
+      {(requestState.permissions.some((p) => p.sessionID === sessionID) || requestState.forms.some((f) => f.sessionID === sessionID)) && (
+        <div className="mx-auto w-full max-w-chat px-3">{paneQuestion({ chat: requestChat, state: { ...requestState, permissions: requestState.permissions.filter((p) => p.sessionID === sessionID), forms: requestState.forms.filter((f) => f.sessionID === sessionID) } })}</div>
+      )}
+      <SubagentStatus state={state} chat={chat} />
+    </div>
+  );
+}
+
+function subagentOutcome(state: ChatState): string {
+  return state.sessionInfo?.outcome ?? state.timeline?.turns.at(-1)?.reply.status ?? 'idle';
+}
+
+function subagentFinishedText(state: ChatState, started: number | undefined): string {
+  const labels: Record<string, string> = { interrupted: 'Interrupted', failed: 'Failed', succeeded: 'Completed' };
+  const label = labels[subagentOutcome(state)] ?? 'Loading…';
+  const ended = state.timeline?.idleAt ?? state.sessionInfo?.ended;
+  return started === undefined || ended == null ? label : `${label} · ${formatDuration(ended - started)}`;
+}
+
+function subagentStatusText(state: ChatState, now: number): string {
+  const timeline = state.timeline;
+  if (!timeline) return 'Loading…';
+  const started = state.sessionInfo?.started ?? timeline.turns[0]?.created;
+  if (timeline.working) return started === undefined ? 'Running' : formatDuration(now - started);
+  return subagentFinishedText(state, started);
+}
+
+function SubagentStatus({ state, chat }: { state: ChatState; chat: ChatSession | null }) {
+  const working = state.timeline?.working === true;
+  const now = useNow(working);
+  const status = subagentStatusText(state, now);
+  return (
+    <div className="mx-auto flex w-full max-w-chat shrink-0 items-center gap-3 p-4 type-work text-text-secondary">
+      <span className="flex min-w-0 flex-1 items-center overflow-hidden tabular-nums">
+        <MorphText id={working ? 'running' : subagentOutcome(state)} text={status} steady className="shrink-0" />
+        {state.durable?.agent && <span className="min-w-0 truncate">{` · ${state.durable.agent}`}</span>}
+      </span>
+      {working && <Button type="button" size="icon-sm" aria-label="Stop subagent" title="Stop subagent"
+        disabled={state.interrupting} onClick={() => void chat?.stop(false)}>
+        <Icon name="stop" className="[&_path]:fill-current" />
+      </Button>}
     </div>
   );
 }
@@ -361,7 +431,7 @@ type View = 'chat' | 'history';
 /** How long the History panel's slide-out runs (see Tabs), so it stays rendered until gone. */
 const SLIDE_OUT_MS = 300;
 
-function useHistoryActivity(history: ReturnType<typeof useHistory>, view: View, activeID: string | null) {
+function useHistoryActivity(history: ReturnType<typeof useHistory>, view: View, activeID: string | null, working: boolean) {
   useEffect(() => {
     const update = () => history.store?.setViewed(view === 'chat' && document.visibilityState !== 'hidden' ? activeID : null);
     update();
@@ -369,7 +439,7 @@ function useHistoryActivity(history: ReturnType<typeof useHistory>, view: View, 
     return () => document.removeEventListener('visibilitychange', update);
   }, [history.store, view, activeID]);
   const other = history.state.knownIDs.filter((id) => id !== activeID).map((id) => history.state.activity[id]);
-  return other.includes('running') ? 'running' : other.includes('unseen') ? 'unseen' : null;
+  return working || other.includes('running') || (!!activeID && history.state.activity[activeID] === 'running') ? 'running' : other.includes('unseen') ? 'unseen' : null;
 }
 
 function useLeaveDeleted(activeID: string | null, newChat: () => void) {
@@ -394,7 +464,7 @@ export function ChatScreen({ connection, tabId, onUnauthorized }: Props) {
   useModelSync(modelStore, session.activeID, session.state.durable);
   const history = useHistory(connection, hub, onUnauthorized);
   const { activeID, open, newChat } = session;
-  const historyActivity = useHistoryActivity(history, view, activeID);
+  const historyActivity = useHistoryActivity(history, view, activeID, session.state.timeline?.working === true);
   // `open` and the open chat change together; History's callbacks read them through refs, so
   // they stay the same and its memoized rows skip re-rendering.
   const latestOpen = useLatest(open);
@@ -421,7 +491,7 @@ export function ChatScreen({ connection, tabId, onUnauthorized }: Props) {
   const showHistory = useLingering(view === 'history', SLIDE_OUT_MS);
 
   return (
-    <Tabs
+    <TooltipGroup><Tabs
       defaultValue="chat"
       value={view}
       onValueChange={(next) => setView(next as View)}
@@ -455,6 +525,6 @@ export function ChatScreen({ connection, tabId, onUnauthorized }: Props) {
           )}
         </TabsContent>
       </TabsContentWrapper>
-    </Tabs>
+    </Tabs></TooltipGroup>
   );
 }

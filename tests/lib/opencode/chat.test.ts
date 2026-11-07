@@ -415,11 +415,25 @@ describe('ChatSession.stop', () => {
     expect(chat.getState().interrupting).toBe(false);
   });
 
+  it('can interrupt a child without resuming its inbox', async () => {
+    const { fake, chat } = await attached({ running: true });
+    await chat.stop(false);
+    expect(fake.interrupts).toEqual([{ resume: null }]);
+  });
+
   it('swallows interrupt failures', async () => {
     const { fake, chat } = await attached({ running: true });
     fake.hooks.onInterrupt = () => Promise.reject(new TypeError('Failed to fetch'));
     await expect(chat.stop()).resolves.toBeUndefined();
     expect(chat.getState().notice).toBeNull();
+  });
+
+  it('reports a failed child interrupt while leaving it running', async () => {
+    const { fake, chat } = await attached({ running: true });
+    fake.hooks.onInterrupt = () => Promise.reject(new TypeError('Failed to fetch'));
+    await chat.stop(false);
+    expect(chat.getState().notice).toBe(OFFLINE_MESSAGE);
+    expect(chat.getState().timeline?.working).toBe(true);
   });
 
   it('ends the turn as interrupted when the server confirms', async () => {
@@ -729,5 +743,76 @@ describe('ChatSession forms', () => {
     });
     expect(await chat.answerForm('frm_1', { choice: 'allow' })).toBe(false);
     expect(chat.getState()).toMatchObject({ forms: [], notice: null });
+  });
+});
+
+describe('ChatSession permissions', () => {
+  const request = { id: 'perm_1', sessionID: SESSION_ID, action: 'edit', resources: ['file.ts'], save: ['*.ts'] };
+  const routes = {
+    [`GET /api/session/${SESSION_ID}/permission`]: () => jsonResponse({ data: [request] }),
+    [`POST /api/session/${SESSION_ID}/permission/perm_1/reply`]: () => new Response(null, { status: 204 }),
+  };
+
+  it('loads a pending request and sends the selected decision', async () => {
+    const { chat, fake } = await attached({ overrides: routes });
+    expect(chat.getState().permissions).toEqual([request]);
+    expect(await chat.answerPermission(chat.getState().permissions[0]!, 'always')).toBe(true);
+    expect(chat.getState().permissions).toEqual([]);
+    expect(body(fake, `/api/session/${SESSION_ID}/permission/perm_1/reply`)).toEqual({ decision: 'always' });
+  });
+
+  it('automatically allows pending requests once when auto mode is enabled', async () => {
+    const { chat, fake } = await attached({ overrides: routes });
+    chat.setPermissionMode('auto');
+    await vi.waitFor(() => expect(chat.getState().permissions).toEqual([]));
+    expect(body(fake, `/api/session/${SESSION_ID}/permission/perm_1/reply`)).toEqual({ decision: 'once' });
+  });
+});
+
+describe('subagent requests', () => {
+  const child = 'ses_child';
+  const request = { id: 'perm_child', sessionID: child, action: 'edit', resources: ['child.ts'] };
+  const form = { id: 'frm_child', sessionID: child, title: 'Site approval', fields: [{ key: 'choice', type: 'string', options: [{ value: 'once', label: 'Allow' }] }] };
+  const routes = {
+    [`GET /api/session/${child}`]: () => jsonResponse({ data: { id: child, parentID: SESSION_ID } }),
+    'GET /api/permission/request': () => jsonResponse({ location: { directory: WORKSPACE_WIN }, data: [request] }),
+    'GET /api/form': () => jsonResponse({ location: { directory: WORKSPACE_WIN }, data: [form] }),
+    [`POST /api/session/${child}/permission/perm_child/reply`]: () => new Response(null, { status: 204 }),
+    [`POST /api/session/${child}/form/frm_child/reply`]: () => new Response(null, { status: 204 }),
+  };
+
+  it('recovers child requests and answers them in the child session', async () => {
+    const { chat, fake } = await attached({ overrides: routes }, { includeSubagents: true });
+    expect(chat.getState().permissions.map((item) => item.id)).toEqual(['perm_child']);
+    expect(chat.getState().forms.map((item) => item.id)).toEqual(['frm_child']);
+    await chat.answerPermission(chat.getState().permissions[0]!, 'once');
+    await chat.answerForm('frm_child', { choice: 'once' });
+    expect(body(fake, `/api/session/${child}/permission/perm_child/reply`)).toEqual({ decision: 'once' });
+    expect(body(fake, `/api/session/${child}/form/frm_child/reply`)).toEqual({ answer: { choice: 'once' } });
+  });
+
+  it('automatically answers child requests and ignores unrelated sessions', async () => {
+    const { chat, fake } = await attached({ overrides: routes }, { includeSubagents: true });
+    chat.setPermissionMode('auto');
+    await vi.waitFor(() => expect(chat.getState().permissions).toEqual([]));
+    fake.emit('permission.asked', { ...request, id: 'perm_unrelated', sessionID: 'ses_unrelated' });
+    await vi.waitFor(() => expect(fake.fetch.calls.some((call) => call.url.pathname === '/api/session/ses_unrelated')).toBe(true));
+    expect(chat.getState().permissions).toEqual([]);
+  });
+
+  it('tracks live child form and permission settlement in order', async () => {
+    const { chat, fake } = await attached({ overrides: {
+      ...routes,
+      'GET /api/permission/request': () => jsonResponse({ location: { directory: WORKSPACE_WIN }, data: [] }),
+      'GET /api/form': () => jsonResponse({ location: { directory: WORKSPACE_WIN }, data: [] }),
+    } }, { includeSubagents: true });
+    fake.emit('permission.asked', request);
+    fake.emit('form.created', { sessionID: child, form });
+    await vi.waitFor(() => expect(chat.getState().permissions).toHaveLength(1));
+    await vi.waitFor(() => expect(chat.getState().forms).toHaveLength(1));
+    fake.emit('permission.replied', { sessionID: child, requestID: request.id });
+    fake.emit('form.cancelled', { sessionID: child, id: form.id });
+    await vi.waitFor(() => expect(chat.getState().permissions).toEqual([]));
+    await vi.waitFor(() => expect(chat.getState().forms).toEqual([]));
   });
 });

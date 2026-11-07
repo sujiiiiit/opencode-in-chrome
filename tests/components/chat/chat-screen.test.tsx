@@ -4,9 +4,10 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fakeBrowser } from 'wxt/testing/fake-browser';
 import { ChatScreen } from '@/components/chat/chat-screen';
 import { BROWSER_ENABLED_KEY } from '@/lib/browser/settings';
+import { PERMISSION_MODE_KEY } from '@/lib/opencode/permission-mode';
 import type { Connection } from '@/lib/opencode/connection';
 import { fakeOpencode, type FakeOpencode } from '@/tests/support/queue-server';
-import { BASE, MODELS, PROVIDER_ERROR, SESSION_ID, TOKEN, jsonResponse, routeFetch, sseStream, unauthorized } from '@/tests/support/testkit';
+import { ASSISTANT_MSG_ID, BASE, MODELS, PROVIDER_ERROR, SESSION_ID, TOKEN, jsonResponse, routeFetch, sseStream, unauthorized } from '@/tests/support/testkit';
 import { transfer } from '@/tests/support/transfer';
 
 const connection: Connection = {
@@ -40,14 +41,60 @@ async function startTurn(fake: FakeOpencode, user: ReturnType<typeof userEvent.s
 }
 
 describe('ChatScreen: sending and the submit button', () => {
+  it('changes the permission mode from the menu beside attachments', async () => {
+    await fakeBrowser.storage.local.set({ [PERMISSION_MODE_KEY]: 'manual' });
+    const { user } = mount();
+    const trigger = await screen.findByRole('button', { name: 'OpenCode permissions: manual' });
+    expect(screen.getByRole('button', { name: 'Add photos and files' }).parentElement).toBe(trigger.parentElement);
+    await user.click(trigger);
+    expect(screen.getByText('Permission')).toBeInTheDocument();
+    await user.click(await screen.findByRole('menuitemradio', { name: 'Automatically approve' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'OpenCode permissions: auto' })).toBeInTheDocument());
+    expect((await fakeBrowser.storage.local.get(PERMISSION_MODE_KEY))[PERMISSION_MODE_KEY]).toBe('auto');
+    await fakeBrowser.storage.local.set({ [PERMISSION_MODE_KEY]: 'manual' });
+    await waitFor(() => expect(screen.getByRole('button', { name: 'OpenCode permissions: manual' })).toBeInTheDocument());
+  });
+  it('opens a running child, interrupts only that child and shows its outcome', async () => {
+    const child = 'ses_child';
+    const requests: URL[] = [];
+    const fake = fakeOpencode({ overrides: {
+      'GET /api/session/active': () => jsonResponse({ data: { [SESSION_ID]: {}, [child]: {} } }),
+      [`GET /api/session/${child}`]: () => jsonResponse({ data: { id: child, agent: 'explore', time: { created: Date.now() - 5000, updated: Date.now() } } }),
+      [`GET /api/session/${child}/message`]: () => jsonResponse({ data: [], cursor: { next: null } }),
+      [`GET /api/session/${child}/inbox`]: () => jsonResponse({ data: [] }),
+      [`GET /api/session/${child}/form`]: () => jsonResponse({ data: [] }),
+      [`POST /api/session/${child}/interrupt`]: (call) => { requests.push(call.url); return jsonResponse({ interrupted: true }); },
+    } });
+    const { user } = mount(fake);
+    await startTurn(fake, user);
+    const event = { assistantMessageID: ASSISTANT_MSG_ID, id: 'call_child' };
+    fake.emit('session.tool.input.started', { ...event, name: 'subagent' });
+    fake.emit('session.tool.called', { ...event, input: { agent: 'explore', description: 'Inspect code' } });
+    fake.emit('session.tool.progress', { ...event, metadata: { sessionID: child } });
+    await user.click(await screen.findByRole('button', { name: /running explore agent/i }));
+    await waitFor(() => expect(document.querySelector('[data-tool="subagent"]')).not.toBeNull());
+    await user.click(document.querySelector<HTMLButtonElement>('[data-tool="subagent"]')!);
+    expect(await screen.findByText(/\d+s/)).toBeVisible();
+    expect(screen.getByText('· explore')).toBeVisible();
+    await user.click(screen.getByRole('button', { name: 'Stop subagent' }));
+    expect(requests).toHaveLength(1);
+    expect(requests[0]!.searchParams.has('resume')).toBe(false);
+    fake.emit('session.execution.interrupted', { sessionID: child });
+    expect(await screen.findByText(/Interrupted · \d+s/)).toBeVisible();
+    expect(screen.queryByRole('button', { name: 'Stop subagent' })).toBeNull();
+  });
   it('copies the active session ID when the chat title is clicked', async () => {
     const { fake, user } = mount();
     expect(screen.queryByRole('button', { name: /Copy session ID/ })).not.toBeInTheDocument();
     await startTurn(fake, user);
     const writeText = vi.spyOn(navigator.clipboard, 'writeText').mockResolvedValue();
-    await user.click(screen.getByRole('button', { name: /Copy session ID/ }));
+    const copyButton = screen.getByRole('button', { name: /Copy session ID/ });
+    await user.hover(copyButton);
+    expect(await screen.findByText('Copy session ID')).toBeInTheDocument();
+    await user.click(copyButton);
     expect(writeText).toHaveBeenCalledWith(SESSION_ID);
     expect(await screen.findByRole('status')).toHaveTextContent('Session ID copied');
+    expect(document.querySelector('[data-slot="tooltip"]')).toHaveTextContent('Session ID copied');
     writeText.mockRestore();
   });
 
@@ -223,7 +270,7 @@ describe('ChatScreen: sending and the submit button', () => {
     const { fake, user } = mount();
     await startTurn(fake, user);
     fake.finish('failed', { error: PROVIDER_ERROR });
-    expect(await screen.findByText(`Model error: ${PROVIDER_ERROR.message}`)).toBeInTheDocument();
+    await waitFor(() => expect(document.querySelector('[data-slot="assistant-error"]')).toHaveTextContent(`Model error: ${PROVIDER_ERROR.message}`));
   });
 
   it('calls onUnauthorized on a 401', async () => {
@@ -349,5 +396,36 @@ describe('ChatScreen: questions from the agent', () => {
     await waitFor(() => expect(box()).toBeInTheDocument());
     const reply = fake.fetch.calls.find((call) => call.url.pathname.endsWith('/form/frm_q/reply'))!;
     expect(JSON.parse(String(reply.init.body))).toMatchObject({ answer: { q0: 'Tutorial' } });
+  });
+});
+
+describe('Subagent permission routing', () => {
+  it('shows child permissions in the main prompt and marks requests in another session', async () => {
+    await fakeBrowser.storage.local.set({ [PERMISSION_MODE_KEY]: 'manual' });
+    const child = 'ses_child';
+    const fake = fakeOpencode({ overrides: {
+      [`GET /api/session/${child}`]: () => jsonResponse({ data: { id: child, parentID: SESSION_ID, agent: 'explore', time: { created: Date.now(), updated: Date.now() } } }),
+      [`GET /api/session/${child}/message`]: () => jsonResponse({ data: [], cursor: { next: null } }),
+      [`GET /api/session/${child}/inbox`]: () => jsonResponse({ data: [] }),
+      [`POST /api/session/${child}/permission/perm_child/reply`]: () => new Response(null, { status: 204 }),
+    } });
+    const { user } = mount(fake);
+    await startTurn(fake, user);
+    const event = { assistantMessageID: ASSISTANT_MSG_ID, id: 'call_child' };
+    fake.emit('session.tool.input.started', { ...event, name: 'subagent' });
+    fake.emit('session.tool.called', { ...event, input: { agent: 'explore', description: 'Inspect code' } });
+    fake.emit('session.tool.progress', { ...event, metadata: { sessionID: child } });
+    fake.emit('permission.asked', { id: 'perm_child', sessionID: child, action: 'edit', resources: ['child.ts'] });
+    expect(await screen.findByText('Subagent request')).toBeVisible();
+    await user.click(screen.getByRole('radio', { name: 'Allow once' }));
+    await waitFor(() => expect(fake.fetch.calls.some((call) => call.url.pathname === `/api/session/${child}/permission/perm_child/reply`)).toBe(true));
+    const group = (await screen.findAllByRole('button', { name: /running explore agent/i })).find((button) => button.dataset.slot === 'collapsible-trigger');
+    if (group?.getAttribute('aria-expanded') !== 'true') await user.click(group!);
+    await user.click(document.querySelector<HTMLButtonElement>('[data-tool="subagent"]')!);
+    await screen.findByRole('button', { name: /Back to main chat/ });
+    fake.emit('permission.asked', { id: 'perm_root', sessionID: SESSION_ID, action: 'execute', resources: ['command'] });
+    expect(await screen.findByRole('status', { name: 'Another chat needs approval' })).toBeVisible();
+    await user.click(screen.getByRole('button', { name: /Back to main chat/ }));
+    expect(await screen.findByText('Allow execute?')).toBeVisible();
   });
 });

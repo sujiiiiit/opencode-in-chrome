@@ -36,7 +36,7 @@ function ItemContent({
 
   return (
     <>
-      {icon && <span className="[&_svg]:size-[15px] text-text-secondary">{icon}</span>}
+      {icon && <span className="[&_svg:not([class*='size-'])]:size-[15px] text-text-secondary">{icon}</span>}
       {hasRow && (
         <ItemRow text={text} subtext={subtext} shortcut={shortcut} badge={badge} />
       )}

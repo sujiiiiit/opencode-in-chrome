@@ -69,6 +69,7 @@ describe('tool rows', () => {
     expect(toolLabel(tool('grep', { input: { pattern: 'TODO' } }), false)).toBe('Searched for "TODO"');
     expect(toolLabel(tool('list', { input: { path: '/repo/src' } }), false)).toBe('Listed files in src');
     expect(toolLabel(tool('subagent', { status: 'running', input: { description: 'Map the code' } }), true)).toBe('Running agent: Map the code');
+    expect(toolLabel(tool('task', { status: 'running', input: { subagent_type: 'explore', description: 'Map the code' } }), true)).toBe('Running explore agent: Map the code');
     expect(toolLabel(tool('todowrite', { input: { todos: [{ status: 'completed' }] } }), false)).toBe('Updated plan · 1/1 done');
     expect(toolLabel(tool('shell', { status: 'streaming', inputText: '{"command":"npm te' }), true)).toBe('Running');
     expect(toolLabel(tool('shell', { status: 'streaming', inputText: '{"command":"npm test"' }), true)).toBe('Running npm test');

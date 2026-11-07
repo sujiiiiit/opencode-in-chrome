@@ -23,8 +23,8 @@ export const AttachMenu = memo(function AttachMenu({ onFiles }: { onFiles: (file
     <>
       <DropdownMenu>
         <Tooltip label={LABEL}>
-          <DropdownMenuTrigger render={<Button variant="ghost" size="icon-sm" data-slot="attach-menu" aria-label={LABEL} />}>
-            <Icon name="plus" />
+          <DropdownMenuTrigger render={<Button variant="ghost" size="icon" data-slot="attach-menu" aria-label={LABEL} />}>
+            <Icon name="plus" className="size-4.5" />
           </DropdownMenuTrigger>
         </Tooltip>
         <DropdownMenuContent side="top" align="start" className="min-w-64">

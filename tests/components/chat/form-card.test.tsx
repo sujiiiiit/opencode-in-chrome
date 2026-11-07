@@ -264,21 +264,26 @@ describe('FormCard: browser approvals', () => {
     const onAnswer = vi.fn().mockResolvedValue(true);
     const user = userEvent.setup();
     render(<FormCard form={await approval('action')} onAnswer={onAnswer} onCancel={vi.fn()} />);
-    expect(current().getByRole('heading', { name: 'Allow this action on shop.test?' })).toBeInTheDocument();
-    expect(current().getByText('Places the order')).toBeInTheDocument();
-    expect(current().getByText('shop.test')).toBeInTheDocument();
-    expect(current().getAllByRole('radio')).toHaveLength(2);
-    expect(current().getByText('Allow')).toBeInTheDocument();
-    expect(current().queryByRole('textbox', { name: /your own answer/i })).toBeNull();
-    await user.click(current().getByText('Deny'));
-    await user.click(screen.getByRole('button', { name: 'Submit' }));
+    expect(screen.getByRole('heading', { name: 'Allow this action on shop.test?' })).toBeInTheDocument();
+    expect(screen.getByText('Places the order')).toBeInTheDocument();
+    expect(screen.getByText('shop.test')).toBeInTheDocument();
+    expect(screen.getAllByRole('radio')).toHaveLength(2);
+    expect(screen.getByText('Allow')).toBeInTheDocument();
+    expect(screen.queryByRole('textbox', { name: /your own answer/i })).toBeNull();
+    await user.click(screen.getByText('Deny'));
+    expect(screen.queryByRole('button', { name: 'Submit' })).toBeNull();
     expect(onAnswer).toHaveBeenCalledWith('frm_b', { choice: 'deny' });
   });
 
   it('offers allow for this chat, always and deny for a new site', async () => {
-    render(<FormCard form={await approval('site')} onAnswer={vi.fn()} onCancel={vi.fn()} />);
-    expect(current().getByRole('heading', { name: 'Let the agent use shop.test?' })).toBeInTheDocument();
-    expect(current().getByText(/the agent wants to read and act on this site/)).toBeInTheDocument();
-    expect(current().getByText('Always allow shop.test')).toBeInTheDocument();
+    const onAnswer = vi.fn().mockResolvedValue(true);
+    const user = userEvent.setup();
+    render(<FormCard form={await approval('site')} onAnswer={onAnswer} onCancel={vi.fn()} />);
+    expect(screen.getByRole('heading', { name: 'Let the agent use shop.test?' })).toBeInTheDocument();
+    expect(screen.getByText(/the agent wants to read and act on this site/i)).toBeInTheDocument();
+    expect(screen.getAllByRole('radio')).toHaveLength(3);
+    await user.click(screen.getByRole('radio', { name: 'Always allow shop.test' }));
+    expect(onAnswer).toHaveBeenCalledWith('frm_b', { choice: 'always' });
+    expect(screen.queryByRole('button', { name: 'Submit' })).toBeNull();
   });
 });

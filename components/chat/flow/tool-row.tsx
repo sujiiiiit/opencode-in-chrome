@@ -26,18 +26,18 @@ function outcome(part: ReplyToolPart, live: boolean): { text: string; failed: bo
 type Props = { part: ReplyToolPart; live: boolean };
 
 function agentSessionID(part: ReplyToolPart): string | undefined {
-  if (part.name !== 'task' && part.name !== 'subagent') return undefined;
-  const value = part.metadata.sessionID ?? part.metadata.sessionId;
+  if (part.name !== 'task' && part.name !== 'subagent' && part.name !== 'agent') return undefined;
+  const value = part.metadata.sessionID ?? part.metadata.sessionId ?? part.metadata.session_id;
   return typeof value === 'string' && value ? value : undefined;
 }
 
 function AgentLink({ part, header, result, sessionID, title, navigate }: {
   part: ReplyToolPart; header: ReactNode; result: ReturnType<typeof outcome>;
-  sessionID: string; title: string; navigate: (id: string, title: string) => void;
+  sessionID?: string; title: string; navigate: (id: string, title: string) => void;
 }) {
   return (
     <Button variant="quiet" size="step" data-tool={part.name} data-status={part.status}
-      className="hover:bg-transparent" onClick={() => navigate(sessionID, title)}>
+      className="hover:bg-transparent" disabled={!sessionID} onClick={() => sessionID && navigate(sessionID, title)}>
       {header}
       <Icon name="arrow-right" className={cn('shrink-0 text-text-tertiary', !result && 'ml-auto')} />
     </Button>
@@ -82,7 +82,7 @@ export const ToolRow = memo(function ToolRow({ part, live }: Props) {
     />
   );
 
-  if (navigate && childID) return <AgentLink part={part} header={header} result={result} sessionID={childID} title={subject ?? 'Subagent'} navigate={navigate} />;
+  if (navigate && ['task', 'subagent', 'agent'].includes(part.name)) return <AgentLink part={part} header={header} result={result} sessionID={childID} title={subject ?? 'Subagent'} navigate={navigate} />;
 
   // Nothing to open (a file read): the same row, not a button.
   if (!Details && !part.error) {

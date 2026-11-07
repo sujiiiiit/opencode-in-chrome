@@ -11,12 +11,12 @@ const part = (name: string, metadata: Record<string, unknown> = {}): ReplyToolPa
   content: [{ type: 'text', text: 'Agent output' }],
 });
 
-function mount(tool: ReplyToolPart) {
+function mount(tool: ReplyToolPart, live = false) {
   const user = userEvent.setup();
   render(
     <SubagentTabs rootID="root"
       renderChild={(id) => <p>Child chat {id}</p>}>
-      <ToolRow part={tool} live={false} />
+      <ToolRow part={tool} live={live} />
     </SubagentTabs>,
   );
   return user;
@@ -30,10 +30,17 @@ describe('ToolRow subagent navigation', () => {
     expect(screen.queryByText('Agent output')).toBeNull();
   });
 
-  it('keeps the disclosure for an agent call before its child ID exists', async () => {
-    const user = mount(part('task'));
-    await user.click(screen.getByRole('button', { name: /ran agent.*check the redirect/i }));
-    expect(screen.getByText('Agent output')).toBeVisible();
+  it('waits for the child ID before allowing navigation', () => {
+    mount(part('task'));
+    expect(screen.getByRole('button', { name: /ran agent.*check the redirect/i })).toBeDisabled();
+    expect(screen.queryByText('Agent output')).toBeNull();
+  });
+
+  it('opens a running named agent using its progress metadata', async () => {
+    const user = mount({ ...part('task', { session_id: 'ses_live' }), status: 'running', input: { subagent_type: 'explore', description: 'Find files' } }, true);
+    // A live row uses the same navigation once progress supplies the session ID.
+    await user.click(screen.getByRole('button', { name: /running explore agent.*find files/i }));
+    expect(screen.getByText('Child chat ses_live')).toBeVisible();
   });
 
   it('keeps non-agent tools as disclosures', async () => {

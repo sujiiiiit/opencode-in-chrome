@@ -14,6 +14,7 @@ import type { PromptBoxHandle } from './prompt-box/prompt-box';
 import { launchSendFlight } from './send-flight';
 import { useAttachedImages } from './use-attachments';
 import { activePanelTab, browserSessionPermissions, ensureBrowserToolsReady, prepareBrowserSession } from '@/lib/browser/guidance';
+import { loadPermissionMode, PERMISSION_MODE_KEY } from '@/lib/opencode/permission-mode';
 
 const noopSubscribe = () => () => undefined;
 
@@ -85,6 +86,7 @@ function useChatStore(connection: Connection, hub: EventHub | null, target: Targ
       connection,
       events: hub,
       sessionID: target.sessionID ?? undefined,
+      includeSubagents: true,
       onCreated: (sessionID, selection) => handlers.current.onCreated(sessionID, selection),
       prepare: (client, sessionID) => prepareBrowserSession(client, sessionID, tabId),
       sessionPermissions: browserSessionPermissions,
@@ -93,12 +95,17 @@ function useChatStore(connection: Connection, hub: EventHub | null, target: Targ
       onUnauthorized: () => handlers.current.onUnauthorized(),
     });
     setChat(session);
+    void loadPermissionMode().then((mode) => session.setPermissionMode(mode));
+    const modeChanged = (changes: Record<string, { newValue?: unknown }>, area: string) => {
+      if (area === 'local' && changes[PERMISSION_MODE_KEY]) session.setPermissionMode(changes[PERMISSION_MODE_KEY].newValue === 'auto' ? 'auto' : 'manual');
+    };
+    browser.storage.onChanged.addListener(modeChanged);
     void session.load().then(async () => {
       if (session.getState().phase !== 'ready' || !target.attachOnOpen) return;
       if (!(await activePanelTab(tabId)) || !(await browserSessionPermissions())) return;
       await session.openBrowserSession();
     }).catch(() => undefined);
-    return () => session.dispose();
+    return () => { browser.storage.onChanged.removeListener(modeChanged); session.dispose(); };
   }, [connection, hub, target, handlers, tabId]);
   const state = useSyncExternalStore(chat?.subscribe ?? noopSubscribe, chat?.getState ?? (() => INITIAL_CHAT_STATE));
   return { chat, state };

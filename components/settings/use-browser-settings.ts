@@ -1,12 +1,11 @@
 import { useCallback, useEffect, useState } from 'react';
 import { browser } from 'wxt/browser';
-import { siteKey, type ApprovalMode, type PolicySettings, type SiteSettings } from '@/lib/browser/policy';
+import { siteKey, type PolicySettings, type SiteSettings } from '@/lib/browser/policy';
 import {
   BROWSER_ENABLED_KEY,
   isBrowserAccessEnabled,
   loadPolicy,
   POLICY_KEY,
-  setApprovalMode,
   setBrowserAccess,
   setSiteSettings,
 } from '@/lib/browser/settings';
@@ -42,8 +41,7 @@ export function useBrowserSettings() {
   }, []);
 
   const setEnabled = useCallback((enabled: boolean) => setBrowserAccess(enabled), []);
-  const setMode = useCallback((mode: ApprovalMode) => setApprovalMode(mode), []);
   const setSite = useCallback((site: string, value: SiteSettings | null) => setSiteSettings(site, value), []);
 
-  return { state, setEnabled, setMode, setSite };
+  return { state, setEnabled, setSite };
 }

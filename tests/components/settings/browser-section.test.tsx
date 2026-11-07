@@ -19,11 +19,10 @@ describe('BrowserSection', () => {
     await waitFor(() => expect(toggle).not.toBeChecked());
   });
 
-  it('switches the approval mode', async () => {
-    const user = userEvent.setup();
+  it('uses the chat permission mode instead of a separate browser approval control', async () => {
     render(<BrowserSection />);
-    await user.click(await screen.findByText('Act on allowed sites'));
-    await waitFor(async () => expect((await loadPolicy()).mode).toBe('act'));
+    expect(await screen.findByText(/Browser approvals follow the permission mode/)).toBeInTheDocument();
+    expect(screen.queryByRole('radiogroup', { name: 'Approvals' })).toBeNull();
   });
 
   it('adds a site from a URL, changes its rule, marks it sensitive and removes it', async () => {

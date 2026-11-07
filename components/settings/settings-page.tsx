@@ -4,12 +4,14 @@ import { Button } from '@/components/ui/button';
 import { Icon, type IconName } from '@/components/ui/icon';
 import { clearConnection, loadConnection, type Connection } from '@/lib/opencode/connection';
 import { BrowserSection } from './browser-section';
+import { PermissionSection } from './permission-section';
 import { ModelsSection, type ModelsPreview } from './models-section';
 import { WebSearchSection } from './web-search-section';
 
-type Page = 'models' | 'web-search' | 'browser';
+type Page = 'models' | 'web-search' | 'browser' | 'permissions';
 
 const PAGES: Array<{ id: Page; label: string; description: string; icon: IconName }> = [
+  { id: 'permissions', label: 'Permissions', description: 'Choose how OpenCode handles permission requests.', icon: 'sliders' },
   { id: 'models', label: 'Models', description: 'Choose which models of each provider appear in the model picker.', icon: 'sliders' },
   { id: 'web-search', label: 'Web search', description: 'Choose the search backend your chats use.', icon: 'globe' },
   { id: 'browser', label: 'Browser', description: 'Let chats read and act in your browser, and choose what needs your OK.', icon: 'browser' },
@@ -100,6 +102,7 @@ export function SettingsPage() {
 }
 
 function SettingsContent({ page, connection }: { page: Page; connection: Connection | null | undefined }) {
+  if (page === 'permissions') return <PermissionSection />;
   if (page === 'browser') return <BrowserSection />;
   if (connection === undefined) return null;
   if (connection === null) return <p className="text-sm text-text-secondary">Pair the extension from its side panel to manage these settings.</p>;

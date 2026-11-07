@@ -40,6 +40,7 @@ const SPECS: Record<string, Spec> = {
   browser: { category: 'web', active: 'Browsing', done: 'Browsed', subject: ['url', 'action'] },
   subagent: AGENT,
   task: AGENT,
+  agent: AGENT,
   skill: { category: 'other', active: 'Loading skill', done: 'Loaded skill', subject: ['name', 'skill'], internal: true },
   todowrite: { category: 'other', active: 'Updating plan', done: 'Updated plan', join: ' · ', internal: true },
   question: { category: 'other', active: 'Asking you', done: 'Asked you', format: 'quoted', internal: true },
@@ -169,6 +170,10 @@ export const toolStopped = (part: ReplyToolPart, live: boolean) =>
 export function toolTitle(part: ReplyToolPart, live: boolean): string {
   if (isBrowserPart(part)) return toolPending(part, live) ? 'Browsing' : 'Browsed';
   const spec = toolSpec(part.name);
+  if (spec.category === 'agent') {
+    const name = toolField(part, 'subagent_type', true) ?? toolField(part, 'agent', true) ?? str(part.metadata.agent);
+    if (name) return `${toolPending(part, live) ? 'Running' : 'Ran'} ${name} agent`;
+  }
   return toolPending(part, live) ? spec.active : spec.done;
 }
 

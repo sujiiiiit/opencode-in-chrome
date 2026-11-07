@@ -12,7 +12,7 @@ import { releaseImage, type ImageAttachment, type PromptFile } from './attachmen
 import { parseSentFiles, withFiles, type SentFile } from './sent-files';
 import type { Connection } from './connection';
 import { EventHub, type HubStatus } from './events';
-import { addForm, createdForm, parseForms, removeForm, settledFormID, type FormAnswer, type PendingForm } from './forms';
+import { addForm, createdForm, parseForm, parseForms, removeForm, settledFormID, type FormAnswer, type PendingForm } from './forms';
 import { createMessageID } from './ids';
 import type { DurableSelection, Selection } from './models/selection';
 import { isRecord, type ReplyState } from './reply';
@@ -33,6 +33,8 @@ import {
   type Timeline,
 } from './timeline';
 import { ensureWorkspace } from './workspace';
+import type { PermissionRequest } from '@opencode/client';
+import type { PermissionMode } from './permission-mode';
 
 /** Messages per page, for the first snapshot and for each "load earlier". */
 const PAGE_LIMIT = 50;
@@ -67,6 +69,8 @@ export type ChatState = {
   title: string | null;
   /** The agent and model the server has for the session (null until known). */
   durable: DurableSelection | null;
+  /** Session creation and last outcome, used for a child session's status. */
+  sessionInfo?: { started?: number; ended?: number; outcome?: 'succeeded' | 'failed' | 'interrupted' };
   /** Older messages exist beyond the loaded ones. */
   hasEarlier: boolean;
   loadingEarlier: boolean;
@@ -77,6 +81,7 @@ export type ChatState = {
   notice: string | null;
   /** Questions the server is waiting on (web search's first-use consent, a question tool). */
   forms: PendingForm[];
+  permissions: PermissionRequest[];
 };
 
 export type ChatSessionOptions = {
@@ -90,6 +95,8 @@ export type ChatSessionOptions = {
   retryMs?: number;
   /** Attach to an existing session instead of creating one on the first send. */
   sessionID?: string;
+  /** Include pending requests from descendant sessions in this chat. */
+  includeSubagents?: boolean;
   /** The first send created the session (with `selection`, when the send named one). */
   onCreated?: (sessionID: string, selection?: Selection) => void;
   /** Runs after the session is created and before the first prompt joins it (the browsing guide). Must not throw. */
@@ -117,6 +124,7 @@ export const INITIAL_CHAT_STATE: ChatState = {
   interrupting: false,
   notice: null,
   forms: [],
+  permissions: [],
 };
 
 /** The admitted inbox item a prompt POST answers with, falling back to what was sent. */
@@ -203,6 +211,99 @@ function durablePatch(event: ServerEvent): DurableSelection | null {
  * through older messages.
  */
 export class ChatSession extends Store<ChatState> {
+  private childEvents: Promise<void> = Promise.resolve();
+  private readonly descendants = new Set<string>();
+  private permissionMode: PermissionMode = 'manual';
+  private readonly answeringPermissions = new Set<string>();
+
+  setPermissionMode(mode: PermissionMode): void {
+    this.permissionMode = mode;
+    if (mode === 'auto') for (const request of this.state.permissions) void this.answerPermission(request, 'once');
+  }
+
+  async answerPermission(request: PermissionRequest, decision: 'once' | 'always' | 'reject'): Promise<boolean> {
+    if (this.answeringPermissions.has(request.id)) return false;
+    this.answeringPermissions.add(request.id);
+    try {
+      await this.client.permission.reply({ sessionID: request.sessionID, requestID: request.id, decision }, { signal: this.signal });
+      this.set((state) => ({ permissions: state.permissions.filter((item) => item.id !== request.id) }));
+      return true;
+    } catch (error) {
+      if (!this.disposed && !this.unauthorized(error)) this.set({ notice: describeError(error) });
+      return false;
+    } finally {
+      this.answeringPermissions.delete(request.id);
+    }
+  }
+
+  private receivePermission(request: PermissionRequest): void {
+    this.set((state) => ({ permissions: state.permissions.some((item) => item.id === request.id) ? state.permissions : [...state.permissions, request] }));
+    if (this.permissionMode === 'auto') void this.answerPermission(request, 'once');
+  }
+
+  private async loadPermissions(sessionID: string): Promise<void> {
+    try {
+      const requests = await this.client.permission.list({ sessionID }, { signal: this.signal });
+      if (sessionID !== this.sessionID || this.disposed) return;
+      this.set((state) => ({ permissions: state.permissions.filter((item) => item.sessionID !== sessionID) }));
+      for (const request of requests) this.receivePermission(request);
+    } catch { /* Keep requests received from the stream. */ }
+  }
+
+  private async belongsToChat(id: string): Promise<boolean> {
+    const visited = new Set<string>();
+    let current = id;
+    while (current && !visited.has(current)) {
+      if (this.isKnownSession(current)) {
+        for (const item of visited) this.descendants.add(item);
+        return true;
+      }
+      visited.add(current);
+      const info: unknown = await this.client.session.get({ sessionID: current }, { signal: this.signal }).catch(() => undefined);
+      current = isRecord(info) && typeof info.parentID === 'string' ? info.parentID : '';
+    }
+    return false;
+  }
+
+  private isKnownSession(id: string): boolean {
+    return id === this.sessionID || this.descendants.has(id);
+  }
+
+  private requestSessionID(event: ServerEvent): string {
+    if (event.type === 'form.created') return parseForm(event.data.form)?.sessionID ?? '';
+    return typeof event.data.sessionID === 'string' ? event.data.sessionID : '';
+  }
+
+  private async applyChildRequest(event: ServerEvent): Promise<void> {
+    const id = this.requestSessionID(event);
+    if (!id || id === this.sessionID || !(await this.belongsToChat(id)) || this.disposed) return;
+    if (!this.applyPermission(event)) this.applyFormForSession(event, id);
+  }
+
+  private async loadChildRequests(): Promise<void> {
+    if (!this.options.includeSubagents || !this.sessionID) return;
+    const location = this.directory ? { directory: this.directory } : undefined;
+    const [permissions, forms] = await Promise.all([
+      this.client.permission.request.list({ location }, { signal: this.signal }).catch(() => undefined),
+      this.client.form.list({ location }, { signal: this.signal }).catch(() => undefined),
+    ]);
+    if (permissions) this.set((state) => ({ permissions: state.permissions.filter((item) => item.sessionID === this.sessionID) }));
+    if (forms) this.set((state) => ({ forms: state.forms.filter((item) => item.sessionID === this.sessionID) }));
+    await this.restoreChildPermissions(permissions?.data ?? []);
+    await this.restoreChildForms(parseForms(forms?.data));
+  }
+
+  private async restoreChildPermissions(requests: PermissionRequest[]): Promise<void> {
+    for (const request of requests) {
+      if (request.sessionID !== this.sessionID && await this.belongsToChat(request.sessionID) && !this.disposed) this.receivePermission(request);
+    }
+  }
+
+  private async restoreChildForms(forms: PendingForm[]): Promise<void> {
+    for (const form of forms) {
+      if (form.sessionID !== this.sessionID && await this.belongsToChat(form.sessionID) && !this.disposed) this.set((state) => ({ forms: addForm(state.forms, form) }));
+    }
+  }
   private readonly previews = new Map<string, { files: SentFile[]; images: readonly ImageAttachment[] }>();
 
   /** Keep the original object URLs for this session, so admission and delivery do not reload thumbnails. */
@@ -337,14 +438,44 @@ export class ChatSession extends Store<ChatState> {
   };
 
   private apply(event: ServerEvent): void {
+    this.queueChildRequest(event);
     if (this.applyForm(event) || !this.sessionID || event.data.sessionID !== this.sessionID) return;
+    if (this.applyPermission(event)) return;
     if (this.applyLifecycle(event)) return;
     const durable = durablePatch(event);
     if (durable) this.set((state) => ({ durable: { ...state.durable, ...durable } }));
+    this.applyExecutionInfo(event);
     const timeline = this.state.timeline;
     if (!timeline) return;
     const next = reduceTimeline(timeline, event);
     if (next !== timeline) this.set({ timeline: next });
+  }
+
+  private queueChildRequest(event: ServerEvent): void {
+    if (!this.options.includeSubagents || !(event.type.startsWith('permission.') || event.type.startsWith('form.'))) return;
+    this.childEvents = this.childEvents.then(() => this.applyChildRequest(event)).catch(() => undefined);
+  }
+
+  private applyPermission(event: ServerEvent): boolean {
+    if (event.type === 'permission.asked' && typeof event.data.id === 'string' && typeof event.data.action === 'string' && Array.isArray(event.data.resources)) {
+      this.receivePermission(event.data as PermissionRequest);
+      return true;
+    }
+    if (event.type === 'permission.replied' && typeof event.data.requestID === 'string') {
+      this.set((state) => ({ permissions: state.permissions.filter((item) => item.id !== event.data.requestID) }));
+      return true;
+    }
+    return false;
+  }
+
+  private applyExecutionInfo(event: ServerEvent): void {
+    if (event.type === 'session.execution.started') {
+      this.set((state) => ({ sessionInfo: { ...state.sessionInfo, outcome: undefined } }));
+      return;
+    }
+    const outcomes = { 'session.execution.succeeded': 'succeeded', 'session.execution.failed': 'failed', 'session.execution.interrupted': 'interrupted' } as const;
+    const outcome = outcomes[event.type as keyof typeof outcomes];
+    if (outcome) this.set((state) => ({ sessionInfo: { ...state.sessionInfo, outcome, ended: event.created } }));
   }
 
   /** A rename or a deletion of the session; true when the event was one of those. */
@@ -359,19 +490,22 @@ export class ChatSession extends Store<ChatState> {
   private applyForm(event: ServerEvent): boolean {
     if (!event.type.startsWith('form.')) return false;
     const sessionID = this.sessionID;
-    if (!sessionID) return true;
+    if (sessionID) this.applyFormForSession(event, sessionID);
+    return true;
+  }
+
+  private applyFormForSession(event: ServerEvent, sessionID: string): void {
     const created = createdForm(event, sessionID);
     const settled = settledFormID(event, sessionID);
     if (created) this.set((state) => ({ forms: addForm(state.forms, created) }));
     else if (settled) this.set((state) => ({ forms: removeForm(state.forms, settled) }));
-    return true;
   }
 
   /** The forms still waiting for an answer; best effort (the stream adds the rest). */
   private async loadForms(sessionID: string): Promise<void> {
     try {
       const forms = parseForms(await this.client.session.form.list({ sessionID }, { signal: this.signal }));
-      if (sessionID === this.sessionID) this.set({ forms });
+      if (sessionID === this.sessionID) this.set((state) => ({ forms: [...state.forms.filter((item) => item.sessionID !== sessionID), ...forms] }));
     } catch {
       // Keep the forms the stream delivered.
     }
@@ -392,7 +526,7 @@ export class ChatSession extends Store<ChatState> {
   }
 
   private async settleForm(formID: string, send: (sessionID: string) => Promise<unknown>): Promise<boolean> {
-    const sessionID = this.sessionID;
+    const sessionID = this.state.forms.find((form) => form.id === formID)?.sessionID ?? this.sessionID;
     if (!sessionID) return false;
     try {
       await send(sessionID);
@@ -415,9 +549,13 @@ export class ChatSession extends Store<ChatState> {
     try {
       const info = await this.client.session.get({ sessionID: this.sessionID! }, { signal: this.signal });
       const durable = durableOf(info);
+      const record: Record<string, unknown> = isRecord(info) ? info : {};
+      const time = isRecord(record.time) ? record.time : {};
+      const outcome = record.outcome === 'succeeded' || record.outcome === 'failed' || record.outcome === 'interrupted' ? record.outcome : undefined;
       this.set((state) => ({
         title: titleOf(info),
         durable: durable?.model ? { ...state.durable, ...durable } : (state.durable ?? durable),
+        sessionInfo: { started: typeof time.created === 'number' ? time.created : undefined, ended: typeof time.idle === 'number' ? time.idle : typeof time.updated === 'number' ? time.updated : undefined, outcome, ...state.sessionInfo },
       }));
     } catch {
       // Keep the current title.
@@ -446,6 +584,8 @@ export class ChatSession extends Store<ChatState> {
         this.client.session.inbox.list({ sessionID }, { signal }),
         this.client.session.active({ signal }),
         this.loadForms(sessionID),
+        this.loadPermissions(sessionID),
+        this.loadChildRequests(),
       ]);
       const { messages, next } = readPage(page);
       this.restoreDurable(messages);
@@ -651,13 +791,14 @@ export class ChatSession extends Store<ChatState> {
   }
 
   /** Interrupts the running turn. `resume` lets prompts that are still waiting continue. */
-  async stop(): Promise<void> {
+  async stop(resume = true): Promise<void> {
     if (!this.sessionID || this.state.interrupting) return;
     this.set({ interrupting: true });
     try {
-      await this.client.session.interrupt({ sessionID: this.sessionID, resume: true }, { signal: this.signal });
-    } catch {
+      await this.client.session.interrupt({ sessionID: this.sessionID, ...(resume ? { resume: true } : {}) }, { signal: this.signal });
+    } catch (error) {
       // The execution events report the outcome; a failed stop leaves the turn running.
+      if (!resume && !this.disposed && !this.unauthorized(error)) this.set({ notice: describeError(error) });
     } finally {
       this.set({ interrupting: false });
     }

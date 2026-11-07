@@ -66,6 +66,34 @@ function OptionRow({ option, control }: { option: FormOption; control: (ids: { l
   );
 }
 
+/** A single click answers an approval; the selected radio stays disabled while it is sent. */
+export function ApprovalChoices({ options, onChoose }: { options: FormOption[]; onChoose: (value: string) => unknown }) {
+  const [chosen, setChosen] = useState<string | null>(null);
+  const busy = useRef(false);
+  const choose = async (value: string) => {
+    if (busy.current) return;
+    busy.current = true;
+    setChosen(value);
+    try {
+      await onChoose(value);
+    } catch {
+      // The caller reports the failure; allow another selection.
+    } finally {
+      busy.current = false;
+      setChosen(null);
+    }
+  };
+  return (
+    <RadioGroup value={chosen} onValueChange={(value) => { if (typeof value === 'string') void choose(value); }} className="gap-0.5" aria-label="Approval choices">
+      {options.map((option) => (
+        <OptionRow key={option.value} option={option} control={(ids) => (
+          <RadioGroupItem value={option.value} disabled={chosen !== null} aria-labelledby={ids.label} aria-describedby={ids.hint} />
+        )} />
+      ))}
+    </RadioGroup>
+  );
+}
+
 /**
  * The last row: the own answer, typed in place. Typing (or going into it) chooses it; Enter goes on. It is a radio
  * for a one-answer question and a checkbox for a many-answer one, like the options above it.
@@ -223,11 +251,11 @@ function ApprovalDetail({ approval }: { approval: BrowserApproval }) {
   return (
     <div className="flex flex-col gap-0.5 px-3" data-browser-approval={approval.approval}>
       {approval.approval === 'action' && approval.summary && <p className="type-body text-text-primary">{approval.summary}</p>}
-      <p className="flex items-center gap-1.5 text-sm leading-snug text-text-tertiary">
-        <Icon name="globe" className="shrink-0" />
-        <span className="truncate">{approval.site}</span>
-        {approval.approval === 'site' && <span>· the agent wants to read and act on this site</span>}
+      <p className="flex items-start gap-1.5 text-sm leading-snug text-text-tertiary">
+        <Icon name="globe" className="mt-0.5 shrink-0" />
+        <span className="min-w-0 break-all">{approval.site}</span>
       </p>
+      {approval.approval === 'site' && <p className="text-sm leading-snug text-text-tertiary">The agent wants to read and act on this site.</p>}
     </div>
   );
 }
@@ -271,13 +299,28 @@ function Pager({ index, total, onMove, onClose, busy }: {
  * a radio option goes on to the next question by itself. The footer button goes on: Skip while the question is unanswered (when it may be skipped), Next
  * once answered, and Submit on the last page. The x declines the form.
  */
-export function FormCard({ form, onAnswer, onCancel }: Props) {
+export function FormCard(props: Props) {
+  const approval = browserApprovalOf(props.form);
+  return approval ? <BrowserApprovalCard {...props} approval={approval} /> : <QuestionCard {...props} />;
+}
+
+function BrowserApprovalCard({ form, onAnswer, approval }: Props & { approval: BrowserApproval }) {
+  const field = form.fields[0]!;
+  return (
+    <section aria-label={form.title} className="relative flex flex-col gap-2 px-1 pt-3.5 pb-3">
+      <h2 className="px-3 type-body font-semibold text-text-primary">{form.title}</h2>
+      <ApprovalDetail approval={approval} />
+      <ApprovalChoices options={field.options} onChoose={(value) => onAnswer(form.id, { [field.key]: value })} />
+    </section>
+  );
+}
+
+function QuestionCard({ form, onAnswer, onCancel }: Props) {
   const [draft, setDraft] = useState<FormDraft>(() => startDraft(form));
   const [at, setAt] = useState(0);
   const [busy, setBusy] = useState(false);
   const answer = draftAnswer(form, draft);
   const steps = askedFields(form, answer);
-  const approval = browserApprovalOf(form);
   const index = Math.min(at, steps.length - 1);
   const step = steps[index]!;
   const last = index === steps.length - 1;
@@ -324,8 +367,7 @@ export function FormCard({ form, onAnswer, onCancel }: Props) {
                 onDraft={setDraft}
                 onEnter={goOn}
                 onPicked={onPicked}
-                heading={approval ? form.title : headingOf(form, field)}
-                detail={approval ? <ApprovalDetail approval={approval} /> : undefined}
+                heading={headingOf(form, field)}
                 roomFor={steps.length > 1 ? 'pager' : 'one'}
               />
             </TabsContent>
