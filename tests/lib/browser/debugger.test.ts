@@ -108,7 +108,7 @@ describe('DebuggerSessions', () => {
     expect(await codeOf(sessions.send(6, 'Page.captureScreenshot', {}, { timeoutMs: 20 }))).toBe('TIMEOUT');
   });
 
-  it('detaches tabs idle for ten minutes on sweep', async () => {
+  it('detaches idle tabs on sweep', async () => {
     await sessions.ensure(5);
     await sessions.ensure(6);
     now += DEBUGGER_IDLE_MS - 1;
@@ -116,5 +116,22 @@ describe('DebuggerSessions', () => {
     now += 2;
     expect(await sessions.sweep()).toEqual([5]);
     expect(api.attached).toEqual(new Set([6]));
+  });
+
+  it('keeps active commands and explicit recordings attached until they finish', async () => {
+    let finish!: () => void;
+    api.respond = (method) => method === 'Runtime.evaluate' ? new Promise<void>((resolve) => { finish = resolve; }) : {};
+    const command = sessions.send(5, 'Runtime.evaluate');
+    await vi.waitFor(() => expect(finish).toBeDefined());
+    now += DEBUGGER_IDLE_MS + 1;
+    expect(await sessions.sweep()).toEqual([]);
+    finish();
+    await command;
+    await sessions.startRecording(5);
+    now += DEBUGGER_IDLE_MS + 1;
+    expect(await sessions.sweep()).toEqual([]);
+    sessions.stopRecording(5);
+    now += DEBUGGER_IDLE_MS + 1;
+    expect(await sessions.sweep()).toEqual([5]);
   });
 });

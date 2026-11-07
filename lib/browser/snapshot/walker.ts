@@ -437,7 +437,7 @@ function renderNode(state: WalkState, el: Element, role: string, name: string, i
 }
 
 function skipElement(el: Element): boolean {
-  return SKIP_TAGS.has(el.tagName.toUpperCase()) || el.hasAttribute('data-opencode-indicator');
+  return SKIP_TAGS.has(el.tagName.toUpperCase());
 }
 
 function shouldKeep(role: string, interactive: boolean, filter: WalkFilter, name: string, hidden: boolean): boolean {

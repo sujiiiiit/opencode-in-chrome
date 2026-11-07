@@ -264,33 +264,7 @@ export function settle(doc: Document, quietMs: number, capMs: number): Promise<b
   });
 }
 
-const INDICATOR_ATTR = 'data-opencode-indicator';
 
-/**
- * The agent-tab indicator (spec browser/tab-scope): a small badge in the page corner while
- * the tab belongs to a chat session. It never takes clicks and is hidden around captures.
- */
-export function indicator(doc: Document, mode: 'show' | 'hide' | 'unhide' | 'remove'): boolean {
-  let host = doc.querySelector(`[${INDICATOR_ATTR}]`) as HTMLElement | null;
-  if (mode === 'remove') {
-    host?.remove();
-    return false;
-  }
-  if (!host && mode === 'show') {
-    host = doc.createElement('div');
-    host.setAttribute(INDICATOR_ATTR, '');
-    host.style.cssText = 'all:initial;position:fixed;right:12px;bottom:12px;z-index:2147483647;pointer-events:none;';
-    const shadow = host.attachShadow({ mode: 'closed' });
-    const badge = doc.createElement('div');
-    badge.textContent = 'Opencode is using this tab';
-    badge.style.cssText =
-      'font:500 12px/1.2 system-ui,sans-serif;color:#fff;background:#d97706;padding:6px 10px;border-radius:999px;box-shadow:0 2px 8px rgba(0,0,0,.25);';
-    shadow.append(badge);
-    (doc.documentElement ?? doc.body).append(host);
-  }
-  if (host) host.style.display = mode === 'hide' ? 'none' : 'block';
-  return !!host;
-}
 
 export type UploadFile = { name: string; type: string; base64: string };
 

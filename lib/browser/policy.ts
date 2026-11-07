@@ -3,6 +3,7 @@
 // live here, in the extension, so they hold whoever the caller is.
 import { ToolError } from './tools/registry';
 import type { KeyValue } from './tabs';
+import type { PermissionMode } from '../opencode/permission-mode';
 
 export type Tier = 'read' | 'navigate' | 'mutate' | 'consequential' | 'handoff';
 export type SiteRule = 'allow' | 'ask' | 'block';
@@ -92,12 +93,9 @@ function submitsWithEnter(call: GuardCall, target: TargetLike): boolean {
   return call.tool === 'computer' && call.action === 'key' && !!target.inForm && /\b(enter|return)\b/i.test(call.text ?? '');
 }
 
-function crossesLinkSite(call: GuardCall, target: TargetLike, pageUrl: string): boolean {
-  return call.tool === 'computer' && call.action.includes('click') && !!target.url && siteKey(target.url) !== siteKey(pageUrl);
-}
-
 export type PolicyDeps = {
   store: KeyValue<PolicySettings>;
+  permissionMode: () => Promise<PermissionMode>;
   approve: (request: ApprovalRequest) => Promise<ApprovalAnswer>;
   /** The URL the tab shows right now (for the pre-input re-check). */
   currentUrl: (tabId: number) => Promise<string>;
@@ -149,10 +147,10 @@ export class Policy {
   }
 
   /**
-   * The site gate every page tool passes (reads included): blocked sites fail; in "ask"
+   * The site gate every page tool passes (reads included): blocked sites fail; in manual
    * mode a site not yet allowed needs the user's OK once per session.
    */
-  async siteGate(sessionID: string, url: string, tool: string, tier: Tier = 'read', requireExplicit = false): Promise<void> {
+  async siteGate(sessionID: string, url: string, tool: string, tier: Tier = 'read'): Promise<void> {
     this.assertRunning();
     const site = siteKey(url);
     if (!site) return;
@@ -162,7 +160,8 @@ export class Policy {
       throw new ToolError('BLOCKED_SITE', `${site} is blocked in the browser settings. Do not try to reach it another way; ask the user.`);
     }
     this.trackSensitiveRead(sessionID, site, tier, settings);
-    if (this.siteAllowed(sessionID, site, rule, settings) && (!requireExplicit || rule === 'allow' || this.allowedThisSession.get(sessionID)?.has(site))) return;
+    if (await this.deps.permissionMode() === 'auto') return;
+    if (this.siteAllowed(sessionID, site, rule)) return;
     const answer = await this.deps.approve({ sessionID, kind: 'site', site, tool, summary: `Use ${site}`, tier });
     await this.applySiteAnswer(sessionID, site, answer, settings);
     this.assertRunning();
@@ -190,8 +189,8 @@ export class Policy {
     if (settings.sites[site]?.sensitive && tier === 'read') this.markSensitiveRead(sessionID, site);
   }
 
-  private siteAllowed(sessionID: string, site: string, rule: SiteRule, settings: PolicySettings): boolean {
-    return rule === 'allow' || settings.mode === 'act' || !!this.allowedThisSession.get(sessionID)?.has(site);
+  private siteAllowed(sessionID: string, site: string, rule: SiteRule): boolean {
+    return rule === 'allow' || !!this.allowedThisSession.get(sessionID)?.has(site);
   }
 
   /**
@@ -213,7 +212,7 @@ export class Policy {
     if (this.leavesSensitiveSite(call, site, tier)) {
       tier = 'consequential';
     }
-    await this.siteGate(call.sessionID, destination, call.tool, tier, crossesLinkSite(call, target, pageUrl));
+    await this.siteGate(call.sessionID, destination, call.tool, tier);
     await this.approveAction(call, site, tier);
     // The tab may have moved while we waited: the approval was for that site only.
     await this.assertSiteUnchanged(call, expectedUrl ?? pageUrl);
@@ -235,7 +234,7 @@ export class Policy {
   }
 
   private async approveAction(call: GuardCall, site: string, tier: Tier): Promise<void> {
-    if (tier !== 'consequential' || (await this.settings()).sites[site]?.autoConsequential) return;
+    if (tier !== 'consequential' || await this.deps.permissionMode() === 'auto') return;
     const summary = call.summary || call.action;
     const answer = await this.deps.approve({ sessionID: call.sessionID, kind: 'action', site, tool: call.tool, summary, tier });
     if (answer === 'deny') throw new ToolError('DENIED', `The user declined: ${summary}. Do not retry it; ask what they want instead.`);

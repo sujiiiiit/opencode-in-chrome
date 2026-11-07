@@ -63,6 +63,7 @@ test('@live asked to summarise a page with injected instructions, the model make
 test('@live 21 browsing tasks across fixtures and public sites', async ({ sw, pages }) => {
   const workspace = await pairExtension(server, sw);
   await sw.evaluate(() => chrome.storage.local.set({
+    'opencode.permission.mode': 'auto',
     'opencode.browser.policy': { mode: 'act', sites: { '127.0.0.1': { rule: 'allow', autoConsequential: true } } },
   }));
   type Action = { name: string; input: Record<string, unknown> };

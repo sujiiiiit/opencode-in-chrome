@@ -36,16 +36,21 @@ export function formatEvalResult(r: EvalResult, maxChars = JS_MAX_CHARS): string
 
 export function diagnosticsTools(deps: DiagnosticsDeps): ToolDef[] {
   const { scope } = deps;
+  async function capture(tabId: number, action: unknown): Promise<void> {
+    if (action === 'start') await deps.debuggers.startRecording(tabId);
+    if (action === 'stop') deps.debuggers.stopRecording(tabId);
+  }
   return [
     {
       name: 'console',
       description:
-        "Read the page's console messages and uncaught errors (since the tab joined this session; cleared when the tab moves to another site). " +
+        "Read console messages captured while the debugger was attached. Use capture=start to record continuously and capture=stop to finish. " +
         'Always pass a regex pattern to filter, e.g. "error|warn" or "MyApp".',
       inputSchema: {
         type: 'object',
         properties: {
           tabId: tabIdProperty,
+          capture: { type: 'string', enum: ['start', 'stop'], description: 'Start or stop continuous console and network capture for this tab.' },
           pattern: { type: 'string', description: 'Regex the message must match (case-insensitive).' },
           onlyErrors: { type: 'boolean', description: 'Only errors and uncaught exceptions.' },
           limit: { type: 'integer', minimum: 1, maximum: 1000, description: 'Most recent N (default 100).' },
@@ -54,7 +59,7 @@ export function diagnosticsTools(deps: DiagnosticsDeps): ToolDef[] {
       },
       async handler(args, { sessionID }) {
         const tab = await requirePage(scope, sessionID, args.tabId);
-        await deps.debuggers.ensure(tab.id);
+        await capture(tab.id, args.capture);
         const text = deps.console.read(tab.id, {
           pattern: args.pattern as string | undefined,
           onlyErrors: args.onlyErrors === true,
@@ -67,12 +72,13 @@ export function diagnosticsTools(deps: DiagnosticsDeps): ToolDef[] {
     {
       name: 'network',
       description:
-        'List HTTP requests the page made since the tab joined this session: id, method, status, type, size, duration, URL. ' +
+        'List HTTP requests captured while the debugger was attached. Use capture=start to record continuously and capture=stop to finish. ' +
         'Filter with urlPattern (substring, e.g. "/api/"). Pass request_id to read one text response body.',
       inputSchema: {
         type: 'object',
         properties: {
           tabId: tabIdProperty,
+          capture: { type: 'string', enum: ['start', 'stop'], description: 'Start or stop continuous console and network capture for this tab.' },
           urlPattern: { type: 'string', description: 'Only URLs containing this.' },
           limit: { type: 'integer', minimum: 1, maximum: 500, description: 'Most recent N (default 100).' },
           clear: { type: 'boolean', description: 'Forget the returned requests afterwards.' },
@@ -81,7 +87,7 @@ export function diagnosticsTools(deps: DiagnosticsDeps): ToolDef[] {
       },
       async handler(args, { sessionID }) {
         const tab = await requirePage(scope, sessionID, args.tabId);
-        await deps.debuggers.ensure(tab.id);
+        await capture(tab.id, args.capture);
         if (typeof args.request_id === 'string' && args.request_id) {
           return { text: [untrusted(await deps.network.body(tab.id, args.request_id))], tabId: tab.id };
         }

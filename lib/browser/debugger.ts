@@ -1,5 +1,4 @@
-// Debugger sessions (design D4): one chrome.debugger attachment per agent tab, made when
-// the tab joins a session so console and network capture start then. Out-of-process
+// Debugger sessions: attach on demand and release idle tabs unless recording. Out-of-process
 // iframes are auto-attached as flat child sessions (Chrome 125+), and every CDP event is
 // fanned out to subscribers with the tab and child session it came from.
 import { browser } from 'wxt/browser';
@@ -21,7 +20,7 @@ export type ChildTarget = { sessionId: string; targetId: string; type: string; u
 
 const PROTOCOL_VERSION = '1.3';
 const COMMAND_TIMEOUT_MS = 10_000;
-export const DEBUGGER_IDLE_MS = 10 * 60_000;
+export const DEBUGGER_IDLE_MS = 5_000;
 const DOMAINS = ['Page.enable', 'Runtime.enable', 'Network.enable', 'Log.enable'] as const;
 const AUTO_ATTACH = { autoAttach: true, waitForDebuggerOnStart: false, flatten: true };
 
@@ -29,10 +28,14 @@ type TabSession = {
   attached: Promise<void>;
   children: Map<string, ChildTarget>;
   lastUsed: number;
+  active: number;
+  recording: boolean;
+  timer?: ReturnType<typeof setTimeout>;
 };
 
 export class DebuggerSessions {
   private readonly tabs = new Map<number, TabSession>();
+  private readonly detaching = new Map<number, Promise<void>>();
   /** Tabs where the user dismissed the debugging bar: no automatic re-attach. */
   private readonly cancelled = new Set<number>();
   private readonly listeners = new Set<(event: CdpEvent) => void>();
@@ -45,6 +48,9 @@ export class DebuggerSessions {
     api.onEvent.addListener((source, method, params) => this.dispatch(source, method, (params ?? {}) as Record<string, unknown>));
     api.onDetach.addListener((source, reason) => {
       if (source.tabId === undefined) return;
+      if (this.detaching.has(source.tabId)) return;
+      const timer = this.tabs.get(source.tabId)?.timer;
+      if (timer) clearTimeout(timer);
       this.tabs.delete(source.tabId);
       if (reason === 'canceled_by_user') this.cancelled.add(source.tabId);
       for (const l of this.detachListeners) l(source.tabId, reason);
@@ -96,13 +102,15 @@ export class DebuggerSessions {
     const existing = this.tabs.get(tabId);
     if (existing) {
       existing.lastUsed = this.now();
+      this.schedule(tabId, existing);
       return existing.attached;
     }
     if (!explicit && this.cancelled.has(tabId)) return Promise.resolve();
     this.cancelled.delete(tabId);
-    const session: TabSession = { attached: Promise.resolve(), children: new Map(), lastUsed: this.now() };
+    const session: TabSession = { attached: Promise.resolve(), children: new Map(), lastUsed: this.now(), active: 0, recording: false };
     session.attached = (async () => {
       try {
+        await this.detaching.get(tabId);
         await this.api.attach({ tabId }, PROTOCOL_VERSION);
       } catch (error) {
         this.tabs.delete(tabId);
@@ -113,36 +121,78 @@ export class DebuggerSessions {
       await this.api.sendCommand(target, 'Target.setAutoAttach', AUTO_ATTACH).catch(() => undefined);
     })();
     this.tabs.set(tabId, session);
+    void session.attached.then(() => this.schedule(tabId, session), () => undefined);
     return session.attached;
+  }
+
+  private schedule(tabId: number, session: TabSession): void {
+    if (session.timer) clearTimeout(session.timer);
+    if (session.active || session.recording || this.tabs.get(tabId) !== session) return;
+    session.lastUsed = this.now();
+    session.timer = setTimeout(() => {
+      if (!session.active && !session.recording && this.tabs.get(tabId) === session) void this.detach(tabId);
+    }, DEBUGGER_IDLE_MS);
+  }
+
+  async startRecording(tabId: number): Promise<void> {
+    const attached = this.ensure(tabId);
+    const session = this.tabs.get(tabId)!;
+    session.recording = true;
+    if (session.timer) clearTimeout(session.timer);
+    await attached;
+  }
+
+  stopRecording(tabId: number): void {
+    const session = this.tabs.get(tabId);
+    if (!session) return;
+    session.recording = false;
+    this.schedule(tabId, session);
   }
 
   /** A CDP command on the tab (or one of its child sessions), with a timeout. */
   async send<T = unknown>(tabId: number, method: string, params?: object, options: { sessionId?: string; timeoutMs?: number } = {}): Promise<T> {
-    await this.ensure(tabId);
-    const target: DebuggerTarget = options.sessionId ? { tabId, sessionId: options.sessionId } : { tabId };
-    const timeoutMs = options.timeoutMs ?? COMMAND_TIMEOUT_MS;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const timeout = new Promise<never>((_, reject) => {
-      timer = setTimeout(() => reject(new ToolError('TIMEOUT', `The page did not answer ${method} within ${timeoutMs / 1000} s.`)), timeoutMs);
-    });
+    const attached = this.ensure(tabId);
+    const session = this.tabs.get(tabId)!;
+    session.active++;
+    if (session.timer) clearTimeout(session.timer);
     try {
-      return (await Promise.race([this.api.sendCommand(target, method, params), timeout])) as T;
-    } catch (error) {
-      if (error instanceof ToolError) throw error;
-      const message = error instanceof Error ? error.message : String(error);
-      if (/not attached|detached|No tab with given id/i.test(message)) {
-        this.tabs.delete(tabId);
-        throw new ToolError('DEBUGGER_DETACHED', 'The browser stopped letting the agent control this tab. Try the call again.');
+      await attached;
+      const target: DebuggerTarget = options.sessionId ? { tabId, sessionId: options.sessionId } : { tabId };
+      const timeoutMs = options.timeoutMs ?? COMMAND_TIMEOUT_MS;
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const timeout = new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new ToolError('TIMEOUT', `The page did not answer ${method} within ${timeoutMs / 1000} s.`)), timeoutMs);
+      });
+      try {
+        return (await Promise.race([this.api.sendCommand(target, method, params), timeout])) as T;
+      } catch (error) {
+        if (error instanceof ToolError) throw error;
+        const message = error instanceof Error ? error.message : String(error);
+        if (/not attached|detached|No tab with given id/i.test(message)) {
+          this.tabs.delete(tabId);
+          throw new ToolError('DEBUGGER_DETACHED', 'The browser stopped letting the agent control this tab. Try the call again.');
+        }
+        throw error;
+      } finally {
+        clearTimeout(timer);
       }
-      throw error;
     } finally {
-      clearTimeout(timer);
+      session.active--;
+      this.schedule(tabId, session);
     }
   }
 
   async detach(tabId: number): Promise<void> {
-    if (!this.tabs.delete(tabId)) return;
-    await this.api.detach({ tabId }).catch(() => undefined);
+    const session = this.tabs.get(tabId);
+    if (!session || !this.tabs.delete(tabId)) return;
+    if (session.timer) clearTimeout(session.timer);
+    const pending = session.attached.catch(() => undefined).then(() => this.api.detach({ tabId }).catch(() => undefined));
+    this.detaching.set(tabId, pending);
+    try {
+      await pending;
+    } finally {
+      if (this.detaching.get(tabId) === pending) this.detaching.delete(tabId);
+    }
   }
 
   async detachAll(): Promise<void> {
@@ -152,7 +202,7 @@ export class DebuggerSessions {
   /** Detach tabs unused for DEBUGGER_IDLE_MS (run from an alarm). Returns the tabs detached. */
   async sweep(): Promise<number[]> {
     const cutoff = this.now() - DEBUGGER_IDLE_MS;
-    const idle = [...this.tabs].filter(([, s]) => s.lastUsed < cutoff).map(([tabId]) => tabId);
+    const idle = [...this.tabs].filter(([, s]) => !s.active && !s.recording && s.lastUsed < cutoff).map(([tabId]) => tabId);
     await Promise.all(idle.map((tabId) => this.detach(tabId)));
     return idle;
   }

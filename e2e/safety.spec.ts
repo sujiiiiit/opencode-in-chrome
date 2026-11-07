@@ -43,7 +43,7 @@ test('blocked sites fail without a request', async ({ tool, sw, pages }) => {
   expect(nav.text).toMatch(/^BLOCKED_SITE: 127\.0\.0\.1 is blocked/);
 });
 
-test('a page link to a new site needs approval even in act mode', async ({ tool, sw, pages, fake, context }) => {
+test('a page link to a new site needs approval in manual mode', async ({ tool, sw, pages, fake, context }) => {
   await sw.evaluate(() => chrome.storage.local.set({ 'opencode.browser.policy': { mode: 'act', sites: { '127.0.0.1': { rule: 'allow' } } } }));
   await openPage(tool, sw, pages.url('/attack-shop.html'));
   const page = await pageFor(context, pages.url('/attack-shop.html'));
@@ -69,8 +69,19 @@ test('consequential clicks ask every time and a denial sends no input', async ({
   await expect(page.locator('#status')).toHaveText('account active');
 });
 
+test('auto mode executes a consequential action without an approval form', async ({ tool, sw, pages, fake, context }) => {
+  await sw.evaluate(() => chrome.storage.local.set({ 'opencode.permission.mode': 'auto' }));
+  await openPage(tool, sw, pages.url('/injection.html'));
+  const page = await pageFor(context, pages.url('/injection.html'));
+  const ref = refOf((await tool('read_page')).text, /button "Delete account"/);
+  const result = await tool('computer', { action: 'left_click', ref, action_summary: 'Deletes the account' });
+  expect(result.isError).toBeFalsy();
+  await expect(page.locator('#status')).not.toHaveText('account active');
+  expect(fake.forms.size).toBe(0);
+});
+
 test('page text with injected instructions stays inside the untrusted markers', async ({ tool, sw, pages }) => {
-  await sw.evaluate(() => chrome.storage.local.set({ 'opencode.browser.policy': { mode: 'act', sites: {} } }));
+  await sw.evaluate(() => chrome.storage.local.set({ 'opencode.permission.mode': 'auto', 'opencode.browser.policy': { mode: 'act', sites: {} } }));
   await openPage(tool, sw, pages.url('/injection.html'));
   for (const result of [await tool('get_page_text'), await tool('read_page', { filter: 'all' })]) {
     const open = /<untrusted_page_content id="([0-9a-f]+)">/.exec(result.text);
@@ -84,7 +95,7 @@ test('page text with injected instructions stays inside the untrusted markers', 
 
 test('typing into a password field is refused in every mode', async ({ tool, sw, pages, context }) => {
   await sw.evaluate(() =>
-    chrome.storage.local.set({ 'opencode.browser.policy': { mode: 'act', sites: { '127.0.0.1': { rule: 'allow', autoConsequential: true } } } }),
+    chrome.storage.local.set({ 'opencode.permission.mode': 'auto', 'opencode.browser.policy': { mode: 'act', sites: { '127.0.0.1': { rule: 'allow', autoConsequential: true } } } }),
   );
   await openPage(tool, sw, pages.url('/form.html'));
   const page = await pageFor(context, pages.url('/form.html'));
@@ -99,7 +110,7 @@ test('typing into a password field is refused in every mode', async ({ tool, sw,
 });
 
 test('the stop control halts a running batch and refuses calls until resumed', async ({ tool, sw, pages, context, extensionId }) => {
-  await sw.evaluate(() => chrome.storage.local.set({ 'opencode.browser.policy': { mode: 'act', sites: {} } }));
+  await sw.evaluate(() => chrome.storage.local.set({ 'opencode.permission.mode': 'auto', 'opencode.browser.policy': { mode: 'act', sites: {} } }));
   await openPage(tool, sw, pages.url('/actions.html'));
   const panel = await context.newPage();
   await panel.goto(`chrome-extension://${extensionId}/sidepanel.html`);

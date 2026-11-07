@@ -1,7 +1,7 @@
 // User settings for the browser agent, kept in storage.local (never sync): whether browser
-// access is on, the approval mode, and the per-site rules (spec chat/browser-activity).
+// access is on and the per-site rules (spec chat/browser-activity).
 import { browser } from 'wxt/browser';
-import type { ApprovalMode, PolicySettings, SiteSettings } from './policy';
+import type { PolicySettings, SiteSettings } from './policy';
 
 /** Browser access is on by default; an explicit false turns it off. */
 export const BROWSER_ENABLED_KEY = 'opencode.browser.enabled';
@@ -27,10 +27,6 @@ export async function loadPolicy(): Promise<PolicySettings> {
 
 async function savePolicy(policy: PolicySettings): Promise<void> {
   await browser.storage.local.set({ [POLICY_KEY]: policy });
-}
-
-export async function setApprovalMode(mode: ApprovalMode): Promise<void> {
-  await savePolicy({ ...(await loadPolicy()), mode });
 }
 
 /** Sets (or, with null, removes) one site's settings. */

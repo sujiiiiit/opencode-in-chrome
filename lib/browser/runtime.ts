@@ -3,6 +3,7 @@
 // keep them in step.
 import { browser } from 'wxt/browser';
 import { WORKSPACE_KEY } from '../opencode/workspace';
+import { loadPermissionMode } from '../opencode/permission-mode';
 import { Actor } from './actions';
 import { BRIDGE_ALARM } from './agent';
 import { formApprovals } from './approvals';
@@ -39,20 +40,11 @@ export function createBrowserRuntime() {
   const debuggers = new DebuggerSessions(chromeDebuggerApi());
   const dialogs = new Dialogs(debuggers);
   const tabApi = chromeTabApi();
-  // The agent-tab indicator: shown on every agent tab (and again after each navigation).
-  const indicate = (tabId: number, mode: 'show' | 'hide' | 'unhide' | 'remove') =>
-    reader.callTop(tabId, 'indicator', [mode]).then(
-      () => undefined,
-      () => undefined,
-    );
   const scope = new TabScope(tabApi, sessionValue(TABS_KEY), {
     onJoin: (tabId) => {
-      void debuggers.ensure(tabId, false).catch(() => undefined);
-      void indicate(tabId, 'show');
     },
     onLeave: (tabId) => {
       void debuggers.detach(tabId);
-      void indicate(tabId, 'remove');
     },
   });
   const reader = new PageReader(chromeScriptingApi(), undefined, (tabId) => dialogs.assertClear(tabId));
@@ -64,7 +56,6 @@ export function createBrowserRuntime() {
       if (!v) throw new Error('no viewport');
       return v;
     },
-    hideIndicator: (tabId, hidden) => indicate(tabId, hidden ? 'hide' : 'unhide'),
   });
   const recorder = new GifRecorder({
     thumbnail: (tabId) => screenshots.thumbnail(tabId, THUMB_EDGE),
@@ -111,14 +102,8 @@ export function createBrowserRuntime() {
   browser.tabs.onUpdated.addListener((tabId, change) => {
     if (change.groupId !== undefined) void scope.groupChanged(tabId, change.groupId);
   });
-  // A new document has no indicator: show it again when an agent tab finishes loading.
-  browser.webNavigation.onCompleted.addListener((d) => {
-    if (d.frameId !== 0) return;
-    void scope.sessionOf(d.tabId).then((sessionID) => {
-      if (sessionID) void indicate(d.tabId, 'show');
-    });
-  });
-  // The bridge's keepalive alarm also detaches debuggers from tabs idle for 10 minutes.
+
+  // The bridge's keepalive alarm also cleans up idle debugger sessions.
   browser.alarms.onAlarm.addListener((alarm) => {
     if (alarm.name === BRIDGE_ALARM) void debuggers.sweep();
   });
@@ -130,6 +115,7 @@ export function createBrowserRuntime() {
   // forms, and the kill switch that also lets go of every debugger.
   const policy = new Policy({
     store: localValue<PolicySettings>(POLICY_KEY),
+    permissionMode: loadPermissionMode,
     approve: (request) => approve(request),
     currentUrl: async (tabId) => {
       const tab = await tabApi.get(tabId);
@@ -149,7 +135,6 @@ export function createBrowserRuntime() {
   const defs: ToolDef[] = [
     ...tabTools(scope, {
       openInNewTab: async (tabId, url) => {
-        await debuggers.ensure(tabId).catch(() => undefined);
         await browser.tabs.update(tabId, { url });
       },
     }),

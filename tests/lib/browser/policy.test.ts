@@ -41,14 +41,17 @@ describe('Policy', () => {
   let asked: ApprovalRequest[];
   let url: string;
   let policy: Policy;
+  let mode: 'manual' | 'auto';
 
   beforeEach(() => {
     store = memoryStore<PolicySettings>();
     answers = [];
+    mode = 'manual';
     asked = [];
     url = 'https://shop.test/cart';
     policy = new Policy({
       store,
+      permissionMode: async () => mode,
       approve: async (r) => {
         asked.push(r);
         return answers.shift() ?? 'deny';
@@ -83,16 +86,28 @@ describe('Policy', () => {
     expect(await codeOf(policy.siteGate('ses_1', url, 'read_page'))).toBe('NEEDS_APPROVAL');
   });
 
-  it('does not ask for sites in act mode, but still asks for consequential actions', async () => {
+  it('does not ask for sites or consequential actions in auto mode', async () => {
+    mode = 'auto';
     store.value = { mode: 'act', sites: {} };
     await policy.siteGate('ses_1', url, 'read_page');
     expect(asked).toEqual([]);
-    answers = ['once'];
     await policy.guard(call({ target: { label: 'button "Place order"', submits: true }, summary: 'Places the order' }));
-    expect(asked).toEqual([expect.objectContaining({ kind: 'action', summary: 'Places the order', tier: 'consequential' })]);
+    expect(asked).toEqual([]);
   });
 
-  it('asks before following a page link to a new site even in act mode', async () => {
+  it('switches modes immediately and still blocks explicitly blocked sites', async () => {
+    store.value = { mode: 'act', sites: { 'blocked.test': { rule: 'block' } } };
+    mode = 'auto';
+    await policy.guard(call({ target: { label: 'link "Deal"', url: 'https://other.test/' } }));
+    expect(asked).toEqual([]);
+    expect(await codeOf(policy.siteGate('ses_1', 'https://blocked.test/', 'read_page'))).toBe('BLOCKED_SITE');
+    mode = 'manual';
+    answers = ['deny'];
+    expect(await codeOf(policy.siteGate('ses_1', url, 'read_page'))).toBe('DENIED');
+    expect(asked).toEqual([expect.objectContaining({ kind: 'site', site: 'shop.test' })]);
+  });
+
+  it('asks before following a page link to a new site in manual mode', async () => {
     store.value = { mode: 'act', sites: { 'shop.test': { rule: 'allow' } } };
     answers = ['deny'];
     expect(await codeOf(policy.guard(call({ target: { label: 'link "Deal"', url: 'https://evil.test/deal' }, summary: 'Opens the deal' })))).toBe('DENIED');
@@ -108,13 +123,15 @@ describe('Policy', () => {
     expect(asked).toHaveLength(2);
   });
 
-  it('can auto-approve consequential actions per site', async () => {
+  it('manual mode asks even when a legacy site auto-approval was stored', async () => {
     store.value = { mode: 'ask', sites: { 'shop.test': { rule: 'allow', autoConsequential: true } } };
+    answers = ['once'];
     await policy.guard(call({ target: { submits: true } }));
-    expect(asked).toEqual([]);
+    expect(asked).toEqual([expect.objectContaining({ kind: 'action' })]);
   });
 
   it('refuses hand-off steps in every mode', async () => {
+    mode = 'auto';
     store.value = { mode: 'act', sites: { 'shop.test': { rule: 'allow', autoConsequential: true } } };
     await expect(policy.guard(call({ action: 'type', target: { secret: 'password' }, summary: 'Types the password' }))).rejects.toThrow(
       /for the user: passwords/,
@@ -149,6 +166,7 @@ describe('Policy', () => {
     expect(stopped).toHaveBeenCalled();
     expect(await codeOf(policy.siteGate('ses_1', url, 'read_page'))).toBe('DENIED');
     policy.resume();
+    mode = 'auto';
     store.value = { mode: 'act', sites: {} };
     await policy.siteGate('ses_1', url, 'read_page');
   });

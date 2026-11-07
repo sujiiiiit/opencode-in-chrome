@@ -6,7 +6,7 @@ import {
   drop,
   fill,
   focusedInfo,
-  indicator,
+
   locate,
   setFiles,
   settle,
@@ -35,7 +35,7 @@ export type PageApi = {
   viewport(): { width: number; height: number; dpr: number; scrollX: number; scrollY: number };
   focused(): ReturnType<typeof focusedInfo>;
   drop(x: number, y: number, file: UploadFile): boolean;
-  indicator(mode: 'show' | 'hide' | 'unhide' | 'remove'): boolean;
+
   registry: ElementRegistry;
 };
 
@@ -59,7 +59,7 @@ export function createPageApi(doc: Document, env: PageEnv = {}): PageApi {
     settle: (quietMs, capMs) => settle(doc, quietMs, capMs),
     focused: () => focusedInfo(doc),
     drop: (x, y, file) => drop(doc, x, y, file),
-    indicator: (mode) => indicator(doc, mode),
+
     viewport: () => {
       const view = doc.defaultView!;
       return {

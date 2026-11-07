@@ -85,7 +85,7 @@ function textInPage(args: { key: string }): ReturnType<PageApi['text']> | undefi
   return api?.text();
 }
 
-export type PageMethod = 'locate' | 'fill' | 'setFiles' | 'settle' | 'viewport' | 'focused' | 'drop' | 'indicator';
+export type PageMethod = 'locate' | 'fill' | 'setFiles' | 'settle' | 'viewport' | 'focused' | 'drop';
 
 function callInPage(args: { key: string; method: PageMethod; params: unknown[] }): unknown {
   const api = (globalThis as unknown as Record<string, Record<string, (...a: unknown[]) => unknown> | undefined>)[args.key];

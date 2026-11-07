@@ -60,8 +60,7 @@ export class Screenshots {
       debuggers: DebuggerSessions;
       viewport: (tabId: number) => Promise<Viewport>;
       resize: Resizer;
-      /** Hides and restores the agent-tab indicator around a capture. */
-      hideIndicator?: (tabId: number, hidden: boolean) => Promise<void>;
+
     },
   ) {}
 
@@ -88,7 +87,7 @@ export class Screenshots {
 
   private async capture(tabId: number): Promise<{ data: string; viewport: Viewport }> {
     const viewport = await this.deps.viewport(tabId);
-    await this.deps.hideIndicator?.(tabId, true).catch(() => undefined);
+
     try {
       const result = await this.deps.debuggers
         .send<{ data: string }>(tabId, 'Page.captureScreenshot', { format: 'jpeg', quality: JPEG_QUALITY, fromSurface: true }, { timeoutMs: CAPTURE_TIMEOUT_MS })
@@ -103,7 +102,7 @@ export class Screenshots {
         });
       return { data: result.data, viewport };
     } finally {
-      await this.deps.hideIndicator?.(tabId, false).catch(() => undefined);
+
     }
   }
 
