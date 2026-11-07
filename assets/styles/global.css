@@ -414,8 +414,8 @@
 @utility actions-fade {
   mask-image: linear-gradient(
     to right,
-    #000 calc(100% - 9rem),
-    #0000 calc(100% - 4.5rem)
+    #000 calc(100% - var(--actions-fade-start, 9rem)),
+    #0000 calc(100% - var(--actions-fade-end, 4.5rem))
   );
 }
 
@@ -1052,7 +1052,7 @@ body {
   }
 
   .marquee[data-overflow]:hover,
-  .marquee[data-overflow]:focus-visible {
+  .marquee[data-overflow]:focus-within {
     --marquee-fade-start: 1.25rem;
     --marquee-fade-end: 0px;
     /* The right fade is gone only once the text has arrived at its end. */
@@ -1062,7 +1062,7 @@ body {
   }
 
   .marquee[data-overflow]:hover .morph-text > span,
-  .marquee[data-overflow]:focus-visible .morph-text > span {
+  .marquee[data-overflow]:focus-within .morph-text > span {
     transform: translateX(calc(-1 * var(--marquee-distance)));
     transition: transform var(--marquee-ms) linear 250ms;
   }

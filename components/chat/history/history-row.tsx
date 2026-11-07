@@ -8,6 +8,7 @@ import { displayTitle, isUntitled, relativeTime, type ChatSummary } from '@/lib/
 type Props = {
   chat: ChatSummary;
   active: boolean;
+  activity?: 'running' | 'unseen';
   now: number;
   /** These take the row's id, so the list can pass the same functions to every row (see `memo`). */
   onOpen: (id: string) => void;
@@ -145,7 +146,7 @@ function RowActions({ title, confirming, onRename, onAskDelete, onConfirmDelete,
  * Hovering (or focusing into) a row swaps its time for the Rename and Delete buttons;
  * deleting asks for a confirm or cancel right in the row.
  */
-export const HistoryRow = memo(function HistoryRow({ chat, active, now, onOpen, onRename, onDelete }: Props) {
+export const HistoryRow = memo(function HistoryRow({ chat, active, activity, now, onOpen, onRename, onDelete }: Props) {
   const [editing, setEditing] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const title = displayTitle(chat.title);
@@ -177,6 +178,8 @@ export const HistoryRow = memo(function HistoryRow({ chat, active, now, onOpen, 
         onClick={() => onOpen(chat.id)}
       >
         <span className={cn('min-w-0 flex-1 truncate', isUntitled(chat.title) && 'text-text-secondary')}>{title}</span>
+        {activity === 'running' && <span role="status" aria-label="Chat running"><Icon name="loader-circle" className="animate-spin text-text-secondary" /></span>}
+        {activity === 'unseen' && <span role="status" aria-label="Unseen chat result" className="size-2 shrink-0 rounded-full bg-primary" />}
         <span className="w-14 shrink-0 text-right text-xs tabular-nums text-text-tertiary select-none group-hover:invisible group-has-[:focus-visible]:invisible group-data-[confirming]:mr-9 group-data-[confirming]:invisible">
           {relativeTime(chat.updated, now)}
         </span>

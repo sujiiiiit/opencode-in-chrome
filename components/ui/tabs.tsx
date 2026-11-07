@@ -349,6 +349,7 @@ export function TabsContentWrapper({
   activeTab,
   mountStrategy = 'all',
   fillHeight = false,
+  direction = 'horizontal',
   style
 }: {
   children: ReactNode;
@@ -367,6 +368,7 @@ export function TabsContentWrapper({
    * parent and collapses. Turn this on for full-height panes.
    */
   fillHeight?: boolean;
+  direction?: 'horizontal' | 'vertical';
   style?: CSSProperties;
 }) {
   const context = useContext(TabsContext);
@@ -441,7 +443,7 @@ export function TabsContentWrapper({
             // can measure it to size/animate itself to the active tab.
             data-panel-active={isActive ? '' : undefined}
             className={panelClassName(isActive, fillHeight)}
-            style={panelStyle(isActive, getSlideOffset(tabIndex, activeIndex, isActive))}
+            style={panelStyle(isActive, getSlideOffset(tabIndex, activeIndex, isActive), direction)}
           >
             <TabPanelActiveContext.Provider value={isActive}>
               {shouldRenderContent ? content : null}
@@ -472,10 +474,10 @@ function panelClassName(isActive: boolean, fillHeight: boolean): string {
  * The incoming panel glides in on the calm curve (fast start, soft settle) while the outgoing
  * one fades quickly, so the two never read as a muddle. Reduced motion passes no offset: fade only.
  */
-function panelStyle(isActive: boolean, offset: number): CSSProperties {
+function panelStyle(isActive: boolean, offset: number, direction: 'horizontal' | 'vertical'): CSSProperties {
   return {
     opacity: isActive ? 1 : 0,
-    transform: `translateX(${offset}px)`,
+    transform: `translate${direction === 'vertical' ? 'Y' : 'X'}(${offset}px)`,
     pointerEvents: isActive ? 'auto' : 'none',
     transition: isActive
       ? 'opacity 260ms var(--ease-calm), transform 260ms var(--ease-calm)'

@@ -79,6 +79,7 @@ function useMinuteClock(): number {
 
 type ListProps = {
   items: ChatSummary[];
+  activity: HistoryState['activity'];
   hasMore: boolean;
   loadingMore: boolean;
   activeID: string | null;
@@ -89,7 +90,7 @@ type ListProps = {
 };
 
 /** Rows are memoized and keyed by id: a search or a live update re-renders only the rows it changes. */
-const List = memo(function List({ items, hasMore, loadingMore, activeID, onOpen, onRename, onDelete, onMore }: ListProps) {
+const List = memo(function List({ items, activity, hasMore, loadingMore, activeID, onOpen, onRename, onDelete, onMore }: ListProps) {
   const now = useMinuteClock();
   const groups = useMemo(() => groupByDay(items, now), [items, now]);
   const waves = groupWaves(groups.map((group) => group.items.length));
@@ -110,6 +111,7 @@ const List = memo(function List({ items, hasMore, loadingMore, activeID, onOpen,
                 chat={chat}
                 now={now}
                 active={chat.id === activeID}
+                activity={activity[chat.id]}
                 onOpen={onOpen}
                 onRename={onRename}
                 onDelete={onDelete}
@@ -166,6 +168,7 @@ function HistoryBody({ store, state, items, query, activeID, onOpen, onDelete }:
   return (
     <List
       items={items}
+      activity={state.activity}
       hasMore={state.hasMore}
       loadingMore={state.loadingMore}
       activeID={activeID}

@@ -1,260 +1,150 @@
-import { useMemo, useRef, useState, type KeyboardEvent, type ReactNode, type RefObject } from 'react';
-import { Combobox } from '@base-ui/react/combobox';
+import { useMemo, useState } from 'react';
 import { Button } from '@/components/ui/button';
-import { Dialog, DialogClose, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog';
-import { Icon } from '@/components/ui/icon';
+import { DropdownMenuContent } from '@/components/ui/dropdown-menu';
+import { EmptyState } from '@/components/ui/empty-state';
+import { Icon, Tick2Icon } from '@/components/ui/icon';
 import { Input } from '@/components/ui/input';
-import { Tooltip } from '@/components/ui/tooltip';
-import { modelKey, sameModel, type CatalogModel, type ModelLabel } from '@/lib/opencode/models/catalog';
-import { pickerGroups, type PickerGroup, type PickerItem } from '@/lib/opencode/models/controls';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import { Tabs, TabsContent, TabsContentWrapper } from '@/components/ui/tabs';
+import { matchesSearch, modelKey } from '@/lib/opencode/models/catalog';
+import { pickerGroups, type PickerItem } from '@/lib/opencode/models/controls';
+import { defaultVisible } from '@/lib/opencode/models/catalog';
+import { isVisible } from '@/lib/opencode/models/preferences';
+import { buildControls } from '@/lib/opencode/models/controls';
+import { DEFAULT_VARIANT } from '@/lib/opencode/models/variant';
 import type { ModelState, ModelStore } from '@/lib/opencode/models/model-store';
+import { MorphText } from '../flow/morph-text';
+import { hasLogo, ProviderLogo } from './provider-logo';
 
 type Props = {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
   store: ModelStore;
   state: ModelState;
-  /** Opens the settings page, where models are shown or hidden. */
-  onManage: () => void;
+  onClose: () => void;
 };
 
-/**
- * The model picker, after opencode's model dialog: search, Favorites and Recent, then the providers'
- * switched-on models (collapsible). Only those models are listed; Manage opens the settings page,
- * where they are switched on or off. Effort is not chosen here: the prompt box offers the chosen
- * model's efforts.
- */
-export function ModelPicker({ open, onOpenChange, store, state, onManage }: Props) {
-  const search = useRef<HTMLInputElement>(null);
+export function ModelPicker({ store, state, onClose }: Props) {
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent data-slot="model-picker" initialFocus={search}>
-        <DialogDescription>Search models and choose one.</DialogDescription>
-        <PickView
-          store={store}
-          state={state}
-          searchRef={search}
-          onManage={onManage}
-          onChosen={() => onOpenChange(false)}
-        />
-      </DialogContent>
-    </Dialog>
+      <DropdownMenuContent side="top" align="start"
+        data-slot="model-picker" aria-label="Choose model" style={{ animation: 'none' }} className="w-[min(22rem,calc(100vw-1rem))] max-w-none select-none overflow-hidden rounded-xl p-0 transition-[opacity,transform] duration-200 ease-out data-starting-style:opacity-0 data-starting-style:[transform:scale(0.96)] data-ending-style:opacity-0 data-ending-style:[transform:scale(0.96)] motion-reduce:transition-none">
+        <PickerContent store={store} state={state} onClose={onClose} />
+      </DropdownMenuContent>
   );
 }
 
-function Header({ title, children }: { title: string; children?: ReactNode }) {
-  return (
-    <div className="flex shrink-0 items-center gap-1 px-4 pt-3 pb-2">
-      <DialogTitle className="min-w-0 flex-1 truncate">{title}</DialogTitle>
-      {children}
-      <DialogClose render={<Button variant="ghost" size="icon-sm" aria-label="Close" />}>
-        <Icon name="close" />
-      </DialogClose>
-    </div>
-  );
-}
-
-/** Provider, context window, inputs and tool use: the details opencode shows on hover. */
-function details(model: CatalogModel, label: ModelLabel): string {
-  const parts = [
-    label.provider ?? 'OpenCode',
-    model.context ? `${model.context.toLocaleString()} context` : '',
-    model.inputs.join(', '),
-    model.tools ? 'tools' : '',
-    model.free ? 'free' : '',
-  ];
-  return parts.filter(Boolean).join(' · ');
-}
-
-/** Ctrl+F (Cmd+F on macOS) toggles the highlighted model's favorite. */
-const isFavoriteKey = (event: KeyboardEvent) =>
-  event.ctrlKey !== event.metaKey && !event.altKey && event.key.toLowerCase() === 'f';
-
-// ─── Pick view ──────────────────────────────────────────────────────────────
-
-/**
- * An always-open (inline) Base UI Combobox: it owns the keyboard (↑↓ Home End Enter), the
- * highlight and the selected check; the store does the filtering and grouping.
- */
-function PickView({
-  store,
-  state,
-  searchRef,
-  onManage,
-  onChosen,
-}: {
-  store: ModelStore;
-  state: ModelState;
-  searchRef: RefObject<HTMLInputElement | null>;
-  onManage: () => void;
-  onChosen: () => void;
-}) {
+function PickerContent({ store, state, onClose }: { store: ModelStore; state: ModelState; onClose: () => void }) {
   const [query, setQuery] = useState('');
-  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
-  const highlighted = useRef<PickerItem | undefined>(undefined);
-  const searching = query.trim().length > 0;
-  const groups = useMemo(() => pickerGroups(state, query), [state, query]);
-  const expanded = (group: PickerGroup) => searching || !group.provider || !collapsed[group.id];
-  // Rows in display order; a collapsed provider keeps its heading but lists none.
-  const shown = groups.map((group) => ({ group, items: expanded(group) ? group.items : [] }));
-  const items = shown.flatMap((entry) => entry.items);
-  const current = groups.flatMap((group) => group.items).find((item) => item.current) ?? null;
-  // Base UI navigates rows by index; the groups are rendered here so a collapsed one stays listed.
-  const offsets = shown.map((_, index) => shown.slice(0, index).reduce((sum, entry) => sum + entry.items.length, 0));
-
-  const choose = (item: PickerItem | null) => {
-    if (item) store.setModel(item.model, { recent: true });
-    onChosen();
-  };
-
-  const onKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
-    if (!isFavoriteKey(event) || !highlighted.current) return;
-    event.preventDefault();
-    store.toggleFavorite(highlighted.current.model);
-  };
+  const [tab, setTab] = useState('');
+  const baseGroups = useMemo(() => {
+    const defaults = defaultVisible(state.catalog);
+    const all = pickerGroups(state, '').flatMap((group) => group.items)
+      .filter((item) => isVisible(state.prefs, defaults, item.model));
+    const unique = new Map(all.map((item) => [modelKey(item.model), item]));
+    const providers = new Map<string, PickerItem[]>();
+    for (const item of unique.values()) {
+      const rows = providers.get(item.model.providerID) ?? [];
+      rows.push(item);
+      providers.set(item.model.providerID, rows);
+    }
+    const keyed = (keys: typeof state.prefs.favorite) => keys.flatMap((key) => {
+      const item = unique.get(modelKey(key));
+      return item ? [item] : [];
+    });
+    return [
+      { id: 'recent', title: 'Recent', items: keyed(state.prefs.recent) },
+      { id: 'favorite', title: 'Favorites', items: keyed(state.prefs.favorite) },
+      ...(state.catalog?.providers ?? []).flatMap((provider) => {
+        const rows = providers.get(provider.id) ?? [];
+        return rows.length ? [{ id: provider.id, title: provider.name, items: rows }] : [];
+      }),
+    ];
+  }, [state]);
+  const groups = useMemo(() => {
+    const text = query.trim();
+    if (!text) return baseGroups;
+    const items = baseGroups.filter((group) => group.id !== 'favorite' && group.id !== 'recent')
+      .flatMap((group) => group.items.filter((item) => matchesSearch(text, [item.model.name, item.model.modelID, item.label.provider ?? ''])));
+    return [...baseGroups, { id: 'search', title: 'Search results', items }];
+  }, [baseGroups, query]);
+  const initial = groups.find((group) => group.id !== 'favorite' && group.id !== 'recent' && group.items.some((item) => item.current))?.id ?? 'favorite';
+  const active = query.trim() ? 'search' : groups.some((group) => group.id === tab) ? tab : initial;
 
   return (
-    <Combobox.Root
-      inline
-      open
-      autoHighlight
-      items={items}
-      filter={null}
-      value={current}
-      onValueChange={choose}
-      inputValue={query}
-      onInputValueChange={(value, details) => {
-        if (details.reason === 'input-change' || details.reason === 'input-clear') setQuery(value);
-      }}
-      onItemHighlighted={(item) => (highlighted.current = item)}
-      itemToStringLabel={(item: PickerItem) => item.label.model}
-      isItemEqualToValue={(item: PickerItem, value: PickerItem) => sameModel(item.model, value.model)}
-    >
-      <Header title="Choose model">
-        <Button variant="ghost" size="sm" onClick={onManage}>
-          <Icon name="sliders" />
-          Manage
-        </Button>
-      </Header>
-      <div className="shrink-0 px-3 pb-2">
-        <Combobox.Input
-          ref={searchRef}
-          aria-label="Search models"
-          placeholder="Search models"
-          onKeyDown={onKeyDown}
-          render={<Input />}
-        />
+    <Tabs defaultValue="favorite" value={active} onValueChange={setTab} className="gap-0">
+      <div className="flex h-80 max-h-[min(20rem,calc(100vh-5rem))] min-h-0">
+        <ScrollArea className="h-full w-12 shrink-0 border-r border-border">
+        <nav aria-label="Model categories" className="flex flex-col items-center gap-1 py-2">
+          {groups.filter((group) => group.id !== 'search').map((group) => {
+            const provider = state.catalog?.providers.find((entry) => entry.id === group.id);
+            return <Button key={group.id} type="button" variant="ghost" size="icon-lg" aria-label={group.title} title={group.title}
+              aria-pressed={active === group.id} onClick={() => { setQuery(''); setTab(group.id); }}
+              className={active === group.id ? 'bg-background-tertiary-transparent text-text-primary transition-none' : 'text-text-secondary transition-none'}>
+              {group.id === 'favorite' ? <Icon name="star" /> : group.id === 'recent' ? <Icon name="history" /> : provider && hasLogo(provider) ? <ProviderLogo provider={provider} /> : <span className="text-xs font-medium">{group.title.slice(0, 2).toUpperCase()}</span>}
+            </Button>;
+          })}
+        </nav>
+        </ScrollArea>
+        <div className="flex min-w-0 flex-1 flex-col">
+          <div className="p-2">
+            <Input autoFocus aria-label="Search models" placeholder="Search models" className="h-8 select-text px-2.5 text-sm placeholder:text-sm" value={query} onChange={(event) => setQuery(event.target.value)}
+              onKeyDown={(event) => { if (event.key !== 'Escape' && event.key !== 'Tab') event.stopPropagation(); }} />
+          </div>
+          <TabsContentWrapper fillHeight direction="vertical" className="min-h-0 flex-1 overflow-hidden">
+            {groups.map((group) => <TabsContent key={group.id} value={group.id}>
+              {group.id === active && (group.items.length === 0 ? (
+                <EmptyState icon={group.id === 'recent' ? 'history' : group.id === 'favorite' ? 'star' : 'search'}
+                  title={group.id === 'search' ? 'No matching models' : group.id === 'recent' ? 'No recent models' : 'No favorite models'}
+                  className={`h-full justify-center gap-2 px-4 py-4 [&>span]:bg-transparent [&>span]:text-text-tertiary [&>span_svg]:size-7 [&_h3]:text-xs ${group.id === 'favorite' ? '[&>span_svg_path]:fill-current' : ''}`} />
+              ) : <ScrollArea fade className="h-full" viewportClassName="overscroll-contain" viewportProps={{ 'aria-label': group.title }}>
+                <div className="p-1.5">
+                {group.items.map((item) => <ModelRow key={modelKey(item.model)} item={item} store={store} onClose={onClose} />)}
+                </div>
+              </ScrollArea>)}
+            </TabsContent>)}
+          </TabsContentWrapper>
+          <EffortSlider state={state} store={store} />
+        </div>
       </div>
-      <Combobox.Empty className="px-3 text-center text-sm text-text-tertiary empty:hidden">
-        {searching ? 'No models match your search.' : 'No models to show. Use Manage to show more.'}
-      </Combobox.Empty>
-      <Combobox.List aria-label="Models" className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-1.5 pb-2">
-        {shown.map(({ group, items: rows }, groupIndex) => (
-          <Combobox.Group key={group.id} className="pb-1">
-            <GroupLabel
-              group={group}
-              expanded={expanded(group)}
-              disabled={searching}
-              onToggle={() => setCollapsed((value) => ({ ...value, [group.id]: !value[group.id] }))}
-            />
-            {rows.map((item, index) => (
-              <ModelRow
-                key={`${group.id}:${modelKey(item.model)}`}
-                index={offsets[groupIndex]! + index}
-                item={item}
-                showProvider={!group.provider}
-                onFavorite={() => store.toggleFavorite(item.model)}
-              />
-            ))}
-          </Combobox.Group>
-        ))}
-      </Combobox.List>
-      <p className="shrink-0 border-t border-border-secondary-transparent px-4 py-1.5 text-xs text-text-tertiary">
-        ↑↓ move · Enter choose · Ctrl+F favorite
-      </p>
-    </Combobox.Root>
+    </Tabs>
   );
 }
 
-/**
- * The group's heading names the group (Base UI hides it from the tree and points the group at it);
- * a provider's heading has its own button to collapse its models.
- */
-function GroupLabel({
-  group,
-  expanded,
-  disabled,
-  onToggle,
-}: {
-  group: PickerGroup;
-  expanded: boolean;
-  disabled: boolean;
-  onToggle: () => void;
-}) {
+function ModelRow({ item, store, onClose }: { item: PickerItem; store: ModelStore; onClose: () => void }) {
+  const provider = { id: item.model.providerID };
+  return <div className="group relative flex items-center rounded-2xl hover:bg-background-tertiary-transparent has-[:focus-visible]:bg-background-tertiary-transparent">
+    <button type="button" aria-current={item.current || undefined} className="flex h-9 w-full min-w-0 cursor-pointer items-center gap-2 px-3 text-left text-sm [--actions-fade-start:5rem] [--actions-fade-end:2.25rem] group-hover:actions-fade group-has-[:focus-visible]:actions-fade [@media(hover:none)]:actions-fade"
+      onClick={() => { store.setModel(item.model, { recent: true }); if (item.model.variants.length === 0) onClose(); }}>
+      <ProviderLogo provider={provider} />
+      <span className="min-w-0 flex-1 truncate">{item.label.model}</span>
+      {item.current && <Tick2Icon className="size-4 shrink-0 text-text-secondary group-hover:invisible group-has-[:focus-visible]:invisible [@media(hover:none)]:invisible" />}
+    </button>
+    <Button type="button" variant="ghost" size="icon-sm" aria-label={`${item.favorite ? 'Remove' : 'Add'} ${item.label.model} ${item.favorite ? 'from' : 'to'} favorites`}
+      className="invisible absolute right-1 shrink-0 text-text-secondary transition-none group-hover:visible group-has-[:focus-visible]:visible [@media(hover:none)]:visible"
+      aria-pressed={item.favorite} onClick={() => store.toggleFavorite(item.model)}><Icon name="star" className={item.favorite ? 'transition-none [&_path]:fill-current' : 'transition-none'} /></Button>
+  </div>;
+}
+
+function EffortSlider({ state, store }: { state: ModelState; store: ModelStore }) {
+  const { variant, loading } = buildControls(state);
+  const { options, current } = variant;
+  const index = Math.max(0, options.indexOf(current));
+  if (loading || options.length <= 1) return null;
+  const position = index / (options.length - 1);
   return (
-    <div className="flex items-center gap-1 pr-1">
-      <Combobox.GroupLabel className="min-w-0 flex-1 truncate px-2.5 py-1.5 text-xs font-medium text-text-tertiary">
-        {group.title}
-      </Combobox.GroupLabel>
-      {group.provider && (
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          aria-label={`${expanded ? 'Collapse' : 'Expand'} ${group.title}`}
-          aria-expanded={expanded}
-          disabled={disabled}
-          onClick={onToggle}
-        >
-          <Icon name={expanded ? 'chevron-down' : 'arrow-right'} />
-        </Button>
-      )}
-    </div>
+    <section className="flex shrink-0 items-center gap-3 border-t border-border px-3 py-2.5">
+      <span className="flex w-16 shrink-0 justify-center text-sm font-medium capitalize text-text-primary">
+        <MorphText id={current} text={current} className="[&_.morph-text]:[--morph-drift:0px]" />
+      </span>
+      <div className="relative h-6 min-w-0 flex-1 overflow-hidden rounded-full bg-background-tertiary has-[:focus-visible]:ring-3 has-[:focus-visible]:ring-ring/30">
+        <div aria-hidden="true" className="pointer-events-none absolute inset-y-0 left-0 rounded-full bg-text-tertiary/60 transition-[width] duration-200 ease-out motion-reduce:transition-none" style={{ width: `calc(${position * 100}% + ${12 - 24 * position}px)` }} />
+        <div aria-hidden="true" className="pointer-events-none absolute inset-y-0 left-3 right-3">
+          {options.map((option, i) => <span key={option} className="absolute top-1/2 size-1 -translate-x-1/2 -translate-y-1/2 rounded-full bg-text-tertiary" style={{ left: `${i / (options.length - 1) * 100}%` }} />)}
+          <span className="absolute top-1/2 size-6 -translate-x-1/2 -translate-y-1/2 rounded-full border border-border bg-background shadow-sm transition-[left] duration-200 ease-out motion-reduce:transition-none" style={{ left: `${position * 100}%` }} />
+        </div>
+        <input type="range" min={0} max={options.length - 1} step={1} value={index} aria-label="Select effort" aria-valuetext={current}
+          onChange={(event) => { const value = options[Number(event.target.value)]; if (value) store.setVariant(value === DEFAULT_VARIANT ? undefined : value); }}
+          onKeyDown={(event) => { if (event.key !== 'Escape' && event.key !== 'Tab') event.stopPropagation(); }}
+          className="absolute inset-0 size-full cursor-pointer opacity-0" />
+      </div>
+    </section>
   );
 }
-
-function ModelRow({
-  index,
-  item,
-  showProvider,
-  onFavorite,
-}: {
-  index: number;
-  item: PickerItem;
-  showProvider: boolean;
-  onFavorite: () => void;
-}) {
-  const { model, label } = item;
-  return (
-    <Combobox.Item
-      index={index}
-      value={item}
-      aria-current={item.current || undefined}
-      className="flex h-9 cursor-pointer items-center gap-1 rounded-2xl pr-1 pl-2.5 text-sm data-highlighted:bg-background-tertiary-transparent"
-    >
-      <Tooltip label={details(model, label)} side="bottom">
-        <span className="flex min-w-0 flex-1 items-center gap-1.5">
-          {showProvider && label.provider && <span className="truncate text-text-tertiary">{label.provider} /</span>}
-          <bdi className="truncate">{label.model}</bdi>
-          {model.free && <span className="text-xs text-text-tertiary">Free</span>}
-        </span>
-      </Tooltip>
-      <Button
-        variant="ghost"
-        size="icon-sm"
-        aria-label={item.favorite ? `Remove ${label.model} from favorites` : `Add ${label.model} to favorites`}
-        aria-pressed={item.favorite}
-        onClick={(event) => {
-          // The star is not a choice of the model.
-          event.stopPropagation();
-          onFavorite();
-        }}
-      >
-        <Icon name="star" className={item.favorite ? '[&_path]:fill-current' : undefined} />
-      </Button>
-      <Combobox.ItemIndicator render={<span className="flex size-7 items-center justify-center" />} keepMounted>
-        {item.current && <Icon name="check" aria-hidden={false} aria-label="Current model" />}
-      </Combobox.ItemIndicator>
-    </Combobox.Item>
-  );
-}
-

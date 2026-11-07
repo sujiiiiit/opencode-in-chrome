@@ -74,14 +74,14 @@ test('lists existing Chrome tabs without opening a blank tab, then shares one on
   expect(user.isClosed()).toBe(false);
 });
 
-test('the debugger attaches when a web tab joins the session', async ({ tool, sw, pages }) => {
+test('joining a session does not attach the debugger', async ({ tool, sw, pages }) => {
   await tool('tabs_create', { url: pages.url('/form.html') });
   const tabId = await currentTab(tool);
   await expect
     .poll(() =>
       sw.evaluate(async (id) => (await chrome.debugger.getTargets()).some((t: { tabId?: number; attached: boolean }) => t.tabId === id && t.attached), tabId),
     )
-    .toBe(true);
+    .toBe(false);
 });
 
 test('sessions cannot touch user tabs or each other', async ({ tool, context, sw, pages }) => {

@@ -174,24 +174,20 @@ export function useChatSession(
 }
 
 /**
- * The extension's chat history. The store is created the first time `enabled` is true (the
- * History view opens) and kept afterwards, so the list stays live and opens instantly.
+ * The extension's chat history stays live while the panel is open, including before History opens.
  */
-export function useHistory(connection: Connection, hub: EventHub | null, enabled: boolean, onUnauthorized: () => void) {
+export function useHistory(connection: Connection, hub: EventHub | null, onUnauthorized: () => void) {
   const [store, setStore] = useState<HistoryStore | null>(null);
-  const [active, setActive] = useState(enabled);
   const unauthorized = useLatest(onUnauthorized);
-  useEffect(() => {
-    if (enabled) setActive(true);
-  }, [enabled]);
 
   useEffect(() => {
-    if (!hub || !active) return;
+    if (!hub) return;
     const history = new HistoryStore({ connection, events: hub, onUnauthorized: () => unauthorized.current() });
     setStore(history);
     void history.load();
+    void history.syncActivity();
     return () => history.dispose();
-  }, [connection, hub, active, unauthorized]);
+  }, [connection, hub, unauthorized]);
 
   const state = useSyncExternalStore(
     store?.subscribe ?? noopSubscribe,

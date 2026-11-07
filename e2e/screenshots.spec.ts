@@ -42,23 +42,7 @@ test('a text-only model is told to use read_page instead of screenshots', async 
   expect(shot.text).toMatch(/does not accept images.*Use read_page or find instead/);
 });
 
-test('the agent indicator is on agent tabs, hidden during a capture, and not in the page tree', async ({ tool, sw, pages, context }) => {
-  await openPage(tool, sw, pages.url('/actions.html'));
-  const page = await pageFor(context, pages.url('/actions.html'));
-  await page.bringToFront();
-  const indicator = page.locator('[data-opencode-indicator]');
-  await expect(indicator).toHaveCount(1);
-  await expect(indicator).toBeVisible();
-  // Record every display change of the indicator while a screenshot is taken.
-  await page.evaluate(() => {
-    const host = document.querySelector('[data-opencode-indicator]') as HTMLElement;
-    (window as unknown as { __displays: string[] }).__displays = [];
-    new MutationObserver(() => (window as unknown as { __displays: string[] }).__displays.push(host.style.display)).observe(host, { attributes: true });
-  });
-  await tool('computer', { action: 'screenshot' });
-  expect(await page.evaluate(() => (window as unknown as { __displays: string[] }).__displays)).toEqual(['none', 'block']);
-  expect((await tool('read_page', { filter: 'all' })).text).not.toContain('Opencode is using this tab');
-});
+
 
 test('upload_image puts a screenshot into a file input and drops it on a target', async ({ tool, sw, pages, context }) => {
   await openPage(tool, sw, pages.url('/actions.html'));

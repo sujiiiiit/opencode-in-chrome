@@ -20,6 +20,8 @@ import { ensureWorkspace } from './workspace';
 const PAGE_LIMIT = 30;
 
 export type HistoryState = {
+  activity: Record<string, 'running' | 'unseen'>;
+  knownIDs: string[];
   status: 'idle' | 'loading' | 'ready' | 'failed';
   items: ChatSummary[];
   /** The search the list shows; '' for all chats. */
@@ -33,6 +35,8 @@ export type HistoryState = {
 };
 
 export const INITIAL_HISTORY_STATE: HistoryState = {
+  activity: {},
+  knownIDs: [],
   status: 'idle',
   items: [],
   search: '',
@@ -51,6 +55,17 @@ export type HistoryStoreOptions = {
 
 type Page = { rows: ChatSummary[]; next: string | null };
 
+function reconcileActivity(previous: HistoryState['activity'], active: Record<string, unknown>, viewed: string | null) {
+  const activity = { ...previous };
+  for (const [id, status] of Object.entries(activity)) {
+    if (status !== 'running' || isRecord(active[id])) continue;
+    if (id === viewed) delete activity[id];
+    else activity[id] = 'unseen';
+  }
+  for (const [id, status] of Object.entries(active)) if (isRecord(status)) activity[id] = 'running';
+  return activity;
+}
+
 /** A search as both the server and the local filter compare it: trimmed, ignoring case. */
 export const normalizeSearch = (search: string) => search.trim().toLowerCase();
 
@@ -67,6 +82,8 @@ export function filterByTitle(items: ChatSummary[], search: string): ChatSummary
  * extension's metadata. Live events keep the list current; a reconnect reloads the first page.
  */
 export class HistoryStore extends Store<HistoryState> {
+  private viewed: string | null = null;
+  private activityVersion = 0;
   private readonly client: OpenCodeClient;
   private workspace: string | null = null;
   private next: string | null = null;
@@ -86,9 +103,9 @@ export class HistoryStore extends Store<HistoryState> {
     this.client = createClient({ baseUrl: connection.baseUrl, token: connection.token, fetch });
     this.cleanups.push(
       options.events.subscribe(this.onEvent),
-      options.events.onReconnect(() =>
-        this.state.status === 'ready' ? this.load(this.state.search) : Promise.resolve(),
-      ),
+      options.events.onReconnect(async () => {
+        await Promise.all([this.load(this.state.search), this.syncActivity()]);
+      }),
     );
   }
 
@@ -117,11 +134,56 @@ export class HistoryStore extends Store<HistoryState> {
   }
 
   private onEvent = (event: ServerEvent): void => {
+    const id = typeof event.data.sessionID === 'string' ? event.data.sessionID : null;
+    if (id) {
+      const type = event.type;
+      const activity = { ...this.state.activity };
+      if (type === 'session.execution.started') activity[id] = 'running';
+      else if (['session.execution.succeeded', 'session.execution.failed', 'session.execution.interrupted'].includes(type)) {
+        if (id === this.viewed) delete activity[id];
+        else activity[id] = 'unseen';
+      } else if (type === 'session.deleted' || type === 'session.archived') delete activity[id];
+      else return this.updateRows(event);
+      this.activityVersion++;
+      this.set({ activity });
+    }
+    this.updateRows(event);
+  };
+
+  private updateRows(event: ServerEvent): void {
     const workspace = this.workspace;
     // Rows only exist once a page loaded; a search's rows get every event too (the view filters).
     if (!workspace || this.state.status === 'idle') return;
+    if (event.type === 'session.created' && isExtensionSession(event.data, workspace)) {
+      const id = event.data.sessionID;
+      if (typeof id === 'string' && !this.state.knownIDs.includes(id)) this.set({ knownIDs: [...this.state.knownIDs, id] });
+    }
     this.change((rows) => reduceSessions(rows, event, workspace));
-  };
+  }
+
+  private rememberRows(rows: ChatSummary[]): void {
+    const knownIDs = [...new Set([...this.state.knownIDs, ...rows.map((row) => row.id)])];
+    if (knownIDs.length !== this.state.knownIDs.length) this.set({ knownIDs });
+  }
+
+  /** Only a visible conversation counts as seen; History itself does not. */
+  setViewed(id: string | null): void {
+    this.viewed = id;
+    if (!id || this.state.activity[id] !== 'unseen') return;
+    const activity = { ...this.state.activity };
+    delete activity[id];
+    this.set({ activity });
+  }
+
+  /** Reconcile running sessions after opening the panel or reconnecting. */
+  async syncActivity(): Promise<void> {
+    const version = this.activityVersion;
+    try {
+      const active: unknown = await this.client.session.active({ signal: this.lifetime.signal });
+      if (version !== this.activityVersion || !isRecord(active)) return;
+      this.set({ activity: reconcileActivity(this.state.activity, active, this.viewed) });
+    } catch { /* The event stream remains authoritative if the snapshot is unavailable. */ }
+  }
 
   private async fetchPage(cursor: string | null, search: string, signal: AbortSignal): Promise<Page> {
     this.workspace ??= await ensureWorkspace(this.client, this.options.connection.baseUrl);
@@ -160,6 +222,7 @@ export class HistoryStore extends Store<HistoryState> {
     try {
       const page = await this.fetchPage(null, term, signal);
       if (request !== this.request) return;
+      this.rememberRows(page.rows);
       this.next = page.next;
       if (term === '') this.base = page;
       const items = keepUnchanged(this.state.items, mergeSummaries([], page.rows));
@@ -194,6 +257,7 @@ export class HistoryStore extends Store<HistoryState> {
         return;
       }
       this.next = next;
+      this.rememberRows(rows);
       const items = mergeSummaries(this.state.items, rows);
       if (this.state.search.trim() === '') this.base = { rows: items, next };
       // One update for the page and the button, so the list renders once.
@@ -233,6 +297,9 @@ export class HistoryStore extends Store<HistoryState> {
     this.set({ notice: null });
     try {
       await this.client.session.remove({ sessionID: id }, { signal: this.lifetime.signal });
+      const activity = { ...this.state.activity };
+      delete activity[id];
+      this.set({ activity });
       this.change((rows) => removeSummary(rows, id));
       return true;
     } catch (error) {

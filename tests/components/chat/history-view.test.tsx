@@ -94,6 +94,21 @@ describe('ChatScreen: resuming', () => {
 });
 
 describe('ChatScreen: history', () => {
+  it('shows background activity and clears an unseen result when the chat is opened', async () => {
+    const { fake, user } = mount(fakeOpencode({ sessions: [loginChat] }));
+    await waitFor(() => expect(fake.listQueries.length).toBeGreaterThan(0));
+    fake.emit('session.execution.started', { sessionID: SESSION_ID });
+    await waitFor(() => expect(screen.getByRole('button', { name: 'History' })).toHaveAttribute('aria-description', 'Other chats running'));
+    await openHistory(user);
+    expect(await screen.findByRole('status', { name: 'Chat running' })).toBeInTheDocument();
+    fake.emit('session.execution.succeeded', { sessionID: SESSION_ID });
+    expect(await screen.findByRole('status', { name: 'Unseen chat result' })).toBeInTheDocument();
+    await user.click(screen.getByText('Fix login redirect'));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'History' })).not.toHaveAttribute('aria-description'));
+    await openHistory(user);
+    expect(screen.queryByRole('status', { name: 'Unseen chat result' })).not.toBeInTheDocument();
+  });
+
   it('lists only the extension’s chats, grouped by day', async () => {
     const { user } = mount(
       fakeOpencode({ sessions: [cliChat, loginChat, extensionSession('ses_old', 'Regex', now - 30 * 86_400_000)] }),

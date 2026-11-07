@@ -116,6 +116,26 @@ describe('HistoryStore.load', () => {
 });
 
 describe('HistoryStore live updates', () => {
+  it('tracks independent executions and clears a result only when its conversation is viewed', async () => {
+    const { fake, store } = await setup({ sessions: [extensionSession('ses_a', 'A', 2), extensionSession('ses_b', 'B', 1)] });
+    store.setViewed('ses_a');
+    fake.emit('session.execution.started', { sessionID: 'ses_a' });
+    fake.emit('session.execution.started', { sessionID: 'ses_b' });
+    await vi.waitFor(() => expect(store.getState().activity).toMatchObject({ ses_a: 'running', ses_b: 'running' }));
+    fake.emit('session.execution.succeeded', { sessionID: 'ses_a' });
+    fake.emit('session.execution.failed', { sessionID: 'ses_b' });
+    await vi.waitFor(() => expect(store.getState().activity).toEqual({ ses_b: 'unseen' }));
+    store.setViewed('ses_b');
+    expect(store.getState().activity).toEqual({});
+    store.setViewed(null);
+    fake.emit('session.execution.interrupted', { sessionID: 'ses_a' });
+    await vi.waitFor(() => expect(store.getState().activity).toEqual({ ses_a: 'unseen' }));
+    fake.emit('session.execution.started', { sessionID: 'ses_a' });
+    await vi.waitFor(() => expect(store.getState().activity).toEqual({ ses_a: 'running' }));
+    fake.emit('session.deleted', { sessionID: 'ses_a' });
+    await vi.waitFor(() => expect(store.getState().activity).toEqual({}));
+  });
+
   it('adds a chat this extension creates and ignores ones made elsewhere', async () => {
     const { fake, store } = await setup({ sessions: [extensionSession('ses_old', 'Old', 1)] });
     fake.emit('session.created', { sessionID: 'ses_cli', location: { directory: 'D:\\repo' } });

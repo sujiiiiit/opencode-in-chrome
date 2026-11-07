@@ -1,18 +1,9 @@
 import { Button } from '@/components/ui/button';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuGroup,
-  DropdownMenuLabel,
-  DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
-import { Icon } from '@/components/ui/icon';
+import { DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
+import { Skeleton } from '@/components/ui/skeleton';
 import { Tooltip } from '@/components/ui/tooltip';
 import { shortcutLabel } from '@/lib/keyboard';
 import type { ModelControls as Controls } from '@/lib/opencode/models/controls';
-import { DEFAULT_VARIANT } from '@/lib/opencode/models/variant';
 import { hasLogo, ProviderLogo } from './provider-logo';
 
 export const SHORTCUTS = {
@@ -21,111 +12,62 @@ export const SHORTCUTS = {
   agent: '⌘.',
 } as const;
 
-type SelectProps = {
-  label: string;
-  shortcut: string;
-  options: string[];
-  current: string;
-  disabled?: boolean;
-  slot: string;
-  onSelect: (value: string) => void;
-};
-
-/** A compact chip that opens a single-choice menu (agent, effort). */
-function ChipSelect({ label, shortcut, options, current, disabled, slot, onSelect }: SelectProps) {
-  return (
-    <DropdownMenu>
-      <Tooltip label={`${label} (${shortcutLabel(shortcut)})`}>
-        <DropdownMenuTrigger
-          disabled={disabled}
-          render={
-            <Button variant="ghost" size="sm" className="max-w-[7rem] shrink-0 text-[13px]" data-slot={slot} aria-label={`${label}: ${current}`} />
-          }
-        >
-          <span className="min-w-0 truncate">{current}</span>
-          <Icon name="chevron-down" />
-        </DropdownMenuTrigger>
-      </Tooltip>
-      <DropdownMenuContent side="top" className="min-w-48">
-        <DropdownMenuGroup>
-          <DropdownMenuLabel>{label}</DropdownMenuLabel>
-          <DropdownMenuRadioGroup value={current} onValueChange={(value) => onSelect(String(value))}>
-            {options.map((option) => (
-              <DropdownMenuRadioItem key={option} value={option} closeOnClick text={option} className="capitalize" />
-            ))}
-          </DropdownMenuRadioGroup>
-        </DropdownMenuGroup>
-      </DropdownMenuContent>
-    </DropdownMenu>
-  );
-}
-
 type Props = {
   controls: Controls;
-  onOpenPicker: () => void;
-  // Agent chip hidden for now (build mode only); restore with the chip below.
-  // onAgent: (name: string) => void;
-  onVariant: (value: string | undefined) => void;
+  pending?: boolean;
 };
 
 /**
- * The model chip's text: the model (with its provider's name when no logo stands for it), a
- * placeholder while loading, or why none.
+ * The model name, including its provider when no logo stands for it, or why none is available.
  */
 function chipLabel(controls: Controls): string {
   const { label, provider } = controls.model;
   if (label) return label.provider && !hasLogo(provider) ? `${label.provider} / ${label.model}` : label.model;
-  if (controls.loading) return 'Loading models…';
   return controls.empty ? 'No models' : 'Choose model';
 }
 
 /**
- * The composer's selection chips, as in opencode's composer toolbar: the agent (when there is a
- * choice), the model (opens the picker) and the effort variant (when the model has variants).
- * While the catalog loads they show the model named last time and stay inert.
+ * The composer's model picker trigger, including its effort when available.
+ * While the catalog loads, a skeleton reserves space for the cached selection.
  */
-export function ModelControls({ controls, onOpenPicker, onVariant }: Props) {
+export function ModelControls({ controls, pending = false }: Props) {
   const { variant, loading } = controls;
+  if (pending) {
+    return (
+      <div role="status" aria-label="Loading model and effort" data-slot="model-controls" className="flex min-w-0 items-center gap-0.5">
+        <div className="flex h-7 min-w-0 max-w-[12rem] items-center gap-1.5 px-2">
+          {controls.preview ? (
+            <span className="relative inline-flex min-w-0 items-center gap-1.5 text-[13px]">
+              <span className="invisible inline-flex min-w-0 items-center gap-1.5">
+                {controls.model.provider && <ProviderLogo provider={controls.model.provider} />}
+                <span className="truncate">{chipLabel(controls)}</span>
+                {variant.options.length > 1 && <><span>·</span><span className="shrink-0">{variant.current}</span></>}
+              </span>
+              <Skeleton className="absolute inset-x-0 top-1/2 h-3 -translate-y-1/2 rounded-md" />
+            </span>
+          ) : <Skeleton className="h-3 w-28 rounded-md" />}
+        </div>
+      </div>
+    );
+  }
   return (
     <div data-slot="model-controls" className="flex min-w-0 items-center gap-0.5">
-      {/* Agent chip hidden for now: the panel runs in build mode only (see PANEL_AGENTS).
-      {controls.agent.visible && controls.agent.current && (
-        <ChipSelect
-          slot="agent-select"
-          label="Agent"
-          shortcut={SHORTCUTS.agent}
-          options={controls.agent.options}
-          current={controls.agent.current}
-          disabled={loading}
-          onSelect={onAgent}
-        />
-      )} */}
       <Tooltip label={`Choose model (${shortcutLabel(SHORTCUTS.picker)})`}>
-        <Button
+        <DropdownMenuTrigger
+          disabled={loading}
+          render={<Button
           variant="ghost"
           size="sm"
           className="min-w-0 max-w-[12rem] shrink justify-start text-[13px]"
           data-slot="model-chip"
-          aria-label={controls.model.label ? `Model: ${controls.model.label.model}` : 'Choose model'}
-          aria-haspopup="dialog"
-          disabled={loading && !controls.preview}
-          onClick={() => !loading && onOpenPicker()}
+          aria-label={controls.model.label ? `Model: ${controls.model.label.model}${variant.options.length > 1 ? `, effort: ${variant.current}` : ''}` : 'Choose model'}
+          />}
         >
           {controls.model.provider && <ProviderLogo provider={controls.model.provider} />}
           <span className="min-w-0 truncate">{chipLabel(controls)}</span>
-        </Button>
+          {variant.options.length > 1 && <><span aria-hidden="true" className="shrink-0 text-text-tertiary">·</span><span className="shrink-0 text-text-secondary">{variant.current}</span></>}
+        </DropdownMenuTrigger>
       </Tooltip>
-      {variant.options.length > 1 && (
-        <ChipSelect
-          slot="variant-select"
-          label="Effort"
-          shortcut={SHORTCUTS.variant}
-          options={variant.options}
-          current={variant.current}
-          disabled={loading}
-          onSelect={(value) => onVariant(value === DEFAULT_VARIANT ? undefined : value)}
-        />
-      )}
     </div>
   );
 }

@@ -5,6 +5,11 @@ import { fakeBrowser } from 'wxt/testing/fake-browser';
 import { ChatScreen } from '@/components/chat/chat-screen';
 import { BROWSER_ENABLED_KEY } from '@/lib/browser/settings';
 import { modelShortcut } from '@/components/chat/model/use-models';
+import { ModelControls } from '@/components/chat/model/model-controls';
+import { DropdownMenu } from '@/components/ui/dropdown-menu';
+import { buildControls } from '@/lib/opencode/models/controls';
+import { INITIAL_MODEL_STATE } from '@/lib/opencode/models/model-store';
+import { PREFERENCES_KEY } from '@/lib/opencode/models/preferences';
 import type { Connection } from '@/lib/opencode/connection';
 import { fakeOpencode, type FakeOpencode } from '@/tests/support/queue-server';
 import { NO_MODEL_MESSAGE } from '@/lib/opencode/client';
@@ -31,13 +36,8 @@ afterEach(() => {
 
 const box = () => screen.getByRole('textbox', { name: /message/i });
 const chip = () => screen.getByRole('button', { name: /^(model:|choose model)/i });
-const picker = () => screen.getByRole('dialog');
-const options = () => within(picker()).getAllByRole('option');
-/** A picker group's title: Base UI names the group by its (hidden) heading. */
-const groupTitles = () =>
-  within(picker())
-    .getAllByRole('group')
-    .map((group) => document.getElementById(group.getAttribute('aria-labelledby')!)?.textContent);
+const picker = () => screen.getByRole('menu', { name: /choose model/i });
+const options = () => within(picker()).getAllByRole('button').filter((button) => button.hasAttribute('aria-current') || /Claude|Flint/.test(button.textContent ?? ''));
 const createBody = (fake: FakeOpencode) =>
   JSON.parse(fake.fetch.calls.find((c) => c.method === 'POST' && c.url.pathname === '/api/session')!.init.body as string);
 
@@ -54,12 +54,18 @@ async function openPicker(user: ReturnType<typeof userEvent.setup>) {
   return picker();
 }
 
-async function pickMenu(user: ReturnType<typeof userEvent.setup>, trigger: HTMLElement, option: string) {
-  await user.click(trigger);
-  await user.click(await screen.findByRole('menuitemradio', { name: option }));
-}
-
 describe('composer model controls', () => {
+  it('shows model and effort skeletons while the catalog is loading', () => {
+    const controls = buildControls(INITIAL_MODEL_STATE);
+    const { container, rerender } = render(<DropdownMenu><ModelControls controls={controls} pending /></DropdownMenu>);
+    expect(screen.getByRole('status', { name: /loading model and effort/i })).toBeInTheDocument();
+    expect(container.querySelectorAll('[data-slot="skeleton"]')).toHaveLength(1);
+    expect(screen.queryByText(/loading models/i)).not.toBeInTheDocument();
+    rerender(<DropdownMenu><ModelControls controls={{ ...controls, loading: false }} /></DropdownMenu>);
+    expect(screen.queryByRole('status', { name: /loading model and effort/i })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /choose model/i })).toBeInTheDocument();
+  });
+
   it('shows the default model, no agent chip (build mode only), and no effort for a model without variants', async () => {
     await mount();
     expect(screen.queryByRole('button', { name: /^agent/i })).not.toBeInTheDocument();
@@ -69,14 +75,17 @@ describe('composer model controls', () => {
   it('chooses a model in the picker, then an effort, and the first send uses both', async () => {
     const { fake, user } = await mount();
     await openPicker(user);
-    await user.type(within(picker()).getByRole('combobox', { name: 'Search models' }), 'opus');
+    await user.type(within(picker()).getByRole('textbox', { name: 'Search models' }), 'opus');
     expect(options().map((o) => o.textContent)).toEqual([expect.stringContaining('Claude Opus 5.5')]);
     await user.click(options()[0]!);
-    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
-    expect(chip()).toHaveAccessibleName('Model: Claude Opus 5.5');
-
-    await pickMenu(user, screen.getByRole('button', { name: 'Effort: default' }), 'high');
-    expect(screen.getByRole('button', { name: 'Effort: high' })).toBeInTheDocument();
+    const slider = within(picker()).getByRole('slider', { name: 'Select effort' });
+    expect(slider).toHaveAttribute('aria-valuetext', 'default');
+    fireEvent.change(slider, { target: { value: '3' } });
+    expect(slider).toHaveAttribute('aria-valuetext', 'high');
+    await user.keyboard('{Escape}');
+    await waitFor(() => expect(screen.queryByRole('menu', { name: /choose model/i })).not.toBeInTheDocument());
+    expect(chip()).toHaveAccessibleName('Model: Claude Opus 5.5, effort: high');
+    expect(chip()).toHaveTextContent(/Claude Opus 5.5.*·.*high/);
 
     await user.type(box(), 'hello{Enter}');
     await waitFor(() => expect(fake.prompts).toHaveLength(1));
@@ -91,8 +100,10 @@ describe('composer model controls', () => {
     await user.type(box(), 'first{Enter}');
     await waitFor(() => expect(fake.prompts).toHaveLength(1));
     await openPicker(user);
+    await user.click(within(picker()).getByRole('button', { name: 'Anthropic' }));
     await user.click(options().find((o) => o.textContent?.includes('Claude Sonnet 5.5'))!);
-    await pickMenu(user, await screen.findByRole('button', { name: 'Effort: default' }), 'low');
+    fireEvent.change(within(picker()).getByRole('slider', { name: 'Select effort' }), { target: { value: '1' } });
+    await user.keyboard('{Escape}');
     await user.type(box(), 'second{Enter}');
     await waitFor(() => expect(fake.prompts).toHaveLength(2));
     expect(fake.switches).toEqual(['model:anthropic/claude-sonnet-5-5/low']);
@@ -124,65 +135,93 @@ describe('no model to send with', () => {
 });
 
 describe('model picker', () => {
-  it('lists providers, popular first, with the current model checked', async () => {
+  it('closes after selecting a model without efforts and stays open when efforts exist', async () => {
     const { user } = await mount();
     await openPicker(user);
-    expect(groupTitles()).toEqual(['OpenCode', 'Anthropic']);
-    const current = options().find((o) => o.getAttribute('aria-current') === 'true')!;
-    expect(current).toHaveTextContent('Flint 40B Free');
+    await user.click(within(picker()).getByRole('button', { name: 'Anthropic' }));
+    await user.click(within(picker()).getByRole('button', { name: 'Claude Opus 5.5' }));
+    expect(within(picker()).getByRole('slider', { name: 'Select effort' })).toBeInTheDocument();
+    await user.click(within(picker()).getByRole('button', { name: 'OpenCode' }));
+    await user.click(within(picker()).getByRole('button', { name: 'Flint 40B Free' }));
+    await waitFor(() => expect(screen.queryByRole('menu', { name: /choose model/i })).not.toBeInTheDocument());
+    expect(chip()).toHaveAccessibleName('Model: Flint 40B Free');
   });
 
-  it('moves with the arrow keys and chooses with Enter; effort is chosen in the prompt box', async () => {
+  it('shows centered empty states for recent, favorites, and search', async () => {
     const { user } = await mount();
     await openPicker(user);
-    expect(within(picker()).queryByRole('button', { name: /^effort/i })).not.toBeInTheDocument();
-    await user.keyboard('{ArrowDown}');
-    await user.keyboard('{Enter}');
-    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
-    expect(chip()).toHaveAccessibleName('Model: Claude Opus 5.5');
-    expect(screen.getByRole('button', { name: 'Effort: default' })).toBeInTheDocument();
+    await user.click(within(picker()).getByRole('button', { name: 'Recent' }));
+    expect(within(picker()).getByText('No recent models').closest('[data-slot="empty-state"]')).toBeInTheDocument();
+    await user.click(within(picker()).getByRole('button', { name: 'Favorites' }));
+    expect(within(picker()).getByText('No favorite models').closest('[data-slot="empty-state"]')).toBeInTheDocument();
+    await user.type(within(picker()).getByRole('textbox', { name: 'Search models' }), 'no-such-model');
+    expect(within(picker()).getByText('No matching models').closest('[data-slot="empty-state"]')).toBeInTheDocument();
   });
 
-  it('adds favorites (star or Ctrl+F) and lists them first; recent models follow', async () => {
+  it('toggles from its trigger and closes with Escape', async () => {
+    const { user } = await mount();
+    await user.click(chip());
+    expect(picker()).toBeInTheDocument();
+    expect(chip()).toHaveAttribute('aria-expanded', 'true');
+    await user.click(chip());
+    await waitFor(() => expect(screen.queryByRole('menu', { name: /choose model/i })).not.toBeInTheDocument());
+    await user.click(chip());
+    expect(picker()).toBeInTheDocument();
+    await user.keyboard('{Escape}');
+    await waitFor(() => expect(screen.queryByRole('menu', { name: /choose model/i })).not.toBeInTheDocument());
+    await user.click(chip());
+    expect(picker()).toBeInTheDocument();
+    await user.click(document.body);
+    await waitFor(() => expect(screen.queryByRole('menu', { name: /choose model/i })).not.toBeInTheDocument());
+  });
+
+  it('hides disabled models even when they are favorites or recent', async () => {
+    const key = { providerID: 'anthropic', modelID: 'claude-opus-5-5' };
+    await fakeBrowser.storage.local.set({ [PREFERENCES_KEY]: { user: [{ ...key, visibility: 'hide' }], favorite: [key], recent: [key] } });
+    vi.stubGlobal('fetch', fakeOpencode().fetch);
+    render(<ChatScreen connection={connection} onUnauthorized={vi.fn()} />);
+    const user = userEvent.setup();
+    await waitFor(() => expect(chip()).toHaveAccessibleName(/^Model:/));
+    await openPicker(user);
+    await user.click(within(picker()).getByRole('button', { name: 'Favorites' }));
+    expect(within(picker()).queryByRole('button', { name: 'Claude Opus 5.5' })).not.toBeInTheDocument();
+    await user.type(within(picker()).getByRole('textbox', { name: 'Search models' }), 'opus');
+    expect(within(picker()).queryByRole('button', { name: 'Claude Opus 5.5' })).not.toBeInTheDocument();
+  });
+
+  it('switches providers and chooses an enabled model', async () => {
     const { user } = await mount();
     await openPicker(user);
+    await user.click(within(picker()).getByRole('button', { name: 'Anthropic' }));
+    expect(within(picker()).getByRole('button', { name: 'Claude Opus 5.5' })).toBeInTheDocument();
+    await user.click(within(picker()).getByRole('button', { name: 'Claude Opus 5.5' }));
+    await waitFor(() => expect(chip()).toHaveAccessibleName('Model: Claude Opus 5.5, effort: default'));
+  });
+
+  it('adds favorites and shows recent selections', async () => {
+    const { user } = await mount();
+    await openPicker(user);
+    await user.click(within(picker()).getByRole('button', { name: 'Anthropic' }));
     await user.click(within(picker()).getByRole('button', { name: 'Add Claude Sonnet 5.5 to favorites' }));
-    expect(groupTitles()[0]).toBe('Favorites');
-    // Ctrl+F stars the highlighted row (the first search result).
-    const search = within(picker()).getByRole('combobox', { name: 'Search models' });
-    await user.type(search, 'opus');
-    await user.keyboard('{Control>}f{/Control}');
-    expect(within(picker()).getByRole('button', { name: 'Remove Claude Opus 5.5 from favorites' })).toBeInTheDocument();
-    await user.clear(search);
-    await user.click(options().find((o) => o.textContent?.includes('Flint 40B Free'))!);
-    await openPicker(user);
-    expect(groupTitles().slice(0, 2)).toEqual(['Favorites', 'Recent']);
-    expect(options().slice(0, 3).map((o) => o.textContent)).toEqual([
-      expect.stringContaining('Claude Opus 5.5'),
-      expect.stringContaining('Claude Sonnet 5.5'),
-      expect.stringContaining('Flint 40B Free'),
-    ]);
+    await user.click(within(picker()).getByRole('button', { name: 'Favorites' }));
+    expect(within(picker()).getByRole('button', { name: 'Claude Sonnet 5.5' })).toBeInTheDocument();
+    await user.click(within(picker()).getByRole('button', { name: 'Claude Sonnet 5.5' }));
+    await user.click(within(picker()).getByRole('button', { name: 'Recent' }));
+    expect(within(picker()).getByRole('button', { name: 'Claude Sonnet 5.5' })).toBeInTheDocument();
   });
 
-  it('collapses a provider group until a search', async () => {
+  it('searches across providers and updates effort options for the selected model', async () => {
     const { user } = await mount();
     await openPicker(user);
-    await user.click(within(picker()).getByRole('button', { name: 'Collapse Anthropic' }));
-    expect(within(picker()).getByRole('button', { name: 'Expand Anthropic' })).toHaveAttribute('aria-expanded', 'false');
-    expect(options()).toHaveLength(1);
-    await user.type(within(picker()).getByRole('combobox'), 'claude');
-    expect(options()).toHaveLength(2);
-  });
-
-  it('Manage closes the picker and opens the settings page, not a view in the picker', async () => {
-    const { browser } = await import('wxt/browser');
-    const create = vi.spyOn(browser.tabs, 'create').mockResolvedValue({} as never);
-    const { user } = await mount();
-    await openPicker(user);
-    expect(within(picker()).queryByRole('switch')).not.toBeInTheDocument();
-    await user.click(within(picker()).getByRole('button', { name: 'Manage' }));
-    expect(create).toHaveBeenCalledWith({ url: browser.runtime.getURL('/settings.html') });
-    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    await user.type(within(picker()).getByRole('textbox', { name: 'Search models' }), 'opus');
+    expect(within(picker()).getByRole('button', { name: 'Claude Opus 5.5' })).toBeInTheDocument();
+    expect(within(picker()).queryByRole('slider')).not.toBeInTheDocument();
+    expect(within(picker()).queryByText('Select effort')).not.toBeInTheDocument();
+    await user.click(within(picker()).getByRole('button', { name: 'Claude Opus 5.5' }));
+    expect(within(picker()).getByRole('slider', { name: 'Select effort' })).toHaveAttribute('max', '3');
+    await user.click(within(picker()).getByRole('button', { name: 'Anthropic' }));
+    await user.click(within(picker()).getByRole('button', { name: 'Claude Sonnet 5.5' }));
+    expect(within(picker()).getByRole('slider', { name: 'Select effort' })).toHaveAttribute('max', '2');
   });
 });
 
@@ -190,12 +229,14 @@ describe('model shortcuts', () => {
   it("opens the picker with Ctrl+' and cycles effort with Ctrl+Shift+D; Ctrl+. is left alone", async () => {
     const { user } = await mount();
     fireEvent.keyDown(window, { code: 'Quote', key: "'", ctrlKey: true });
-    expect(await screen.findByRole('dialog')).toBeInTheDocument();
+    expect(await screen.findByRole('menu', { name: /choose model/i })).toBeInTheDocument();
+    await user.click(within(picker()).getByRole('button', { name: 'Anthropic' }));
     await user.click(options().find((o) => o.textContent?.includes('Claude Opus 5.5'))!);
-    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    await user.keyboard('{Escape}');
+    await waitFor(() => expect(screen.queryByRole('menu', { name: /choose model/i })).not.toBeInTheDocument());
 
     fireEvent.keyDown(window, { code: 'KeyD', key: 'D', ctrlKey: true, shiftKey: true });
-    expect(await screen.findByRole('button', { name: 'Effort: low' })).toBeInTheDocument();
+    await waitFor(() => expect(chip()).toHaveAccessibleName('Model: Claude Opus 5.5, effort: low'));
     // Agent switching is hidden: the key reaches the browser untouched.
     expect(fireEvent.keyDown(window, { code: 'Period', key: '.', ctrlKey: true })).toBe(true);
     expect(screen.queryByRole('button', { name: /^agent/i })).not.toBeInTheDocument();
@@ -227,8 +268,7 @@ describe('restoring a chat', () => {
     await browser.storage.local.set({ 'opencode.activeChat': { baseUrl: BASE, sessionID: SESSION_ID } });
     vi.stubGlobal('fetch', fake.fetch);
     render(<ChatScreen connection={connection} onUnauthorized={vi.fn()} />);
-    await waitFor(() => expect(chip()).toHaveAccessibleName('Model: Claude Opus 5.5'));
-    expect(screen.getByRole('button', { name: 'Effort: low' })).toBeInTheDocument();
+    await waitFor(() => expect(chip()).toHaveAccessibleName('Model: Claude Opus 5.5, effort: low'));
   });
 
   it('moves a chat started in another agent to build on its next send', async () => {

@@ -40,6 +40,17 @@ async function startTurn(fake: FakeOpencode, user: ReturnType<typeof userEvent.s
 }
 
 describe('ChatScreen: sending and the submit button', () => {
+  it('copies the active session ID when the chat title is clicked', async () => {
+    const { fake, user } = mount();
+    expect(screen.queryByRole('button', { name: /Copy session ID/ })).not.toBeInTheDocument();
+    await startTurn(fake, user);
+    const writeText = vi.spyOn(navigator.clipboard, 'writeText').mockResolvedValue();
+    await user.click(screen.getByRole('button', { name: /Copy session ID/ }));
+    expect(writeText).toHaveBeenCalledWith(SESSION_ID);
+    expect(await screen.findByRole('status')).toHaveTextContent('Session ID copied');
+    writeText.mockRestore();
+  });
+
   it('keeps browser controls out of the composer', async () => {
     await fakeBrowser.storage.local.set({ [BROWSER_ENABLED_KEY]: true });
     mount();

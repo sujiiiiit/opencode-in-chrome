@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { Button } from '@/components/ui/button';
 import { Icon, type IconName } from '@/components/ui/icon';
-import { loadConnection, type Connection } from '@/lib/opencode/connection';
+import { clearConnection, loadConnection, type Connection } from '@/lib/opencode/connection';
 import { BrowserSection } from './browser-section';
 import { ModelsSection, type ModelsPreview } from './models-section';
 import { WebSearchSection } from './web-search-section';
@@ -24,6 +25,21 @@ function devPreview(): ModelsPreview | undefined {
 export function SettingsPage() {
   const [page, setPage] = useState<Page>('models');
   const [connection, setConnection] = useState<Connection | null | undefined>(undefined);
+  const [loggingOut, setLoggingOut] = useState(false);
+  const [logoutError, setLogoutError] = useState(false);
+
+  const logOut = async () => {
+    setLoggingOut(true);
+    setLogoutError(false);
+    try {
+      await clearConnection();
+      setConnection(null);
+    } catch {
+      setLogoutError(true);
+    } finally {
+      setLoggingOut(false);
+    }
+  };
 
   useEffect(() => {
     void loadConnection().then(setConnection, () => setConnection(null));
@@ -60,6 +76,14 @@ export function SettingsPage() {
             {item.label}
           </button>
         ))}
+        {connection && (
+          <div className="mt-6 border-t border-border px-3 pt-4">
+            <Button type="button" variant="outline" disabled={loggingOut} onClick={() => void logOut()}>
+              {loggingOut ? 'Logging out…' : 'Log out'}
+            </Button>
+            {logoutError && <p role="alert" className="mt-2 text-xs text-destructive">Could not log out. Try again.</p>}
+          </div>
+        )}
       </nav>
       <main className="min-w-0 flex-1">
         <div className="w-full space-y-6 px-8 py-10">

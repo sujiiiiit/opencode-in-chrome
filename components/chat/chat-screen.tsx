@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode, type RefObject } from 'react';
 import { browser } from 'wxt/browser';
 import { Button } from '@/components/ui/button';
+import { DropdownMenu } from '@/components/ui/dropdown-menu';
 import { Icon } from '@/components/ui/icon';
 import { Tabs, TabsContent, TabsContentWrapper, useTabPanelActive } from '@/components/ui/tabs';
 import { ChatSession, INITIAL_CHAT_STATE, pendingMessages, type ChatState } from '@/lib/opencode/chat';
@@ -71,34 +72,65 @@ function openSettings() {
   void browser.tabs.create({ url: browser.runtime.getURL('/settings.html') });
 }
 
+function HistoryButton({ activity, onClick }: { activity: 'running' | 'unseen' | null; onClick: () => void }) {
+  const description = activity === 'running' ? 'Other chats running' : activity === 'unseen' ? 'Unseen chat results' : undefined;
+  return (
+    <Button variant="ghost" size="icon-lg" className="relative" aria-label="History" aria-description={description} title="History" onClick={onClick}>
+      {activity === 'running' ? <Icon name="loader-circle" className="animate-spin" /> : <Icon name="history" />}
+      {activity === 'unseen' && <span className="absolute top-1 right-1 size-2 rounded-full bg-primary" aria-hidden="true" />}
+    </Button>
+  );
+}
+
 function ChatHeader({
   title,
   activeID,
   onHistory,
   onNewChat,
+  historyActivity,
 }: {
   title: string;
   /** The open chat's id, so the title id is stable per chat and changes when a chat is named. */
   activeID: string | null;
   onHistory: () => void;
   onNewChat: () => void;
+  historyActivity: 'running' | 'unseen' | null;
 }) {
+  const [copied, setCopied] = useState(false);
+  const copyTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  useEffect(() => {
+    setCopied(false);
+    clearTimeout(copyTimer.current);
+    return () => clearTimeout(copyTimer.current);
+  }, [activeID]);
+
+  const copySessionID = () => {
+    if (!activeID) return;
+    void navigator.clipboard?.writeText(activeID).then(() => {
+      setCopied(true);
+      clearTimeout(copyTimer.current);
+      copyTimer.current = setTimeout(() => setCopied(false), 2000);
+    }, () => {});
+  };
   // Morph from the "New chat" placeholder to the real title once the chat is named, and again
   // when switching chats (the id changes). Under one id the text just eases its width instead.
   const id = activeID && title !== 'New chat' ? `title:${activeID}` : 'untitled';
 
   return (
-    <header className="mx-auto flex w-full max-w-chat shrink-0 items-center gap-2 px-4 py-1.5">
+    <header className="mx-auto flex w-full max-w-chat shrink-0 items-center gap-2 pl-4 pr-2 py-1.5">
       <MarqueeTitle title={title} className="flex-1 text-sm text-text-primary">
-        <MorphText id={id} text={title} textSlot="chat-title" />
+        {activeID ? (
+          <button type="button" className="block w-full cursor-pointer text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px]" aria-label={copied ? 'Session ID copied' : 'Copy session ID'} title={copied ? 'Session ID copied' : 'Copy session ID'} onClick={copySessionID}>
+            <MorphText id={id} text={title} textSlot="chat-title" />
+          </button>
+        ) : <MorphText id={id} text={title} textSlot="chat-title" />}
       </MarqueeTitle>
+      {copied && <span role="status" className="text-xs text-text-secondary">Session ID copied</span>}
       <div className="flex items-center gap-0.5">
         <Button variant="ghost" size="icon-lg" aria-label="Settings" title="Settings" onClick={openSettings}>
           <Icon name="settings" />
         </Button>
-        <Button variant="ghost" size="icon-lg" aria-label="History" title="History" onClick={onHistory}>
-          <Icon name="history" />
-        </Button>
+        <HistoryButton activity={historyActivity} onClick={onHistory} />
         <Button variant="ghost" size="icon-lg" aria-label="New chat" title="New chat" onClick={onNewChat}>
           <Icon name="new-chat" />
         </Button>
@@ -119,6 +151,7 @@ type ChatPaneProps = {
   active: boolean;
   onHistory: () => void;
   onNewChat: () => void;
+  historyActivity: 'running' | 'unseen' | null;
 };
 
 /**
@@ -146,15 +179,12 @@ function PaneNotice({ session, models }: { session: ReturnType<typeof useChatSes
 }
 
 /** The model and effort chips under the composer, once the store exists. */
-function ComposerFooter({ models, onOpenPicker }: { models: Models; onOpenPicker: () => void }) {
+function ComposerFooter({ models }: { models: Models }) {
   const store = models.store;
-  if (!store) return null;
   return (
     <ModelControls
       controls={models.controls}
-      onOpenPicker={onOpenPicker}
-      // onAgent={(name) => store.setAgent(name)}
-      onVariant={(value) => store.setVariant(value)}
+      pending={!store || models.state.phase === 'idle' || models.state.phase === 'loading'}
     />
   );
 }
@@ -177,7 +207,7 @@ function paneQuestion({ chat, state }: ReturnType<typeof useChatSession>): React
 }
 
 /** The model picker's open state and its shortcuts (⌘' opens it, ⇧⌘D cycles the effort). */
-function usePicker(models: Models, box: RefObject<PromptBoxHandle | null>) {
+function usePicker(models: Models) {
   const [picking, setPicking] = useState(false);
   const store = models.store;
   const open = useCallback(() => {
@@ -189,14 +219,7 @@ function usePicker(models: Models, box: RefObject<PromptBoxHandle | null>) {
     // Agent switching is hidden for now (build mode only).
     // moveAgent: (direction) => store?.moveAgent(direction),
   });
-  const onOpenChange = useCallback(
-    (next: boolean) => {
-      setPicking(next);
-      // Back to the message after choosing, like opencode's composer.
-      if (!next) requestAnimationFrame(() => box.current?.focus());
-    },
-    [box],
-  );
+  const onOpenChange = useCallback((next: boolean) => setPicking(next), []);
   return { picking, open, onOpenChange };
 }
 
@@ -208,14 +231,13 @@ type ChatComposerProps = {
   active: boolean;
   /** A question the agent asks, shown in the box in place of the editor. */
   question: ReactNode;
-  onOpenPicker: () => void;
 };
 
 /**
  * The prompt box with its attach menu, attached images and model chips, and the drop zone that
  * covers the whole pane (the overlay is placed against the pane, its nearest positioned box).
  */
-function ChatComposer({ box, composer, models, active, question, onOpenPicker }: ChatComposerProps) {
+function ChatComposer({ box, composer, models, active, question }: ChatComposerProps) {
   // History, sliding over the chat, takes no drops.
   const panelActive = useTabPanelActive();
   const dragging = useFileDrop(composer.addFiles, active && panelActive);
@@ -225,7 +247,7 @@ function ChatComposer({ box, composer, models, active, question, onOpenPicker }:
       <PromptBox
         ref={box}
         controls={<AttachMenu onFiles={composer.addFiles} />}
-        footer={models.store && <ComposerFooter models={models} onOpenPicker={onOpenPicker} />}
+        footer={<ComposerFooter models={models} />}
         attachments={<AttachmentStrip images={composer.images} onRemove={composer.removeImage} />}
         takeover={question}
         placeholder={composer.placeholder}
@@ -243,7 +265,7 @@ function ChatComposer({ box, composer, models, active, question, onOpenPicker }:
 }
 
 /** The conversation and the composer. */
-function ChatPane({ connection, session, models, hub, onUnauthorized, active, onHistory, onNewChat }: ChatPaneProps) {
+function ChatPane({ connection, session, models, hub, onUnauthorized, active, onHistory, onNewChat, historyActivity }: ChatPaneProps) {
   const { chat, state, activeID } = session;
   const box = useRef<PromptBoxHandle>(null);
   const composer = useComposer({
@@ -253,30 +275,31 @@ function ChatPane({ connection, session, models, hub, onUnauthorized, active, on
     models: { store: models.store, controls: models.controls, phase: models.state.phase },
   });
   const store = models.store;
-  const picker = usePicker(models, box);
+  const picker = usePicker(models);
   const title = useChatTitle(activeID, state.title);
   const transcript = (
     <>
       <TranscriptList chat={chat} state={state} models={models} />
       <div className="mx-auto w-full max-w-chat">
         <PaneNotice session={session} models={models} />
-        <ChatComposer box={box} composer={composer} models={models} active={active} question={paneQuestion(session)} onOpenPicker={picker.open} />
+        <ChatComposer box={box} composer={composer} models={models} active={active} question={paneQuestion(session)} />
       </div>
       {store && (
-        <ModelPicker open={picker.picking} onOpenChange={picker.onOpenChange} store={store} state={models.state}
-          onManage={() => { picker.onOpenChange(false); openSettings(); }} />
+        <ModelPicker store={store} state={models.state} onClose={() => picker.onOpenChange(false)} />
       )}
     </>
   );
 
   return (
+    <DropdownMenu open={picker.picking} onOpenChange={picker.onOpenChange}>
     <div className="relative flex h-full min-h-0 flex-col">
-      <ChatHeader title={title} activeID={activeID} onHistory={onHistory} onNewChat={onNewChat} />
+      <ChatHeader title={title} activeID={activeID} onHistory={onHistory} onNewChat={onNewChat} historyActivity={historyActivity} />
       <ConnectionBanners connection={connection} />
       <SessionBranch activeID={activeID} hub={hub} connection={connection} models={models} onUnauthorized={onUnauthorized}>
         {transcript}
       </SessionBranch>
     </div>
+    </DropdownMenu>
   );
 }
 
@@ -338,6 +361,24 @@ type View = 'chat' | 'history';
 /** How long the History panel's slide-out runs (see Tabs), so it stays rendered until gone. */
 const SLIDE_OUT_MS = 300;
 
+function useHistoryActivity(history: ReturnType<typeof useHistory>, view: View, activeID: string | null) {
+  useEffect(() => {
+    const update = () => history.store?.setViewed(view === 'chat' && document.visibilityState !== 'hidden' ? activeID : null);
+    update();
+    document.addEventListener('visibilitychange', update);
+    return () => document.removeEventListener('visibilitychange', update);
+  }, [history.store, view, activeID]);
+  const other = history.state.knownIDs.filter((id) => id !== activeID).map((id) => history.state.activity[id]);
+  return other.includes('running') ? 'running' : other.includes('unseen') ? 'unseen' : null;
+}
+
+function useLeaveDeleted(activeID: string | null, newChat: () => void) {
+  const active = useLatest(activeID);
+  return useCallback((sessionID: string) => {
+    if (sessionID === active.current) newChat();
+  }, [active, newChat]);
+}
+
 export function ChatScreen({ connection, tabId, onUnauthorized }: Props) {
   const [view, setView] = useState<View>('chat');
   const hub = useEventHub(connection, onUnauthorized);
@@ -351,11 +392,11 @@ export function ChatScreen({ connection, tabId, onUnauthorized }: Props) {
   );
   const session = useChatSession(connection, hub, onUnauthorized, promote, tabId);
   useModelSync(modelStore, session.activeID, session.state.durable);
-  const history = useHistory(connection, hub, view === 'history', onUnauthorized);
+  const history = useHistory(connection, hub, onUnauthorized);
   const { activeID, open, newChat } = session;
+  const historyActivity = useHistoryActivity(history, view, activeID);
   // `open` and the open chat change together; History's callbacks read them through refs, so
   // they stay the same and its memoized rows skip re-rendering.
-  const active = useLatest(activeID);
   const latestOpen = useLatest(open);
 
   // Stable callbacks: the chat re-renders this screen on every streamed update, and History
@@ -372,13 +413,7 @@ export function ChatScreen({ connection, tabId, onUnauthorized }: Props) {
     },
     [latestOpen],
   );
-  const leaveDeleted = useCallback(
-    (sessionID: string) => {
-      // Leave the chat first, so its deletion is not reported as a surprise.
-      if (sessionID === active.current) newChat();
-    },
-    [active, newChat],
-  );
+  const leaveDeleted = useLeaveDeleted(activeID, newChat);
 
   // History is a child of the chat: it slides in from the right and back out to it. It is built
   // fresh on each open (its list's entrance wave plays every time) and kept only while it slides
@@ -401,6 +436,7 @@ export function ChatScreen({ connection, tabId, onUnauthorized }: Props) {
             hub={hub}
             onUnauthorized={onUnauthorized}
             active={view === 'chat'}
+            historyActivity={historyActivity}
             onHistory={() => setView('history')}
             onNewChat={startNewChat}
           />
