@@ -3,6 +3,7 @@ import { cn } from 'cn';
 import { Button } from '@/components/ui/button';
 import { Icon } from '@/components/ui/icon';
 import { Input } from '@/components/ui/input';
+import { TooltipTrigger } from '@/components/ui/tooltip';
 import { displayTitle, isUntitled, relativeTime, type ChatSummary } from '@/lib/opencode/sessions';
 
 type Props = {
@@ -86,26 +87,24 @@ function RowActions({ title, confirming, onRename, onAskDelete, onConfirmDelete,
         className={cn('col-start-1 row-start-1 transition-opacity duration-150', confirming ? 'opacity-0' : 'opacity-100')}
       >
         <div className="flex items-center">
-          <Button
+          <TooltipTrigger label="Rename"><Button
             variant="ghost"
             size="icon"
             className="transition-none"
             aria-label={`Rename ${title}`}
-            title="Rename"
             onClick={onRename}
           >
             <Icon name="edit" className="size-4.5" />
-          </Button>
-          <Button
+          </Button></TooltipTrigger>
+          <TooltipTrigger label="Delete"><Button
             variant="ghost"
             size="icon"
             className="transition-none text-destructive hover:bg-destructive/10 hover:text-destructive"
             aria-label={`Delete ${title}`}
-            title="Delete"
             onClick={onAskDelete}
           >
             <Icon name="delete" className="size-4.5" />
-          </Button>
+          </Button></TooltipTrigger>
         </div>
       </div>
       <div
@@ -115,27 +114,25 @@ function RowActions({ title, confirming, onRename, onAskDelete, onConfirmDelete,
           confirming ? 'opacity-100' : 'opacity-0',
         )}
       >
-        <Button
+        <TooltipTrigger label="Cancel"><Button
           ref={cancel}
           variant="ghost"
           size="icon"
           className="transition-none"
           aria-label={`Cancel deleting ${title}`}
-          title="Cancel"
           onClick={onCancelDelete}
         >
           <Icon name="close" className="size-4.5" />
-        </Button>
-        <Button
+        </Button></TooltipTrigger>
+        <TooltipTrigger label="Confirm delete"><Button
           variant="destructive"
           size="icon"
           className="transition-none"
           aria-label={`Confirm delete ${title}`}
-          title="Delete"
           onClick={onConfirmDelete}
         >
           <Icon name="check" className="size-4.5" />
-        </Button>
+        </Button></TooltipTrigger>
       </div>
     </div>
   );
@@ -178,10 +175,9 @@ export const HistoryRow = memo(function HistoryRow({ chat, active, activity, now
         onClick={() => onOpen(chat.id)}
       >
         <span className={cn('min-w-0 flex-1 truncate', isUntitled(chat.title) && 'text-text-secondary')}>{title}</span>
-        {activity === 'running' && <span role="status" aria-label="Chat running"><Icon name="loader-circle" className="animate-spin text-text-secondary" /></span>}
         {activity === 'unseen' && <span role="status" aria-label="Unseen chat result" className="size-2 shrink-0 rounded-full bg-primary" />}
-        <span className="w-14 shrink-0 text-right text-xs tabular-nums text-text-tertiary select-none group-hover:invisible group-has-[:focus-visible]:invisible group-data-[confirming]:mr-9 group-data-[confirming]:invisible">
-          {relativeTime(chat.updated, now)}
+        <span className="flex w-14 shrink-0 justify-end text-right text-xs tabular-nums text-text-tertiary select-none group-hover:invisible group-has-[:focus-visible]:invisible group-data-[confirming]:mr-9 group-data-[confirming]:invisible">
+          {activity === 'running' ? <span role="status" aria-label="Chat running" className="inline-flex text-text-secondary"><Icon name="loader-circle" strokeWidth={1.5} className="size-4 origin-center animate-spin [transform-box:view-box]" /></span> : relativeTime(chat.updated, now)}
         </span>
       </Button>
       <RowActions

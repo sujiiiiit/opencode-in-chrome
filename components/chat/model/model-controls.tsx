@@ -58,7 +58,7 @@ export function ModelControls({ controls, pending = false }: Props) {
           render={<Button
           variant="ghost"
           size="sm"
-          className="min-w-0 max-w-[12rem] shrink justify-start text-[13px]"
+          className="min-w-0 max-w-[12rem] shrink justify-start gap-1 text-[13px]"
           data-slot="model-chip"
           aria-label={controls.model.label ? `Model: ${controls.model.label.model}${variant.options.length > 1 ? `, effort: ${variant.current}` : ''}` : 'Choose model'}
           />}

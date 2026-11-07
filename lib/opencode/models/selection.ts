@@ -18,6 +18,7 @@ import type { ModelPreferences } from './preferences';
 import { configuredVariant, resolveVariant } from './variant';
 
 const SELECTION_KEY = 'opencode.modelSelection';
+const lastChoiceKey = (baseUrl: string) => `opencode.lastModelChoice:${encodeURIComponent(baseUrl)}`;
 
 /** A model and its variant (null: "default" chosen explicitly; undefined: never chosen). */
 export type Choice = { model?: ModelKey; variant?: string | null };
@@ -158,6 +159,17 @@ function parseChoice(value: unknown): Choice | undefined {
     : undefined;
   const variant = typeof value.variant === 'string' || value.variant === null ? value.variant : undefined;
   return { model, variant };
+}
+
+/** The last model and effort explicitly chosen for a new chat on this server. */
+export async function loadLastChoice(baseUrl: string): Promise<Choice | undefined> {
+  const key = lastChoiceKey(baseUrl);
+  const choice = parseChoice((await browser.storage.local.get(key))[key]);
+  return choice?.model ? choice : undefined;
+}
+
+export async function saveLastChoice(baseUrl: string, choice: Choice): Promise<void> {
+  await browser.storage.local.set({ [lastChoiceKey(baseUrl)]: choice });
 }
 
 function parseSelectionState(value: unknown): SelectionState | undefined {

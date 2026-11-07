@@ -10,7 +10,7 @@ const SPEED = 45;
  * only); JS just measures the overflow when the box or text resizes, and writes it to two
  * custom properties, so nothing re-renders and nothing runs per frame (see `.marquee` in global.css).
  */
-export function MarqueeTitle({ title, className, children }: { title: string; className?: string; children: ReactNode }) {
+export function MarqueeTitle({ title, className, children, showTitle = true }: { title: string; className?: string; children: ReactNode; showTitle?: boolean }) {
   const box = useRef<HTMLHeadingElement>(null);
 
   useEffect(() => {
@@ -35,7 +35,7 @@ export function MarqueeTitle({ title, className, children }: { title: string; cl
   }, [title]);
 
   return (
-    <h1 ref={box} className={cn('marquee', className)} title={title}>
+    <h1 ref={box} className={cn('marquee', className)} title={showTitle ? title : undefined}>
       {children}
     </h1>
   );

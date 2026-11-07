@@ -3,6 +3,7 @@ import { cn } from 'cn';
 import { Button } from '@/components/ui/button';
 import { Icon } from '@/components/ui/icon';
 import { Input } from '@/components/ui/input';
+import { TooltipTrigger } from '@/components/ui/tooltip';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { filterByTitle, normalizeSearch, type HistoryState, type HistoryStore } from '@/lib/opencode/history';
 import { groupByDay, type ChatSummary } from '@/lib/opencode/sessions';
@@ -204,13 +205,12 @@ function SearchField({ value, busy, onChange }: SearchFieldProps) {
           value={value}
           onChange={(event) => onChange(event.target.value)}
         />
-        <Icon
-          name="loader"
+        <span
           className={cn(
-            'pointer-events-none absolute top-1/2 right-3 -translate-y-1/2 animate-spin text-muted-foreground transition-opacity',
+            'pointer-events-none absolute top-1/2 right-3 -translate-y-1/2 text-muted-foreground transition-opacity',
             busy ? 'opacity-100 delay-150 duration-200' : 'opacity-0 duration-100',
           )}
-        />
+        ><span className="inline-flex size-4 items-center justify-center animate-spin"><Icon name="loader" /></span></span>
       </div>
     </div>
   );
@@ -278,13 +278,13 @@ export const HistoryView = memo(function HistoryView({
       }}
     >
       <header className="mx-auto flex w-full max-w-chat shrink-0 items-center gap-1 px-3 py-1.5">
-        <Button variant="ghost" size="icon-lg" aria-label="Back to chat" title="Back to chat" onClick={onBack}>
+        <TooltipTrigger label="Back to chat"><Button variant="ghost" size="icon-lg" aria-label="Back to chat" onClick={onBack}>
           <Icon name="arrow-left" />
-        </Button>
+        </Button></TooltipTrigger>
         <h1 className="flex-1 text-sm font-medium select-none">History</h1>
-        <Button variant="ghost" size="icon-lg" aria-label="New chat" title="New chat" onClick={onNewChat}>
+        <TooltipTrigger label="New chat"><Button variant="ghost" size="icon-lg" aria-label="New chat" onClick={onNewChat}>
           <Icon name="new-chat" />
-        </Button>
+        </Button></TooltipTrigger>
       </header>
       <SearchField value={query} busy={state.status === 'loading' && query.trim() !== ''} onChange={setQuery} />
       {state.notice && (

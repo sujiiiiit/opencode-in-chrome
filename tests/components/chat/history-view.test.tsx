@@ -98,15 +98,27 @@ describe('ChatScreen: history', () => {
     const { fake, user } = mount(fakeOpencode({ sessions: [loginChat] }));
     await waitFor(() => expect(fake.listQueries.length).toBeGreaterThan(0));
     fake.emit('session.execution.started', { sessionID: SESSION_ID });
-    await waitFor(() => expect(screen.getByRole('button', { name: 'History' })).toHaveAttribute('aria-description', 'Other chats running'));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'History' })).toHaveAttribute('aria-description', 'Chats running'));
     await openHistory(user);
-    expect(await screen.findByRole('status', { name: 'Chat running' })).toBeInTheDocument();
+    const running = await screen.findByRole('status', { name: 'Chat running' });
+    expect(running).toBeInTheDocument();
+    expect(running.parentElement).toHaveClass('w-14');
+    expect(running.querySelector('svg')).toHaveAttribute('stroke-width', '1.5');
     fake.emit('session.execution.succeeded', { sessionID: SESSION_ID });
     expect(await screen.findByRole('status', { name: 'Unseen chat result' })).toBeInTheDocument();
     await user.click(screen.getByText('Fix login redirect'));
     await waitFor(() => expect(screen.getByRole('button', { name: 'History' })).not.toHaveAttribute('aria-description'));
     await openHistory(user);
     expect(screen.queryByRole('status', { name: 'Unseen chat result' })).not.toBeInTheDocument();
+  });
+
+  it('shows activity in the history button for the currently open chat', async () => {
+    await remember(SESSION_ID);
+    const { fake } = mount(fakeOpencode({ sessions: [loginChat] }));
+    await waitFor(() => expect(fake.listQueries.length).toBeGreaterThan(0));
+    fake.emit('session.execution.started', { sessionID: SESSION_ID });
+    await waitFor(() => expect(screen.getByRole('button', { name: 'History' })).toHaveAttribute('aria-description', 'Chats running'));
+    expect(screen.getByRole('button', { name: 'History' }).querySelector('svg')).toHaveAttribute('stroke-width', '1.5');
   });
 
   it('lists only the extension’s chats, grouped by day', async () => {

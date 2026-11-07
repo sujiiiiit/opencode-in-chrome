@@ -5,7 +5,7 @@ import { EventHub } from '@/lib/opencode/events';
 import { buildControls } from '@/lib/opencode/models/controls';
 import { ModelStore } from '@/lib/opencode/models/model-store';
 import { loadPreferences, savePreferences } from '@/lib/opencode/models/preferences';
-import { loadSavedSelections } from '@/lib/opencode/models/selection';
+import { loadLastChoice, loadSavedSelections } from '@/lib/opencode/models/selection';
 import { fakeOpencode, type FakeOpencodeOptions } from '@/tests/support/queue-server';
 import { BASE, MODELS, PROVIDERS, SESSION_ID, TOKEN, jsonResponse, modelInfo, unauthorized } from '@/tests/support/testkit';
 
@@ -280,6 +280,34 @@ describe('sessions', () => {
     store.focus('ses_other');
     store.focus(null);
     expect(store.getState().draft).toBeUndefined();
+    expect(current(store)).toEqual(['build', 'anthropic/claude-sonnet-5-5', 'default']);
+  });
+
+  it('restores the last chosen model and effort in a new panel and new chat', async () => {
+    const first = await setup();
+    first.store.focus(SESSION_ID);
+    first.store.setModel(OPUS, { recent: true });
+    first.store.setVariant('high');
+    await vi.waitFor(async () => expect(await loadLastChoice(BASE)).toEqual({ model: OPUS, variant: 'high' }));
+    first.store.focus(null);
+    expect(current(first.store)).toEqual(['build', 'anthropic/claude-opus-5-5', 'high']);
+    const second = await setup();
+    expect(current(second.store)).toEqual(['build', 'anthropic/claude-opus-5-5', 'high']);
+    expect(await loadLastChoice('http://127.0.0.1:1')).toBeUndefined();
+  });
+
+  it('uses the most recent available model when upgrading from older saved preferences', async () => {
+    await savePreferences({ user: [], favorite: [], recent: [{ providerID: 'gone', modelID: 'missing' }, SONNET] });
+    const { store } = await setup();
+    expect(current(store)).toEqual(['build', 'anthropic/claude-sonnet-5-5', 'default']);
+  });
+
+  it('keeps an existing chat’s server model when a last choice exists', async () => {
+    const { store } = await setup();
+    store.setModel(OPUS);
+    store.focus(SESSION_ID);
+    store.setDurable(SESSION_ID, { agent: 'build', model: FLINT });
+    expect(current(store)[1]).toBe('opencode/flint-40b-free');
   });
 
   it('persists session selections and forgets deleted sessions', async () => {

@@ -29,10 +29,12 @@ import {
 } from './preferences';
 import {
   fromDurable,
+  loadLastChoice,
   loadSavedSelections,
   resolveSelection,
   sameSelection,
   saveSelections,
+  saveLastChoice,
   type Choice,
   type DurableSelection,
   type ResolveInput,
@@ -63,6 +65,8 @@ export type ModelState = {
   saved: Record<string, SelectionState>;
   /** The new chat's selection, until its first send creates the session. */
   draft: SelectionState | undefined;
+  /** Last model and effort explicitly selected, used to seed new chats. */
+  lastChoice?: Choice;
   /** The server's agent and model for the chat on screen. */
   durable: DurableSelection | undefined;
   notice: string | null;
@@ -119,9 +123,11 @@ const plain = (model: ModelKey): ModelKey => ({ providerID: model.providerID, mo
 
 /** The resolver's input for a state (the live catalog, else the cached one while loading). */
 export function resolveInput(state: ModelState): ResolveInput {
-  const scope = state.sessionID ? state.saved[state.sessionID] : state.draft;
+  const catalog = state.catalog ?? state.cached;
+  const recent = state.prefs.recent.find((model) => isValidModel(catalog, model));
+  const scope = state.sessionID ? state.saved[state.sessionID] : (state.draft ?? state.lastChoice ?? (recent && { model: recent }));
   return {
-    catalog: state.catalog ?? state.cached,
+    catalog,
     agents: state.agents,
     configured: state.configured,
     prefs: state.prefs,
@@ -145,6 +151,7 @@ export class ModelStore extends Store<ModelState> {
   private reloadTimer: ReturnType<typeof setTimeout> | undefined;
   /** The preference writes, one after another. */
   private saving: Promise<void> = Promise.resolve();
+  private savingChoice: Promise<void> = Promise.resolve();
 
   constructor(private readonly options: ModelStoreOptions) {
     super(INITIAL_MODEL_STATE);
@@ -181,13 +188,14 @@ export class ModelStore extends Store<ModelState> {
     if (this.disposed) return;
     this.set({ error: null, phase: 'loading' });
     try {
-      const [prefs, saved, cached] = await Promise.all([
+      const [prefs, saved, cached, lastChoice] = await Promise.all([
         loadPreferences().catch(() => EMPTY_PREFERENCES),
         loadSavedSelections(this.baseUrl).catch(() => ({})),
         this.state.cached ? Promise.resolve(this.state.cached) : loadCachedCatalog(this.baseUrl).catch(() => null),
+        loadLastChoice(this.baseUrl).catch(() => undefined),
       ]);
       // Selections made before storage answered win over the stored ones.
-      this.set((state) => ({ prefs, saved: { ...saved, ...state.saved }, cached }));
+      this.set((state) => ({ prefs, saved: { ...saved, ...state.saved }, cached, lastChoice: state.lastChoice ?? lastChoice }));
       await this.fetchCatalog();
       this.set({ phase: 'ready', error: null });
     } catch (error) {
@@ -342,6 +350,15 @@ export class ModelStore extends Store<ModelState> {
       .catch(() => this.notify("Couldn't save your model choices. They will reset when the browser restarts."));
   }
 
+  private rememberLastChoice(): void {
+    const { model, variant } = this.resolved();
+    if (!model) return;
+    const lastChoice = { model: plain(model), variant: variant ?? null };
+    this.set({ lastChoice });
+    this.savingChoice = this.savingChoice.then(() => saveLastChoice(this.baseUrl, lastChoice))
+      .catch(() => this.notify("Couldn't save your model choices. They will reset when the browser restarts."));
+  }
+
   /**
    * Chooses a model. The same model keeps its variant; another model starts from its configured
    * variant, else its default. `recent`: picked from the picker, so it joins the recent list.
@@ -351,7 +368,10 @@ export class ModelStore extends Store<ModelState> {
     const previous = this.resolved();
     const same = sameModel(previous.model, model);
     this.write({ model: model && plain(model), variant: same ? (previous.variant ?? null) : undefined });
-    if (model) this.chosen(model, same, options.recent);
+    if (model) {
+      this.chosen(model, same, options.recent);
+      this.rememberLastChoice();
+    }
   }
 
   /** After choosing a model: pin a session's variant, show the model in the picker, list it as recent. */
@@ -369,6 +389,7 @@ export class ModelStore extends Store<ModelState> {
     const model = this.resolved().model;
     if (!model || this.state.phase !== 'ready') return;
     this.write({ model: plain(model), variant: value ?? null });
+    this.rememberLastChoice();
   }
 
   /** default → first variant → … → last → default. */

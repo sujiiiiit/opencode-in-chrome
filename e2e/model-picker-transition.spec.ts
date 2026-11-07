@@ -1,6 +1,17 @@
 import { expect, test } from './fixtures';
 import { AGENTS, CONFIG, PROVIDERS } from '../tests/support/testkit';
 
+test('header buttons share a tooltip', async ({ connect, context, extensionId }) => {
+  await connect();
+  const page = await context.newPage();
+  await page.goto(`chrome-extension://${extensionId}/sidepanel.html`);
+  await page.getByRole('button', { name: 'Settings' }).hover();
+  await expect(page.locator('[data-slot="tooltip"]')).toHaveText('Settings');
+  await page.getByRole('button', { name: 'History' }).hover();
+  await expect(page.locator('[data-slot="tooltip"]')).toHaveText('History');
+  await expect(page.locator('[data-slot="tooltip"]')).toHaveCount(1);
+});
+
 test('model picker animates open and closes from its trigger', async ({ connect, context, extensionId }) => {
   await connect();
   const page = await context.newPage();

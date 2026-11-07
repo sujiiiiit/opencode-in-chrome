@@ -74,7 +74,7 @@ describe('MessageList', () => {
         turn('m2', 'two', reply('interrupted')),
       ],
     });
-    expect(screen.getByText(`Model error: ${PROVIDER_ERROR.message}`)).toBeInTheDocument();
+    expect(document.querySelector('[data-slot="assistant-error"]')).toHaveTextContent(`Model error: ${PROVIDER_ERROR.message}`);
     expect(screen.getByText('Stopped before the reply finished.')).toBeInTheDocument();
   });
 
