@@ -26,8 +26,6 @@ export type BridgeOptions = {
   directory?: (connection: Connection) => Promise<string>;
   now?: () => number;
   onState?: (state: BridgeState) => void;
-  /** Runs before the ticket request for a server (installs the Origin rule in the extension). */
-  beforeConnect?: (baseUrl: string) => Promise<void>;
 };
 
 /**
@@ -143,7 +141,6 @@ export class Bridge {
   private async issueTicket(): Promise<{ connection: Connection; ticket: string; directory: string } | null> {
     const connection = await (this.options.loadConnection ?? loadConnection)();
     if (!connection || tokenExpiry(connection.token) <= (this.options.now ?? Date.now)()) return null;
-    await this.options.beforeConnect?.(connection.baseUrl);
     const client = createClient({ baseUrl: connection.baseUrl, token: connection.token, fetch: this.options.fetch });
     const directory = await (this.options.directory ?? ((c) => ensureWorkspace(client, c.baseUrl)))(connection);
     const issued = await client.experimental.mcp.client.token({

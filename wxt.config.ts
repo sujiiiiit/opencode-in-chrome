@@ -35,9 +35,6 @@ export default defineConfig({
     // scripting + webNavigation for page snapshots in every frame; alarms keep the
     // tool bridge alive; downloads saves GIF recordings (encoded in the worker).
     // Chrome does not allow `debugger` as an optional permission, so it is required.
-    // declarativeNetRequestWithHostAccess removes the extension's Origin header on its own
-    // client-MCP requests to the paired server (lib/browser/origin-rule.ts); with
-    // <all_urls> already granted it adds no install warning.
     permissions: [
       'storage',
       'sidePanel',
@@ -49,7 +46,6 @@ export default defineConfig({
       'webNavigation',
       'alarms',
       'downloads',
-      'declarativeNetRequestWithHostAccess',
     ],
     // Pages in any site are scripted for the browser agent; the opencode server
     // itself stays loopback-only (lib/opencode/link.ts).
