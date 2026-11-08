@@ -36,6 +36,18 @@ gives you structural context (callers, dependents, test coverage) that file sear
 | `get_architecture_overview_tool` | Understanding high-level codebase structure |
 | `refactor_tool` | Planning renames, finding dead code |
 
+### Token budget rules
+
+- First call for any code task: `get_minimal_context_tool(task="...")` (~100 tokens); it suggests the next tool.
+- Pass `detail_level="minimal"` wherever accepted; keep `max_results`/`limit` small and widen only when output says `truncated`.
+- Prefer one targeted `query_graph_tool` (`callers_of`, `tests_for`, `file_summary`, ...) over listing tools; ~5 graph calls per task, then read only the needed line ranges.
+
+### Model selection: small models for small work
+
+- Lookups ("where/who calls/which tests"): Agent `graph-lookup` (haiku). Broad sweeps: `Explore` (haiku).
+- Small, well-specified edits (1-3 files): Agent `small-edit` (sonnet). Give exact files, symbols and expected outcome.
+- Keep design, cross-cutting refactors, unclear debugging and reviews in the main session.
+
 ### Workflow
 
 1. The graph auto-updates on file changes (via hooks).
