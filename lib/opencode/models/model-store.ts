@@ -148,7 +148,6 @@ export class ModelStore extends Store<ModelState> {
   private readonly pending = new Map<string, SelectionState>();
   private resolvedFor: ModelState | null = null;
   private resolvedCache: Resolved | null = null;
-  private reloadTimer: ReturnType<typeof setTimeout> | undefined;
   /** The preference writes, one after another. */
   private saving: Promise<void> = Promise.resolve();
   private savingChoice: Promise<void> = Promise.resolve();
@@ -157,14 +156,7 @@ export class ModelStore extends Store<ModelState> {
     super(INITIAL_MODEL_STATE);
     const { connection, fetch } = options;
     this.client = createClient({ baseUrl: connection.baseUrl, token: connection.token, fetch });
-    const events = options.events;
-    if (events) {
-      this.cleanups.push(
-        events.subscribe(this.onEvent),
-        () => clearTimeout(this.reloadTimer),
-        events.onReconnect(() => (this.state.phase === 'ready' ? this.fetchCatalog().catch(() => undefined) : Promise.resolve())),
-      );
-    }
+    this.follow(options.events, this.onEvent, () => (this.state.phase === 'ready' ? this.fetchCatalog().catch(() => undefined) : Promise.resolve()));
     this.cleanups.push(
       watchPreferences((prefs) => {
         if (JSON.stringify(prefs) !== JSON.stringify(this.state.prefs)) this.set({ prefs });
@@ -230,11 +222,9 @@ export class ModelStore extends Store<ModelState> {
   /** Reloads the catalog once a burst of catalog events settles (connecting fires several). */
   private scheduleCatalogReload(): void {
     if (this.state.phase !== 'ready') return;
-    clearTimeout(this.reloadTimer);
-    this.reloadTimer = setTimeout(() => {
-      if (!this.disposed) this.fetchCatalog().catch(() => undefined);
-    }, CATALOG_RELOAD_MS);
+    this.debounce(() => void this.fetchCatalog().catch(() => undefined), CATALOG_RELOAD_MS);
   }
+
 
   private onEvent = (event: ServerEvent): void => {
     if (CATALOG_EVENTS.has(event.type)) return this.scheduleCatalogReload();

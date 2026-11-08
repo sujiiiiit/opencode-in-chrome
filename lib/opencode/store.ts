@@ -1,3 +1,6 @@
+import type { EventHub } from './events';
+import type { ServerEvent } from './sse';
+
 /**
  * An external store for React's `useSyncExternalStore`: immutable state, change listeners, an
  * abort signal for in-flight requests, and cleanups that run once on dispose.
@@ -10,6 +13,7 @@ export abstract class Store<S extends { notice: string | null }> {
   protected readonly cleanups: Array<() => void> = [];
   protected disposed = false;
   private running: Promise<void> | null = null;
+  private debounceTimer: ReturnType<typeof setTimeout> | undefined;
 
   protected constructor(initial: S) {
     this.state = initial;
@@ -32,6 +36,20 @@ export abstract class Store<S extends { notice: string | null }> {
   protected once(task: () => Promise<void>): Promise<void> {
     this.running ??= task().finally(() => (this.running = null));
     return this.running;
+  }
+
+  /** Follows the panel's event stream: `onEvent` for each event, `resync` after a reconnect. */
+  protected follow(events: EventHub | undefined, onEvent: (event: ServerEvent) => void, resync: () => Promise<void>): void {
+    if (!events) return;
+    this.cleanups.push(events.subscribe(onEvent), () => clearTimeout(this.debounceTimer), events.onReconnect(resync));
+  }
+
+  /** Runs `task` once a burst of calls settles for `ms` (a later call restarts the wait). */
+  protected debounce(task: () => void, ms: number): void {
+    clearTimeout(this.debounceTimer);
+    this.debounceTimer = setTimeout(() => {
+      if (!this.disposed) task();
+    }, ms);
   }
 
   dismissNotice(): void {
