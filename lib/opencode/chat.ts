@@ -33,6 +33,7 @@ import {
   type Timeline,
 } from './timeline';
 import { ensureWorkspace } from './workspace';
+import type { PromptRefs } from './mentions';
 import type { PermissionRequest } from '@opencode/client';
 import type { PermissionMode } from './permission-mode';
 
@@ -145,10 +146,19 @@ function parseAck(ack: unknown, local: LocalPrompt): PendingPrompt {
 /** The panel's own copy of the files, else the echo's: it carries the same bytes again. */
 const ackFiles = (local: LocalPrompt, payload: Record<string, unknown>) => local.files ?? parseSentFiles(payload.files);
 
-/** A steer's request: exactly the user's text, plus its attachments when there are any. */
-function promptBody(sessionID: string, local: LocalPrompt, files: readonly PromptFile[] = []) {
+/**
+ * A steer's request: exactly the user's text, plus its attachments and mentions when there are any
+ * (a mentioned file travels with the attachments, its `mention` marking where it sits in the text).
+ */
+function promptBody(sessionID: string, local: LocalPrompt, files: readonly PromptFile[] = [], refs?: PromptRefs) {
   const body = { sessionID, id: local.id, text: local.text, delivery: 'steer' as const };
-  return files.length ? { ...body, files } : body;
+  const all = [...files, ...(refs?.files ?? [])];
+  return {
+    ...body,
+    ...(all.length ? { files: all } : {}),
+    ...(refs?.agents.length ? { agents: refs.agents } : {}),
+    ...(refs?.skills.length ? { skills: refs.skills } : {}),
+  };
 }
 
 /**
@@ -756,25 +766,70 @@ export class ChatSession extends Store<ChatState> {
     return local;
   }
 
-  async submit(text: string, id: string = createMessageID(), selection?: Selection, files?: readonly PromptFile[]): Promise<boolean> {
+  async submit(
+    text: string,
+    id: string = createMessageID(),
+    selection?: Selection,
+    files?: readonly PromptFile[],
+    refs?: PromptRefs,
+  ): Promise<boolean> {
     const local = this.localForSubmit(id, text, files);
     if (!local) return false;
     try {
-      await this.browserOpening;
-      const { sessionID, created } = await this.ensureSession(selection);
-      if (selection && !created) await this.applySelection(sessionID, selection);
-      await this.options.beforePrompt?.();
+      const sessionID = await this.readyToSend(selection);
       const ack: unknown = await this.client.session.prompt(
-        promptBody(sessionID, local, files) as never,
+        promptBody(sessionID, local, files, refs) as never,
         { signal: this.signal },
       );
       this.admit(ack, local);
       return true;
     } catch (error) {
-      if (!this.disposed && !this.unauthorized(error)) this.set({ notice: describeError(error) });
+      this.sendFailed(error);
       return false;
     } finally {
       this.set((state) => ({ submitting: false, local: state.local.filter((p) => p.id !== local.id) }));
+    }
+  }
+
+  /**
+   * Gets the chat ready for a send: the browser session attached, the session created (on a new
+   * chat) or switched to `selection`, and the caller's pre-prompt step done. Returns the session.
+   */
+  private async readyToSend(selection: Selection | undefined): Promise<string> {
+    await this.browserOpening;
+    const { sessionID, created } = await this.ensureSession(selection);
+    if (selection && !created) await this.applySelection(sessionID, selection);
+    await this.options.beforePrompt?.();
+    return sessionID;
+  }
+
+  /** A failed send says why, unless the chat is gone or the pairing was rejected. */
+  private sendFailed(error: unknown): void {
+    if (!this.disposed && !this.unauthorized(error)) this.set({ notice: describeError(error) });
+  }
+
+  /** The workspace this chat's paths are relative to; null until the chat loads. */
+  get workspace(): string | null {
+    return this.directory;
+  }
+
+  /**
+   * Runs one of the server's slash commands (`/name args`) in this chat, creating the session on a
+   * new chat's first send. The server adds the command's own prompt to the conversation, so no
+   * local bubble is staged. Returns false when nothing was sent.
+   */
+  async command(name: string, args: string, selection?: Selection, files?: readonly PromptFile[]): Promise<boolean> {
+    if (this.disposed || this.state.phase !== 'ready' || this.state.submitting) return false;
+    this.set({ submitting: true, notice: null });
+    try {
+      const sessionID = await this.readyToSend(selection);
+      await this.client.session.command({ sessionID, name, text: args, ...(files?.length ? { files } : {}) }, { signal: this.signal });
+      return true;
+    } catch (error) {
+      this.sendFailed(error);
+      return false;
+    } finally {
+      this.set({ submitting: false });
     }
   }
 

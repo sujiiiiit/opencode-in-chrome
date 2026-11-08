@@ -1,6 +1,7 @@
 import { useImperativeHandle, useRef, useState, type ClipboardEvent, type DragEvent, type FormEvent, type Ref } from 'react';
 import { isFileDrag, pastedFiles } from '@/lib/transfer-files';
-import { caretToEnd, insertPlainText, placeCaretAt, readText } from './editor-dom';
+import type { MentionItem, MentionKind, PlacedMention } from '@/lib/opencode/mentions';
+import { caretToEnd, insertChip, insertPlainText, placeCaretAt, readChips, readText } from './editor-dom';
 
 export type PromptBoxHandle = {
   /** Replaces the draft (reported through `onChange`), optionally focusing with the caret at the end. */
@@ -8,6 +9,10 @@ export type PromptBoxHandle = {
   focus: () => void;
   /** Where the text's first line starts on screen (for the send flight); null with no editor. */
   textOrigin: () => { left: number; top: number } | null;
+  /** The chips in the draft (agents, skills, files, a command), with their offsets in its text. */
+  mentions: () => PlacedMention[];
+  /** Puts a chip at the caret (at the end when the editor is not focused) and focuses the editor. */
+  insertMention: (item: MentionItem) => void;
 };
 
 /** The top-left of the editor's text, kept inside its scroll viewport when the text is scrolled. */
@@ -55,6 +60,13 @@ export function usePlainTextEditor(
       if (editor.current) focusEnd(editor.current);
     },
     textOrigin: () => (editor.current ? textOrigin(editor.current) : null),
+    mentions: () =>
+      editor.current
+        ? readChips(editor.current).map(({ kind, name, path, label, start, end }) => ({ kind: kind as MentionKind, name, path, start, end, text: label }))
+        : [],
+    insertMention: (item) => {
+      if (editor.current) insertChip(editor.current, { kind: item.kind, name: item.name, label: item.label, path: item.path });
+    },
   }));
 
   const onInput = () => {

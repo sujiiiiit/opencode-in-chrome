@@ -35,6 +35,8 @@ import { PermissionMenu } from './prompt-box/permission-menu';
 import { AttachmentStrip } from './prompt-box/attachment-strip';
 import { PromptBox, type PromptBoxHandle } from './prompt-box/prompt-box';
 import { useChatSession, useComposer, useEventHub, useHistory, useLatest } from './use-chat';
+import { useMentions } from './use-mentions';
+import type { MentionItem } from '@/lib/opencode/mentions';
 import { SubagentTabs, useSubagentPath, type SubagentPath } from './subagent-tabs';
 
 type Props = {
@@ -271,22 +273,38 @@ type ChatComposerProps = {
   question: ReactNode;
   /** A subagent's chat is open: the box shows its requests or status, and the chips fold away. */
   subagent: boolean;
+  mentions: ReturnType<typeof useMentions>;
 };
 
 /**
  * The prompt box with its attach menu, attached images and model chips, and the drop zone that
  * covers the whole pane (the overlay is placed against the pane, its nearest positioned box).
  */
-function ChatComposer({ box, composer, models, active, question, subagent }: ChatComposerProps) {
+function ChatComposer({ box, composer, models, active, question, subagent, mentions }: ChatComposerProps) {
   // History, sliding over the chat, takes no drops; nor does a subagent's chat (no editor shows).
   const panelActive = useTabPanelActive();
   const dragging = useFileDrop(composer.addFiles, active && panelActive && !subagent);
+  const source = mentions.source;
+  const loadMentions = useCallback(() => source?.load(), [source]);
+  const addSkill = useCallback((skill: MentionItem) => box.current?.insertMention(skill), [box]);
   return (
     <>
       <DropOverlay visible={dragging} />
       <PromptBox
         ref={box}
-        controls={<><AttachMenu onFiles={composer.addFiles} /><PermissionMenu /></>}
+        mentions={source}
+        controls={
+          <>
+            <AttachMenu
+              onFiles={composer.addFiles}
+              onOpen={loadMentions}
+              skills={mentions.catalog.skills}
+              loading={!!source?.loading}
+              onSkill={addSkill}
+            />
+            <PermissionMenu />
+          </>
+        }
         footer={<ComposerFooter models={models} />}
         footerHidden={subagent}
         attachments={<AttachmentStrip images={composer.images} onRemove={composer.removeImage} />}
@@ -331,11 +349,13 @@ const moveAside = (chat: ChatSession | null) => chat?.moveToBackground() ?? Prom
 function ChatPane({ connection, session, models, hub, onUnauthorized, active, onHistory, onNewChat, historyActivity }: ChatPaneProps) {
   const { chat, state, activeID } = session;
   const box = useRef<PromptBoxHandle>(null);
+  const mentions = useMentions(connection, hub, onUnauthorized);
   const composer = useComposer({
     chat,
     state,
     box,
     models: { store: models.store, controls: models.controls, phase: models.state.phase },
+    commands: mentions.catalog.commands,
   });
   const store = models.store;
   const picker = usePicker(models);
@@ -352,7 +372,7 @@ function ChatPane({ connection, session, models, hub, onUnauthorized, active, on
         <div className="mx-auto w-full max-w-chat"><PaneNotice session={session} models={models} /></div>
       </SessionBranch>
       <div className="mx-auto w-full max-w-chat shrink-0">
-        <ChatComposer box={box} composer={composer} models={models} active={active} question={question} subagent={!!nav.child} />
+        <ChatComposer box={box} composer={composer} models={models} active={active} question={question} subagent={!!nav.child} mentions={mentions} />
       </div>
       {store && (
         <ModelPicker store={store} state={models.state} onClose={() => picker.onOpenChange(false)} />

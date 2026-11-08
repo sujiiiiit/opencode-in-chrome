@@ -42,6 +42,28 @@ describe('PromptBox editor', () => {
     expect(screen.getByText('Add a follow-up…')).toBeInTheDocument();
   });
 
+  it('cycles empty prompt hints, pauses for a follow-up, and hides while typing', () => {
+    vi.useFakeTimers();
+    try {
+      const { rerender, ref } = setup();
+      act(() => vi.advanceTimersByTime(3000));
+      expect(screen.getByText('Ask opencode')).toHaveAttribute('data-visible', 'false');
+      act(() => vi.advanceTimersByTime(250));
+      expect(screen.getByText('Type / for commands and skills')).toHaveAttribute('data-visible', 'true');
+      act(() => vi.advanceTimersByTime(3250));
+      expect(screen.getByText('Type @ to mention agents and files')).toBeInTheDocument();
+      rerender({ placeholder: 'Add a follow-up…' });
+      act(() => vi.advanceTimersByTime(10000));
+      expect(screen.getByText('Add a follow-up…')).toHaveAttribute('data-visible', 'true');
+      act(() => ref.current!.setText('hello'));
+      expect(document.querySelector('[data-slot="prompt-placeholder"]')).toBeNull();
+      act(() => ref.current!.setText(''));
+      expect(screen.getByText('Add a follow-up…')).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('reports the draft as it changes and hides the placeholder', async () => {
     const { onChange } = setup();
     await userEvent.setup().type(box(), 'hi');

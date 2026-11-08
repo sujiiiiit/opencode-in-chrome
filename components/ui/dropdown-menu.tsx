@@ -36,7 +36,7 @@ function ItemContent({
 
   return (
     <>
-      {icon && <span className="[&_svg:not([class*='size-'])]:size-[15px] text-text-secondary">{icon}</span>}
+      {icon && <span className="[&_svg:not([class*='size-'])]:size-4 text-text-secondary">{icon}</span>}
       {hasRow && (
         <ItemRow text={text} subtext={subtext} shortcut={shortcut} badge={badge} />
       )}
@@ -230,16 +230,16 @@ function DropdownMenuSubContent({
 
 // ─── Label ─────────────────────────────────────────────────────────────────
 
+/** A group heading's look, shared with lists styled like this menu (the composer's mention list). */
+const labelCn = 'text-muted-foreground pointer-events-none px-2 py-1.5 text-xs select-none data-inset:pl-7';
+
 function DropdownMenuLabel({
   className,
   inset,
   ...props
 }: MenuPrimitive.GroupLabel.Props & { inset?: boolean }) {
   const insideGroup = React.useContext(DropdownMenuGroupContext);
-  const labelClassName = cn(
-    'text-muted-foreground pointer-events-none px-2 py-1.5 text-xs select-none data-inset:pl-7',
-    className
-  );
+  const labelClassName = cn(labelCn, className);
 
   // Base UI's GroupLabel registers its id for the group's aria-labelledby and
   // throws without a <Menu.Group> ancestor. A standalone label is just a static
@@ -437,6 +437,7 @@ function DropdownMenuRadioItem({
 
 export {
   itemCn,
+  labelCn,
   ItemContent,
   DropdownMenu,
   DropdownMenuPortal,

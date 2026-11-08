@@ -6,6 +6,7 @@ import type { Connection } from '@/lib/opencode/connection';
 import { EventHub } from '@/lib/opencode/events';
 import { HistoryStore, INITIAL_HISTORY_STATE } from '@/lib/opencode/history';
 import { createMessageID } from '@/lib/opencode/ids';
+import { hasRefs, promptRefs, slashCommand, trimMentions, type MentionItem, type PromptRefs } from '@/lib/opencode/mentions';
 import { NO_MODEL_MESSAGE } from '@/lib/opencode/client';
 import type { ModelControls } from '@/lib/opencode/models/controls';
 import type { ModelStore } from '@/lib/opencode/models/model-store';
@@ -249,15 +250,29 @@ function messageID(retry: Retry | null, text: string, selection: string): string
  */
 async function submitPrompt(
   chat: ChatSession,
-  prompt: { text: string; id: string; selection: Selection | undefined; images: readonly ImageAttachment[] },
+  prompt: { text: string; id: string; selection: Selection | undefined; images: readonly ImageAttachment[]; refs?: PromptRefs },
   notify: (message: string) => void,
 ): Promise<boolean> {
-  const files = await promptFiles(prompt.images).catch(() => null);
-  if (!files) {
-    notify("Couldn't read an attached image. Remove it and attach it again.");
-    return false;
-  }
-  return chat.submit(prompt.text, prompt.id, prompt.selection, files);
+  const files = await readImages(prompt.images, notify);
+  return !!files && chat.submit(prompt.text, prompt.id, prompt.selection, files, prompt.refs);
+}
+
+/** The images as prompt files; null (after saying why) when one can no longer be read. */
+async function readImages(images: readonly ImageAttachment[], notify: (message: string) => void) {
+  const files = await promptFiles(images).catch(() => null);
+  if (!files) notify("Couldn't read an attached image. Remove it and attach it again.");
+  return files;
+}
+
+/**
+ * What the draft's chips mean for the send: the slash command it runs, else the agents, skills and
+ * files it mentions (offsets are into the trimmed `text`).
+ */
+function readMentions(box: PromptBoxHandle | null, raw: string, text: string, commands: readonly MentionItem[] = [], directory: string | null) {
+  const placed = trimMentions(raw, box?.mentions() ?? []);
+  const command = slashCommand(text, placed, commands);
+  const refs = command ? undefined : promptRefs(placed, directory);
+  return { command, refs: hasRefs(refs) ? refs : undefined };
 }
 
 /** Tells the store an existing chat is switching selection; returns the cancel for a failed send. */
@@ -276,8 +291,10 @@ export function useComposer(input: {
   state: ChatState;
   box: RefObject<PromptBoxHandle | null>;
   models?: ComposerModels;
+  /** The server's slash commands: a draft starting with `/name` for one of them runs it. */
+  commands?: readonly MentionItem[];
 }) {
-  const { chat, state, box, models } = input;
+  const { chat, state, box, models, commands } = input;
   const modelStore = models?.store;
   const selection = models?.controls.selection;
   // A failed send keeps its ID: retrying the same text with the same selection is the same prompt.
@@ -304,11 +321,26 @@ export function useComposer(input: {
   /** The models are still loading (a failed catalog falls back to the server's default model). */
   const modelsLoading = !!models && (models.phase === 'idle' || models.phase === 'loading');
 
+  const notify = (message: string) => modelStore?.notify(message);
+
+  /** Runs a slash command; a failed one puts the text (as typed text) and images back. */
+  const runCommand = async (chat: ChatSession, command: { name: string; args: string }, text: string) => {
+    setText('');
+    const attached = attachments.take();
+    const files = await readImages(attached, notify);
+    if (files && (await chat.command(command.name, command.args, selection, files))) return;
+    setText(joinDraft(draftRef.current, text), true);
+    attachments.restore(attached);
+  };
+
   const send = async () => {
-    const text = draftRef.current.trim();
+    const raw = draftRef.current;
+    const text = raw.trim();
     if (!chat || !text) return;
     const notice = sendBlocker(models, attachments.current.current);
     if (notice) return void modelStore?.notify(notice);
+    const { command, refs } = readMentions(box.current, raw, text, commands, chat.workspace);
+    if (command) return void runCommand(chat, command, text);
     const key = retryKey(selection, attachments.current.current);
     const id = messageID(retry.current, text, key);
     retry.current = null;
@@ -323,8 +355,7 @@ export function useComposer(input: {
     }
     launchSendFlight({ id, from });
     const cancel = trackCommit(modelStore, chat, selection);
-    const notify = (message: string) => modelStore?.notify(message);
-    if (await submitPrompt(chat, { text, id, selection, images: attached }, notify)) return;
+    if (await submitPrompt(chat, { text, id, selection, images: attached, refs }, notify)) return;
     chat.cancelStagedPrompt(id);
     cancel();
     retry.current = { id, text, selection: key };

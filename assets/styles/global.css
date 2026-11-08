@@ -117,6 +117,40 @@
   --teal-bg: #e0f3f7;
   --teal-border: #cae9f0;
 
+  /* Badge hues (Notion's "New" badge in the / menu): -accent is texAccPri, -tint the
+   * translucent bacSecTra fill behind it, -tint-border borPriTra. Translucent, so a badge sits
+   * on any surface (a menu row's hover too) without a hard edge. */
+  --gray-accent: #8e8b86;
+  --gray-tint: #2a1c0012;
+  --gray-tint-border: #1c13011c;
+  --brown-accent: #b68965;
+  --brown-tint: #8b2e0016;
+  --brown-tint-border: #7f330028;
+  --orange-accent: #d5803b;
+  --orange-tint: #e0650121;
+  --orange-tint-border: #c4580034;
+  --yellow-accent: #d8a32f;
+  --yellow-tint: #d3a80023;
+  --yellow-tint-border: #d19c0048;
+  --green-accent: #46a171;
+  --green-tint: #00642d17;
+  --green-tint-border: #00602628;
+  --blue-accent: #2783de;
+  --blue-tint: #007cd718;
+  --blue-tint-border: #0076d934;
+  --purple-accent: #b577d6;
+  --purple-tint: #6600b214;
+  --purple-tint-border: #5c00a324;
+  --pink-accent: #db6999;
+  --pink-tint: #c5005d16;
+  --pink-tint-border: #b7004e27;
+  --red-accent: #e56458;
+  --red-tint: #df160018;
+  --red-tint-border: #ce18002a;
+  --teal-accent: #37a4b4;
+  --teal-tint: #019dbd1f;
+  --teal-tint-border: #0095b735;
+
   /* Code syntax (the highlighter in a reply's code blocks): one hue per kind of token. */
   --syntax-text: var(--text-primary);
   --syntax-comment: var(--text-secondary);
@@ -258,6 +292,38 @@
   --color-teal-bg: var(--teal-bg);
   --color-teal-border: var(--teal-border);
 
+  /* Colours: badge hues (Notion's "New" badge) ---------------------------- */
+  --color-gray-accent: var(--gray-accent);
+  --color-gray-tint: var(--gray-tint);
+  --color-gray-tint-border: var(--gray-tint-border);
+  --color-brown-accent: var(--brown-accent);
+  --color-brown-tint: var(--brown-tint);
+  --color-brown-tint-border: var(--brown-tint-border);
+  --color-orange-accent: var(--orange-accent);
+  --color-orange-tint: var(--orange-tint);
+  --color-orange-tint-border: var(--orange-tint-border);
+  --color-yellow-accent: var(--yellow-accent);
+  --color-yellow-tint: var(--yellow-tint);
+  --color-yellow-tint-border: var(--yellow-tint-border);
+  --color-green-accent: var(--green-accent);
+  --color-green-tint: var(--green-tint);
+  --color-green-tint-border: var(--green-tint-border);
+  --color-blue-accent: var(--blue-accent);
+  --color-blue-tint: var(--blue-tint);
+  --color-blue-tint-border: var(--blue-tint-border);
+  --color-purple-accent: var(--purple-accent);
+  --color-purple-tint: var(--purple-tint);
+  --color-purple-tint-border: var(--purple-tint-border);
+  --color-pink-accent: var(--pink-accent);
+  --color-pink-tint: var(--pink-tint);
+  --color-pink-tint-border: var(--pink-tint-border);
+  --color-red-accent: var(--red-accent);
+  --color-red-tint: var(--red-tint);
+  --color-red-tint-border: var(--red-tint-border);
+  --color-teal-accent: var(--teal-accent);
+  --color-teal-tint: var(--teal-tint);
+  --color-teal-tint-border: var(--teal-tint-border);
+
   /* Colours: actions & fills --------------------------------------------- */
   --color-primary: var(--primary);
   --color-primary-foreground: var(--primary-foreground);
@@ -295,6 +361,7 @@
 
   /* Radius --------------------------------------------------------------- */
   --radius-sm: calc(var(--radius) * 0.6);
+  --radius-badge: 0.25rem; /* 4px: Notion's small badges ("New") */
   --radius-lg: var(--radius);
   --radius-2xl: calc(var(--radius) * 1.8);
   --radius-3xl: calc(var(--radius) * 2.2);
@@ -326,6 +393,12 @@
 @utility type-body {
   font-size: 0.9375rem; /* 15px */
   line-height: 1.4;
+}
+
+/* Notion's small badge text ("New" in the / menu): 11px, medium, 1.3 line height. */
+@utility type-badge {
+  font-size: 0.6875rem; /* 11px */
+  line-height: 1.3;
 }
 
 @utility type-work {
@@ -505,6 +578,53 @@
   @media (prefers-reduced-motion: reduce) {
     transition: box-shadow 150ms var(--ease-standard);
   }
+}
+
+/* A mention chip in the prompt box (editor-dom.ts `createChip`): an agent, skill, command, file or
+ * reference picked from the `@` / `/` list or the + menu. A non-editable inline badge in the Badge
+ * component's Notion colours (accent text on its translucent tint): agents blue, skills purple,
+ * commands neutral (secondary text), files and references teal. MentionBackgrounds draws one rounded silhouette. */
+[data-slot="prompt-box"] [data-mention] {
+  --chip-text: var(--gray-accent);
+  --chip-fill: color-mix(in srgb, var(--chip-text) 12%, var(--background));
+  padding-inline: 0.2em;
+  margin-inline: 0.2em;
+  color: var(--chip-text);
+  font-weight: 500;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  cursor: default;
+  &[data-mention="agent"] {
+    --chip-text: var(--blue-accent);
+  }
+  &[data-mention="skill"] {
+    --chip-text: var(--purple-accent);
+  }
+  &[data-mention="command"] {
+    --chip-text: var(--text-secondary);
+  }
+  &[data-mention="file"],
+  &[data-mention="reference"] {
+    --chip-text: var(--teal-accent);
+  }
+}
+
+[data-slot="prompt-box"] [data-mention-prefix] {
+  position: relative;
+  display: inline-block;
+  width: 1.3em;
+  color: transparent;
+  vertical-align: baseline;
+}
+
+[data-slot="prompt-box"] [data-mention-icon] {
+  position: absolute;
+  inset: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--chip-text);
+  pointer-events: none;
 }
 
 /* The chips under the prompt box fold away (rows to 0, fading) when they don't apply. */

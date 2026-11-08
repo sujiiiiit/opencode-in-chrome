@@ -1,16 +1,50 @@
-import type { KeyboardEvent, ReactNode, Ref } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode, type Ref } from 'react';
 import { Button } from '@/components/ui/button';
 import { Icon } from '@/components/ui/icon';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Tooltip } from '@/components/ui/tooltip';
 import { insertLineBreak } from './editor-dom';
+import { MentionBackgrounds } from './mention-backgrounds';
 import { keyAction, type KeyAction } from './keys';
+import { MentionMenu, useMentionAria, useMentionMenu, type MentionSource } from './mention-menu';
 import { usePlainTextEditor, type PromptBoxHandle } from './use-editor';
 import { useSmoothHeight } from './use-smooth-height';
 
 export type { PromptBoxHandle } from './use-editor';
+export type { MentionSource } from './mention-menu';
 
 const PLACEHOLDER = 'Ask opencode';
+const PLACEHOLDER_HINTS = [PLACEHOLDER, 'Type / for commands and skills', 'Type @ to mention agents and files'];
+const HINT_HOLD_MS = 3000;
+const HINT_FADE_MS = 250;
+
+/** Cycle the empty prompt's hints; an explicit placeholder stays fixed. */
+function PromptPlaceholder({ placeholder }: { placeholder?: string }) {
+  const [index, setIndex] = useState(0);
+  const [visible, setVisible] = useState(true);
+  useEffect(() => {
+    if (placeholder !== undefined) return;
+    let timer: ReturnType<typeof setTimeout>;
+    const hold = () => {
+      timer = setTimeout(() => {
+        setVisible(false);
+        timer = setTimeout(() => {
+          setIndex((current) => (current + 1) % PLACEHOLDER_HINTS.length);
+          setVisible(true);
+          hold();
+        }, HINT_FADE_MS);
+      }, HINT_HOLD_MS);
+    };
+    hold();
+    return () => clearTimeout(timer);
+  }, [placeholder]);
+  return (
+    <div aria-hidden="true" data-slot="prompt-placeholder" data-visible={placeholder !== undefined || visible}
+      className="pointer-events-none absolute inset-x-0 top-0 select-none truncate px-4 pt-3 type-body text-text-tertiary transition-opacity duration-250 motion-reduce:transition-none data-[visible=false]:opacity-0">
+      {placeholder ?? PLACEHOLDER_HINTS[index]}
+    </div>
+  );
+}
 
 type Props = {
   ref?: Ref<PromptBoxHandle>;
@@ -41,6 +75,8 @@ type Props = {
   onStop: () => void;
   /** Files pasted into the box (Ctrl/Cmd+V of a screenshot, copied images or files). */
   onPasteFiles?: (files: File[]) => void;
+  /** What `@` and a leading `/` offer; without it, they are plain text. */
+  mentions?: MentionSource;
 };
 
 /**
@@ -123,11 +159,35 @@ function Toolbar(props: Pick<Props, 'controls' | 'stopping' | 'held' | 'disabled
  * (never as HTML). Paste and drop are reduced to `text/plain`, and rich-text commands
  * (Ctrl+B, …) are blocked, so no markup from the clipboard or another page reaches the DOM.
  */
-export function PromptBox({ ref, placeholder = PLACEHOLDER, ...props }: Props) {
+export function PromptBox({ ref, placeholder, ...props }: Props) {
   const { editor, text, handlers } = usePlainTextEditor(ref, props.onChange, props.onPasteFiles);
   const card = useSmoothHeight<HTMLDivElement, HTMLDivElement, HTMLDivElement>();
+  const menu = useMentionMenu(editor, props.mentions);
+  const aria = useMentionAria(menu.view);
+  const editorFrame = useRef<HTMLDivElement>(null);
+  const [hintPosition, setHintPosition] = useState<{ left: number; top: number } | null>(null);
+
+  useLayoutEffect(() => {
+    const frame = editorFrame.current;
+    const anchor = menu.hintAnchor;
+    if (!frame || !anchor) {
+      setHintPosition(null);
+      return;
+    }
+    const measure = () => {
+      const trigger = anchor.getBoundingClientRect();
+      const bounds = frame.getBoundingClientRect();
+      setHintPosition({ left: trigger.right - bounds.left, top: trigger.top - bounds.top });
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(frame);
+    return () => observer.disconnect();
+  }, [menu.hintAnchor]);
 
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    // An open `@` / `/` list takes the arrows, Enter, Tab and Escape first.
+    if (menu.onKeyDown(event)) return;
     const { key, ctrlKey, metaKey, altKey, shiftKey, repeat, keyCode } = event;
     const info = { key, ctrlKey, metaKey, altKey, shiftKey, repeat, keyCode, isComposing: event.nativeEvent.isComposing };
     const action = keyAction(info, { stoppable: props.working || props.held });
@@ -164,29 +224,33 @@ export function PromptBox({ ref, placeholder = PLACEHOLDER, ...props }: Props) {
                 viewportClassName="max-h-70 overscroll-contain scroll-pt-3 scroll-pb-10"
                 scrollbarClassName="top-3! bottom-12! h-auto!"
               >
-                <div className="relative">
+                <div ref={editorFrame} className="relative">
+                  <MentionBackgrounds editor={editor} text={text} agents={props.mentions?.catalog.agents} />
                   <div
                     ref={editor}
                     role="textbox"
                     aria-label="Message"
                     aria-multiline="true"
-                    aria-placeholder={placeholder}
+                    aria-placeholder={placeholder ?? PLACEHOLDER}
                     contentEditable
                     suppressContentEditableWarning
                     spellCheck
                     dir="auto"
                     autoCapitalize="sentences"
-                    className="block min-h-24 w-full whitespace-pre-wrap break-words px-4 pt-3 pb-11 type-body text-text-primary caret-text-primary outline-none [unicode-bidi:plaintext]"
+                    className="relative block min-h-24 w-full whitespace-pre-wrap break-words px-4 pt-3 pb-11 type-body text-text-primary caret-text-primary outline-none [unicode-bidi:plaintext]"
                     onKeyDown={onKeyDown}
+                    {...aria.editorProps}
                     {...handlers}
+                    onInput={() => {
+                      handlers.onInput();
+                      menu.refresh();
+                    }}
                   />
-                  {text === '' && (
-                    <div
-                      aria-hidden="true"
-                      className="pointer-events-none absolute inset-x-0 top-0 select-none truncate px-4 pt-3 type-body text-text-tertiary"
-                    >
-                      {placeholder}
-                    </div>
+                  {text === '' && <PromptPlaceholder placeholder={placeholder} />}
+                  {menu.hintAnchor && hintPosition && (
+                    <span aria-hidden="true" data-slot="mention-hint" className="pointer-events-none absolute select-none whitespace-nowrap type-body text-text-tertiary" style={hintPosition}>
+                      Type to filter
+                    </span>
                   )}
                 </div>
               </ScrollArea>
@@ -195,6 +259,7 @@ export function PromptBox({ ref, placeholder = PLACEHOLDER, ...props }: Props) {
         </div>
         {!props.takeover && <Toolbar {...props} />}
       </div>
+      {props.mentions && <MentionMenu view={menu.view} actions={menu.actions} listID={aria.listID} editor={editor} />}
       {props.footer && (
         <div data-slot="prompt-box-footer" data-hidden={props.footerHidden ? '' : undefined} inert={props.footerHidden}>
           <div className="min-h-0 overflow-hidden">
