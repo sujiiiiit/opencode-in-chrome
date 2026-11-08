@@ -7,33 +7,35 @@ const NavigationContext = createContext<((id: string, title: string) => void) | 
 export const useSubagentNavigation = () => useContext(NavigationContext);
 
 type Child = { id: string; title: string };
-type Props = {
-  rootID: string;
-  renderChild: (sessionID: string) => ReactNode;
-  pendingSessionIDs?: readonly string[];
-  children: ReactNode;
+
+/** The chain of child chats open over the root chat, and how to move along it. */
+export type SubagentPath = {
+  path: Child[];
+  /** The open child chat, or null on the root chat. */
+  child: string | null;
+  open: (id: string, title: string) => void;
+  back: () => void;
 };
 
-function PendingDot({ pending, current }: { pending: readonly string[]; current: string }) {
-  if (!pending.some((id) => id !== current)) return null;
-  return <span role="status" aria-label="Another chat needs approval" className="size-2 shrink-0 rounded-full bg-primary" />;
-}
-
-/** Tool rows open child sessions; only the current transcript is visible. */
-function SubagentSessions({ rootID, renderChild, children, pendingSessionIDs = [] }: Props) {
-  const [path, setPath] = useState<Child[]>([]);
+/**
+ * Tool rows open child sessions; Escape (outside fields and menus) returns one level. The path
+ * resets when the root chat changes.
+ */
+export function useSubagentPath(rootID: string | null): SubagentPath {
+  const [state, setState] = useState<{ root: string | null; path: Child[] }>({ root: rootID, path: [] });
+  const path = state.root === rootID ? state.path : [];
   const active = useTabPanelActive();
-  const leaf = path.at(-1)?.id ?? rootID;
-  const parent = path.at(-2)?.title ?? 'main chat';
-  const openChild = useCallback((id: string, title: string) => {
-    setPath((current) => {
-      if (!id || id === rootID || current.some((child) => child.id === id)) return current;
-      return [...current, { id, title }];
+  const child = path.at(-1)?.id ?? null;
+  const open = useCallback((id: string, title: string) => {
+    setState((current) => {
+      const currentPath = current.root === rootID ? current.path : [];
+      if (!id || id === rootID || currentPath.some((item) => item.id === id)) return current;
+      return { root: rootID, path: [...currentPath, { id, title }] };
     });
   }, [rootID]);
-  const back = useCallback(() => setPath((current) => current.slice(0, -1)), []);
+  const back = useCallback(() => setState((current) => ({ root: rootID, path: current.root === rootID ? current.path.slice(0, -1) : [] })), [rootID]);
   useEffect(() => {
-    if (!active || leaf === rootID) return;
+    if (!active || !child) return;
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== 'Escape' || event.defaultPrevented || event.isComposing || event.keyCode === 229) return;
       const target = event.target instanceof Element ? event.target : null;
@@ -43,10 +45,36 @@ function SubagentSessions({ rootID, renderChild, children, pendingSessionIDs = [
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [active, leaf, rootID, back]);
+  }, [active, child, back]);
+  return { path, child, open, back };
+}
+
+type Props = {
+  rootID: string;
+  renderChild: (sessionID: string) => ReactNode;
+  pendingSessionIDs?: readonly string[];
+  /** Controlled navigation (from useSubagentPath), so the caller can follow the open child. */
+  nav?: SubagentPath;
+  children: ReactNode;
+};
+
+function PendingDot({ pending, current }: { pending: readonly string[]; current: string }) {
+  if (!pending.some((id) => id !== current)) return null;
+  return <span role="status" aria-label="Another chat needs approval" className="size-2 shrink-0 rounded-full bg-primary" />;
+}
+
+/**
+ * Only the current transcript (and its header) is visible; the child slides over the root chat.
+ * Whatever sits after this in the pane (the prompt box) stays put.
+ */
+export function SubagentTabs({ rootID, renderChild, children, pendingSessionIDs = [], nav }: Props) {
+  const own = useSubagentPath(rootID);
+  const { path, child, open, back } = nav ?? own;
+  const leaf = child ?? rootID;
+  const parent = path.at(-2)?.title ?? 'main chat';
 
   return (
-    <NavigationContext.Provider value={openChild}>
+    <NavigationContext.Provider value={open}>
       <Tabs defaultValue={rootID} value={leaf} className="min-h-0 flex-1 gap-0">
         <TabsContentWrapper fillHeight className="min-h-0 flex-1">
           <TabsContent value={rootID}>{children}</TabsContent>
@@ -67,8 +95,4 @@ function SubagentSessions({ rootID, renderChild, children, pendingSessionIDs = [
       </Tabs>
     </NavigationContext.Provider>
   );
-}
-
-export function SubagentTabs(props: Props) {
-  return <SubagentSessions key={props.rootID} {...props} />;
 }

@@ -70,12 +70,17 @@ export type ReplyStep = {
   tokens?: StepTokens;
 };
 
+/** A background subagent's completion, placed before the step the reply picked up with. */
+export type ReplyNotice = { id: string; afterStep: number };
+
 export type ReplyState = {
   sessionID: string;
   status: ReplyStatus;
   steps: ReplyStep[];
   error?: ReplyError;
   interruptReason?: string;
+  /** Background subagents that finished during this turn and woke the main agent again. */
+  notices?: ReplyNotice[];
 };
 
 export const initialReply = (sessionID: string): ReplyState => ({ sessionID, status: 'idle', steps: [] });

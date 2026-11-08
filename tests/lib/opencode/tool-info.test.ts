@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import type { ReplyToolPart } from '@/lib/opencode/reply';
 import {
+  agentLabel,
+  agentState,
   editChange,
   languageOf,
   partialField,
@@ -141,5 +143,29 @@ describe('tool rows', () => {
     expect(languageOf('script.py')).toBe('python');
     expect(languageOf('Makefile')).toBe('text');
     expect(languageOf(undefined)).toBe('text');
+  });
+});
+
+describe('agentState', () => {
+  it('follows a foreground call: running while the reply runs, then done, stopped or failed', () => {
+    expect(agentState(tool('subagent', { status: 'running' }), true)).toBe('running');
+    expect(agentState(tool('subagent', { status: 'running' }), false)).toBe('stopped');
+    expect(agentState(tool('subagent'), false)).toBe('done');
+    expect(agentState(tool('subagent', { status: 'error' }), false)).toBe('failed');
+  });
+
+  it('keeps a background run going until its outcome reaches the chat', () => {
+    const background = tool('subagent', { metadata: { status: 'running', sessionID: 'ses_child' } });
+    expect(agentState(background, false)).toBe('running');
+    expect(agentState(background, false, 'completed')).toBe('done');
+    expect(agentState(background, false, 'cancelled')).toBe('stopped');
+    expect(agentState(background, false, 'error')).toBe('failed');
+  });
+
+  it('labels each state by its verb alone', () => {
+    const call = tool('subagent', { input: { agent: 'explore' } });
+    expect(agentLabel(call, 'running')).toBe('Running explore agent');
+    expect(agentLabel(call, 'stopped')).toBe('Stopped explore agent');
+    expect(agentLabel(call, 'done')).toBe('Ran explore agent');
   });
 });

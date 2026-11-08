@@ -1,6 +1,7 @@
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
+import { AgentRow } from '@/components/chat/flow/agent-rows';
 import { ToolRow } from '@/components/chat/flow/tool-row';
 import { SubagentTabs } from '@/components/chat/subagent-tabs';
 import type { ReplyToolPart } from '@/lib/opencode/reply';
@@ -16,13 +17,13 @@ function mount(tool: ReplyToolPart, live = false) {
   render(
     <SubagentTabs rootID="root"
       renderChild={(id) => <p>Child chat {id}</p>}>
-      <ToolRow part={tool} live={live} />
+      {['task', 'subagent', 'agent'].includes(tool.name) ? <AgentRow part={tool} index={0} live={live} /> : <ToolRow part={tool} live={live} />}
     </SubagentTabs>,
   );
   return user;
 }
 
-describe('ToolRow subagent navigation', () => {
+describe('Subagent row navigation', () => {
   it.each([['task', 'sessionId'], ['subagent', 'sessionID']])('opens the child chat from a %s row', async (name, key) => {
     const user = mount(part(name, { [key]: 'ses_child' }));
     await user.click(screen.getByRole('button', { name: /ran agent.*check the redirect/i }));

@@ -427,3 +427,62 @@ describe('attachments on user prompts', () => {
     expect(t.turns[0]).not.toHaveProperty('files');
   });
 });
+
+describe('background subagent completions', () => {
+  const completion = (inboxID: string, childID: string, state = 'completed') =>
+    ev('session.inbox.enqueued', { inboxID, item: { type: 'synthetic', delivery: 'steer', payload: {
+      text: `<subagent sessionID="${childID}">done</subagent>`, description: 'Inspect code',
+      metadata: { source: 'subagent', childID, agent: 'explore', state },
+    } } });
+  const firstTurn = () => run([enqueued('m1', 'hello'), ev('session.execution.started'), delivered('m1'), ...say('launched', 'a1'), ev('session.execution.succeeded')]);
+
+  it('marks the child finished on admission, then reopens the turn while the main agent replies again', () => {
+    const admitted = run([completion('syn1', 'ses_child')], firstTurn());
+    expect(admitted.finished).toEqual({ ses_child: 'completed' });
+    expect(admitted.turns[0]!.reply.status).toBe('succeeded');
+
+    const resumed = run([ev('session.execution.started'), delivered('syn1')], admitted);
+    expect(resumed.turns).toHaveLength(1);
+    expect(resumed.turns[0]!.reply.status).toBe('running');
+    expect(resumed.turns[0]!.reply.notices).toEqual([
+      { id: 'syn1', afterStep: 1 },
+    ]);
+
+    const settled = run([...say('it found two files', 'a2'), ev('session.execution.succeeded')], resumed);
+    expect(settled.turns[0]!.reply.status).toBe('succeeded');
+    expect(replyText(settled.turns[0]!.reply)).toBe('launched\n\nit found two files');
+  });
+
+  it('lands in the newer turn when the reader sent another message meanwhile', () => {
+    const second = run([enqueued('m2', 'next'), ev('session.execution.started'), delivered('m2'), ...say('working', 'a2')], firstTurn());
+    const t = run([completion('syn1', 'ses_child', 'error'), delivered('syn1')], second);
+    expect(t.turns[0]!.reply.notices).toBeUndefined();
+    expect(t.turns[1]!.reply.status).toBe('running');
+    expect(t.turns[1]!.reply.notices?.[0]).toEqual({ id: 'syn1', afterStep: 1 });
+    expect(t.finished).toEqual({ ses_child: 'error' });
+  });
+
+  it('ignores synthetic items that are not subagent completions', () => {
+    const t = run([ev('session.inbox.enqueued', { inboxID: 'syn9', item: { type: 'synthetic', delivery: 'steer', payload: { text: 'restart' } } }), delivered('syn9')], firstTurn());
+    expect(t.finished).toBeUndefined();
+    expect(t.turns[0]!.reply).toMatchObject({ status: 'succeeded' });
+    expect(t.turns[0]!.reply.notices).toBeUndefined();
+  });
+
+  it('rebuilds the note and the reopened run from a snapshot', () => {
+    const synthetic = { id: 'syn1', type: 'synthetic', description: 'Inspect code', metadata: { source: 'subagent', childID: 'ses_child', agent: 'explore', state: 'completed' } };
+    const messages = [
+      { id: 'm1', type: 'user', text: 'hello', time: { created: 1 } },
+      { id: 'a1', type: 'assistant', content: [{ type: 'text', text: 'launched' }], time: { created: 2 } },
+      { id: 'i1', type: 'idle', outcome: 'succeeded', time: { created: 3 } },
+      synthetic,
+      { id: 'a2', type: 'assistant', content: [{ type: 'text', text: 'found it' }], time: { created: 4 } },
+    ];
+    const running = timelineFromSnapshot(SESSION_ID, { messages, inbox: [], running: true });
+    expect(running.finished).toEqual({ ses_child: 'completed' });
+    expect(running.turns[0]!.reply.status).toBe('running');
+    expect(running.turns[0]!.reply.notices?.[0]).toMatchObject({ id: 'syn1', afterStep: 1 });
+    const done = timelineFromSnapshot(SESSION_ID, { messages: [...messages, { id: 'i2', type: 'idle', outcome: 'succeeded', time: { created: 5 } }], inbox: [], running: false });
+    expect(done.turns[0]!.reply.status).toBe('succeeded');
+  });
+});

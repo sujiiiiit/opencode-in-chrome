@@ -2,6 +2,7 @@
 // yet delivered). One server execution can run several turns: a steer is delivered at the next
 // step boundary and starts a new turn mid-execution, and a queued prompt is delivered (one at a
 // time) once every steer has drained. Assistant output always belongs to the latest delivered turn.
+import { subagentNotice, type BackgroundNotice, type NoticeState } from './background';
 import { initialReply, isRecord, parseError, reduceReply, snapshotStep, type ReplyState, type StepModel } from './reply';
 import { parseSentFiles, withFiles, type SentFile } from './sent-files';
 import type { ServerEvent } from './sse';
@@ -9,8 +10,11 @@ import type { ServerEvent } from './sse';
 export type Delivery = 'steer' | 'queue';
 /** A user prompt in the inbox, in the server's admission order. `files`: its attachments. */
 export type PendingPrompt = { id: string; text: string; delivery: Delivery; created: number; files?: SentFile[] };
-/** A non-prompt inbox item (compaction, move). A queued one blocks reordering the queue. */
-export type ControlItem = { id: string; delivery: Delivery };
+/**
+ * A non-prompt inbox item (compaction, move, a synthetic note). A queued one blocks reordering the
+ * queue. `notice`: the item reports a background subagent's completion.
+ */
+export type ControlItem = { id: string; delivery: Delivery; notice?: BackgroundNotice };
 /** `created`: server time (ms) the prompt was sent, when known. `files`: its attachments. */
 export type ModelSwitch = { id: string; model: StepModel; previous?: StepModel };
 export type Turn = { id: string; text: string; reply: ReplyState; created?: number; files?: SentFile[]; switches?: ModelSwitch[] };
@@ -35,6 +39,8 @@ export type Timeline = {
   deliveredSinceIdle: boolean;
   /** A revert is staged; re-admitting queued prompts would commit it. */
   reverted: boolean;
+  /** Background subagents whose completion reached this chat, by child session id. */
+  finished?: Record<string, NoticeState>;
 };
 
 export const emptyTimeline = (sessionID: string): Timeline => ({
@@ -74,6 +80,12 @@ function replaceLastTurn(t: Timeline, update: (turn: Turn) => Turn): Timeline {
   return next === last ? t : { ...t, turns: [...t.turns.slice(0, -1), next] };
 }
 
+/** A non-prompt inbox item; a synthetic one may carry a background subagent's completion. */
+function parseControl(id: string, item: Record<string, unknown>, mode: Delivery): ControlItem {
+  const notice = item.type === 'synthetic' ? subagentNotice(id, item.payload) : null;
+  return { id, delivery: mode, ...(notice && { notice }) };
+}
+
 /** Parses one inbox item (from an event or GET .../inbox) into a prompt or a control item. */
 function parseInboxItem(
   id: unknown,
@@ -83,15 +95,21 @@ function parseInboxItem(
   if (typeof id !== 'string' || !isRecord(item) || typeof item.type !== 'string') return null;
   const mode = delivery(item.delivery);
   if (!mode) return null;
-  if (item.type !== 'user') return { control: { id, delivery: mode } };
+  if (item.type !== 'user') return { control: parseControl(id, item, mode) };
   const payload = isRecord(item.payload) ? item.payload : {};
   return { prompt: { id, text: str(payload.text) ?? '', delivery: mode, created, ...withFiles(parseSentFiles(payload.files)) } };
+}
+
+/** Marks a background subagent finished: its completion was admitted, so it runs no more. */
+function markFinished(t: Timeline, notice: BackgroundNotice | undefined): Timeline {
+  if (!notice || t.finished?.[notice.childID] === notice.state) return t;
+  return { ...t, finished: { ...t.finished, [notice.childID]: notice.state } };
 }
 
 function enqueue(t: Timeline, d: Record<string, unknown>, created: number): Timeline {
   const parsed = parseInboxItem(d.inboxID, d.item, created);
   if (!parsed) return t;
-  if ('control' in parsed) return { ...t, controls: upsert(t.controls, parsed.control) };
+  if ('control' in parsed) return markFinished({ ...t, controls: upsert(t.controls, parsed.control) }, parsed.control.notice);
   if (hasTurn(t, parsed.prompt.id)) return t;
   return { ...t, pending: upsert(t.pending, parsed.prompt) };
 }
@@ -104,8 +122,28 @@ function withoutInbox(t: Timeline, id: string): Timeline {
   };
 }
 
+/**
+ * A background subagent's completion entered the conversation: it wakes the main agent, which
+ * replies again within the latest turn. The note goes where the reply picks up, and the turn runs
+ * again, so its footer hides while the reply streams and returns once the run settles.
+ */
+function resumeWithNotice(t: Timeline, notice: BackgroundNotice): Timeline {
+  return replaceLastTurn(markFinished(t, notice), (turn) => {
+    if (turn.reply.notices?.some((item) => item.id === notice.id)) return turn;
+    const next = withNotice(turn, notice);
+    return { ...next, reply: { ...next.reply, status: 'running' } };
+  });
+}
+
+/** The turn with a completion note where its reply picks up; the earlier run's error no longer stands. */
+function withNotice(turn: Turn, notice: BackgroundNotice): Turn {
+  const { error: _error, interruptReason: _reason, ...reply } = turn.reply;
+  return { ...turn, reply: { ...reply, notices: [...(reply.notices ?? []), { id: notice.id, afterStep: reply.steps.length }] } };
+}
+
 function deliver(t: Timeline, id: string, at: number | undefined): Timeline {
-  if (t.controls.some((c) => c.id === id)) return withoutInbox(t, id);
+  const control = t.controls.find((c) => c.id === id);
+  if (control) return control.notice ? resumeWithNotice(withoutInbox(t, id), control.notice) : withoutInbox(t, id);
   const prompt = t.pending.find((p) => p.id === id);
   const rest = withoutInbox(t, id);
   if (hasTurn(t, id)) return rest;
@@ -212,7 +250,7 @@ export function syncInbox(t: Timeline, items: unknown): Timeline {
     if ('control' in parsed) controls.push(parsed.control);
     else if (!hasTurn(t, parsed.prompt.id)) pending.push(parsed.prompt);
   }
-  return { ...t, pending, controls };
+  return controls.reduce((next, control) => markFinished(next, control.notice), { ...t, pending, controls });
 }
 
 export function pendingStatus(t: Timeline, prompt: Pick<PendingPrompt, 'delivery' | 'created'>): PendingStatus {
@@ -240,7 +278,7 @@ export function timelineFromSnapshot(
   snapshot: { messages: unknown; inbox: unknown; running: boolean; hasEarlier?: boolean },
 ): Timeline {
   const messages = Array.isArray(snapshot.messages) ? snapshot.messages : [];
-  const { turns, idleAt, sinceIdle, switches } = messages.reduce(
+  const { turns, idleAt, sinceIdle, switches, finished } = messages.reduce(
     (acc: SnapshotAcc, m: unknown) => readSnapshotMessage(acc, m, sessionID),
     { turns: [], switches: [], idleAt: null, sinceIdle: false, showLeadingSwitches: snapshot.hasEarlier === true },
   );
@@ -248,11 +286,18 @@ export function timelineFromSnapshot(
   const running = snapshot.running && sinceIdle;
   if (running && last) turns[turns.length - 1] = { ...last, reply: { ...last.reply, status: 'running' } };
 
-  const base: Timeline = { ...emptyTimeline(sessionID), working: snapshot.running, turns, switches, idleAt, deliveredSinceIdle: running };
+  const base: Timeline = { ...emptyTimeline(sessionID), working: snapshot.running, turns, switches, idleAt, deliveredSinceIdle: running, ...(finished ? { finished } : {}) };
   return syncInbox(base, snapshot.inbox);
 }
 
-type SnapshotAcc = { turns: Turn[]; switches: ModelSwitch[]; idleAt: number | null; sinceIdle: boolean; showLeadingSwitches: boolean };
+type SnapshotAcc = {
+  turns: Turn[];
+  switches: ModelSwitch[];
+  idleAt: number | null;
+  sinceIdle: boolean;
+  showLeadingSwitches: boolean;
+  finished?: Record<string, NoticeState>;
+};
 
 type SnapshotMessage = Record<string, unknown> & { id: string; type: string };
 
@@ -279,6 +324,15 @@ const SNAPSHOT_READERS: Record<string, (acc: SnapshotAcc, m: SnapshotMessage, se
     const last = acc.turns.at(-1);
     if (last) acc.turns[acc.turns.length - 1] = { ...last, reply: { ...last.reply, steps: [...last.reply.steps, snapshotStep(m)] } };
     return acc;
+  },
+  // A background subagent's completion: the main agent picked up again in the same turn, so the
+  // run after it belongs to that turn until the next idle marker closes it.
+  synthetic: (acc, m) => {
+    const notice = subagentNotice(m.id, m);
+    if (!notice) return acc;
+    const last = acc.turns.at(-1);
+    if (last) acc.turns[acc.turns.length - 1] = withNotice(last, notice);
+    return { ...acc, sinceIdle: true, finished: { ...acc.finished, [notice.childID]: notice.state } };
   },
   idle: (acc, m) => {
     const last = acc.turns.at(-1);

@@ -790,6 +790,20 @@ export class ChatSession extends Store<ChatState> {
     if (timeline) this.set({ timeline: admitPrompt(timeline, parseAck(ack, local)) });
   }
 
+  /**
+   * Moves the running turn's blocking work (its foreground subagents and shell commands) to the
+   * background, so the agent goes on while it runs. The server moves all of it at once, ignores a
+   * repeated move, and tells the agent in the conversation; the calls then return as running.
+   */
+  async moveToBackground(): Promise<void> {
+    if (!this.sessionID) return;
+    try {
+      await this.client.session.background({ sessionID: this.sessionID }, { signal: this.signal });
+    } catch (error) {
+      if (!this.disposed && !this.unauthorized(error)) this.set({ notice: describeError(error) });
+    }
+  }
+
   /** Interrupts the running turn. `resume` lets prompts that are still waiting continue. */
   async stop(resume = true): Promise<void> {
     if (!this.sessionID || this.state.interrupting) return;

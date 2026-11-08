@@ -507,6 +507,43 @@
   }
 }
 
+/* The chips under the prompt box fold away (rows to 0, fading) when they don't apply. */
+[data-slot="prompt-box-footer"] {
+  display: grid;
+  grid-template-rows: 1fr;
+  transition:
+    grid-template-rows 220ms var(--ease-calm),
+    opacity 200ms var(--ease-calm);
+  &[data-hidden] {
+    grid-template-rows: 0fr;
+    opacity: 0;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    transition: none;
+  }
+}
+
+/* A subagent's row in the reply. One that appears as its agent starts eases open; rows already
+   there when a chat loads only fade in, so nothing shifts. */
+@keyframes agent-row-open {
+  from {
+    grid-template-rows: 0fr;
+    opacity: 0;
+  }
+}
+
+[data-slot="agent-row"] {
+  display: grid;
+  grid-template-rows: 1fr;
+  animation: calm-fade 300ms var(--ease-calm) backwards;
+  &[data-opening] {
+    animation: agent-row-open 260ms var(--ease-calm) backwards;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    animation: none;
+  }
+}
+
 /* An attached image's thumbnail: it fades in with a small settle as the box makes room. */
 @keyframes thumb-in {
   from {

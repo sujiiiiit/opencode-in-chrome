@@ -71,16 +71,23 @@ describe('ChatScreen: sending and the submit button', () => {
     fake.emit('session.tool.input.started', { ...event, name: 'subagent' });
     fake.emit('session.tool.called', { ...event, input: { agent: 'explore', description: 'Inspect code' } });
     fake.emit('session.tool.progress', { ...event, metadata: { sessionID: child } });
-    await user.click(await screen.findByRole('button', { name: /running explore agent/i }));
-    await waitFor(() => expect(document.querySelector('[data-tool="subagent"]')).not.toBeNull());
-    await user.click(document.querySelector<HTMLButtonElement>('[data-tool="subagent"]')!);
+    // The running subagent has a row of its own under the reply, outside the folded work, that opens it.
+    const row = await screen.findByRole('button', { name: /^Running explore agent\s*Inspect code/ });
+    expect(row.closest('[data-slot="agent-row"]')).not.toBeNull();
+    await user.click(row);
     expect(await screen.findByText(/\d+s/)).toBeVisible();
-    expect(screen.getByText('· explore')).toBeVisible();
+    const status = screen.getByRole('region', { name: 'Subagent status' });
+    await waitFor(() => expect(status).toHaveTextContent(/^Running·\d+s·explore/));
+    // The prompt box stays below the sliding chats: on the child it shows the status, not the editor.
+    const box = document.querySelector('[data-slot="prompt-box"]')!;
+    expect(box).toContainElement(screen.getByRole('region', { name: 'Subagent status' }));
+    expect(screen.getByRole('textbox', { name: 'Message', hidden: true })).not.toBeVisible();
+    expect(document.querySelector('[data-slot="prompt-box-footer"]')).toHaveAttribute('data-hidden');
     await user.click(screen.getByRole('button', { name: 'Stop subagent' }));
     expect(requests).toHaveLength(1);
     expect(requests[0]!.searchParams.has('resume')).toBe(false);
     fake.emit('session.execution.interrupted', { sessionID: child });
-    expect(await screen.findByText(/Interrupted · \d+s/)).toBeVisible();
+    await waitFor(() => expect(status).toHaveTextContent(/^Interrupted·\d+s·explore/));
     expect(screen.queryByRole('button', { name: 'Stop subagent' })).toBeNull();
   });
   it('copies the active session ID when the chat title is clicked', async () => {
@@ -399,6 +406,71 @@ describe('ChatScreen: questions from the agent', () => {
   });
 });
 
+describe('Background subagents', () => {
+  const replyFooter = () => document.querySelector('[data-slot="assistant-reply"] [data-slot="message-footer"]');
+  const agentRows = () => [...document.querySelectorAll<HTMLElement>('[data-slot="agent-row"]')];
+
+  it('moves a subagent to the background from its panel, keeps its row, and reopens the reply when it finishes', async () => {
+    const child = 'ses_child';
+    const moves: URL[] = [];
+    const fake = fakeOpencode({ overrides: {
+      [`POST /api/session/${SESSION_ID}/background`]: (call) => { moves.push(call.url); return new Response(null, { status: 204 }); },
+      'GET /api/session/active': () => jsonResponse({ data: { [SESSION_ID]: {}, [child]: {} } }),
+      [`GET /api/session/${child}`]: () => jsonResponse({ data: { id: child, parentID: SESSION_ID, agent: 'explore', time: { created: Date.now(), updated: Date.now() } } }),
+      [`GET /api/session/${child}/message`]: () => jsonResponse({ data: [], cursor: { next: null } }),
+      [`GET /api/session/${child}/inbox`]: () => jsonResponse({ data: [] }),
+      [`GET /api/session/${child}/form`]: () => jsonResponse({ data: [] }),
+    } });
+    const { user } = mount(fake);
+    await startTurn(fake, user);
+    const call = { assistantMessageID: ASSISTANT_MSG_ID, id: 'call_child' };
+    fake.emit('session.step.started', { assistantMessageID: ASSISTANT_MSG_ID });
+    fake.emit('session.tool.input.started', { ...call, name: 'subagent' });
+    fake.emit('session.tool.called', { ...call, input: { agent: 'explore', description: 'Inspect code' } });
+    fake.emit('session.tool.progress', { ...call, metadata: { sessionID: child, status: 'running' } });
+
+    // The subagent has one row under the reply; the main chat offers no move of its own.
+    const row = await screen.findByRole('button', { name: /^Running explore agent\s*Inspect code/ });
+    expect(agentRows()).toHaveLength(1);
+    expect(document.querySelector('[data-slot="work-group"] [data-tool="subagent"]')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Move to background' })).toBeNull();
+
+    // Its panel's status row, at the bottom, moves it while the main chat waits on it.
+    await user.click(row);
+    const status = await screen.findByRole('region', { name: 'Subagent status' });
+    await user.click(await within(status).findByRole('button', { name: 'Move to background' }));
+    await waitFor(() => expect(moves).toHaveLength(1));
+
+    // The call returns at once, the child runs on.
+    fake.emit('session.tool.success', { ...call, metadata: { sessionID: child, status: 'running' }, content: [{ type: 'text', text: 'working in the background' }] });
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Move to background' })).toBeNull());
+    await user.click(screen.getByRole('button', { name: /Back to main chat/ }));
+    fake.say('Launched it.', 'msg_a2');
+    fake.finish();
+    await waitFor(() => expect(replyFooter()).not.toBeNull());
+    // It keeps its row under the finished reply while it runs on.
+    await waitFor(() => expect(agentRows()[0]).toHaveTextContent('Running background explore agent'));
+
+    // It finishes: the completion wakes the main agent, which replies again in the same turn.
+    fake.emit('session.inbox.enqueued', { inboxID: 'syn_1', item: { type: 'synthetic', delivery: 'steer', payload: {
+      text: 'done', description: 'Inspect code', metadata: { source: 'subagent', childID: child, agent: 'explore', state: 'completed' },
+    } } });
+    // The same row stays and shows how it ended.
+    await waitFor(() => expect(agentRows()[0]).toHaveTextContent('Ran background explore agent'));
+    expect(agentRows()).toHaveLength(1);
+    expect(agentRows()[0]).toHaveAttribute('data-state', 'done');
+    fake.start();
+    fake.emit('session.inbox.delivered', { inboxID: 'syn_1' });
+    // No divider marks it: the row already says how it ended.
+    await waitFor(() => expect(replyFooter()).toBeNull());
+    expect(screen.queryByText(/agent finished/)).toBeNull();
+    fake.say('It found two files.', 'msg_a3');
+    fake.finish();
+    await waitFor(() => expect(replyFooter()).not.toBeNull());
+    expect(screen.getByText('It found two files.')).toBeVisible();
+  });
+});
+
 describe('Subagent permission routing', () => {
   it('shows child permissions in the main prompt and marks requests in another session', async () => {
     await fakeBrowser.storage.local.set({ [PERMISSION_MODE_KEY]: 'manual' });
@@ -419,13 +491,40 @@ describe('Subagent permission routing', () => {
     expect(await screen.findByText('Subagent request')).toBeVisible();
     await user.click(screen.getByRole('radio', { name: 'Allow once' }));
     await waitFor(() => expect(fake.fetch.calls.some((call) => call.url.pathname === `/api/session/${child}/permission/perm_child/reply`)).toBe(true));
-    const group = (await screen.findAllByRole('button', { name: /running explore agent/i })).find((button) => button.dataset.slot === 'collapsible-trigger');
-    if (group?.getAttribute('aria-expanded') !== 'true') await user.click(group!);
-    await user.click(document.querySelector<HTMLButtonElement>('[data-tool="subagent"]')!);
+    await user.click(await screen.findByRole('button', { name: /^Running explore agent\s*Inspect code/ }));
     await screen.findByRole('button', { name: /Back to main chat/ });
     fake.emit('permission.asked', { id: 'perm_root', sessionID: SESSION_ID, action: 'execute', resources: ['command'] });
     expect(await screen.findByRole('status', { name: 'Another chat needs approval' })).toBeVisible();
     await user.click(screen.getByRole('button', { name: /Back to main chat/ }));
     expect(await screen.findByText('Allow execute?')).toBeVisible();
+  });
+
+  it("shows the open subagent's own request in the fixed prompt box, then its status again", async () => {
+    await fakeBrowser.storage.local.set({ [PERMISSION_MODE_KEY]: 'manual' });
+    const child = 'ses_child';
+    const fake = fakeOpencode({ overrides: {
+      [`GET /api/session/${child}`]: () => jsonResponse({ data: { id: child, parentID: SESSION_ID, agent: 'explore', time: { created: Date.now(), updated: Date.now() } } }),
+      [`GET /api/session/${child}/message`]: () => jsonResponse({ data: [], cursor: { next: null } }),
+      [`GET /api/session/${child}/inbox`]: () => jsonResponse({ data: [] }),
+      [`POST /api/session/${child}/permission/perm_child/reply`]: () => new Response(null, { status: 204 }),
+    } });
+    const { user } = mount(fake);
+    await startTurn(fake, user);
+    const event = { assistantMessageID: ASSISTANT_MSG_ID, id: 'call_child' };
+    fake.emit('session.tool.input.started', { ...event, name: 'subagent' });
+    fake.emit('session.tool.called', { ...event, input: { agent: 'explore', description: 'Inspect code' } });
+    fake.emit('session.tool.progress', { ...event, metadata: { sessionID: child } });
+    await user.click(await screen.findByRole('button', { name: /^Running explore agent\s*Inspect code/ }));
+    expect(await screen.findByRole('region', { name: 'Subagent status' })).toBeVisible();
+    fake.emit('permission.asked', { id: 'perm_child', sessionID: child, action: 'edit', resources: ['child.ts'] });
+    const box = document.querySelector('[data-slot="prompt-box"]')!;
+    expect(await screen.findByText('Allow edit?')).toBeVisible();
+    expect(box).toContainElement(screen.getByText('Allow edit?'));
+    expect(screen.queryByRole('region', { name: 'Subagent status' })).toBeNull();
+    await user.click(screen.getByRole('radio', { name: 'Allow once' }));
+    expect(await screen.findByRole('region', { name: 'Subagent status' })).toBeVisible();
+    await user.click(screen.getByRole('button', { name: /Back to main chat/ }));
+    await waitFor(() => expect(screen.getByRole('textbox', { name: 'Message' })).toBeVisible());
+    expect(document.querySelector('[data-slot="prompt-box-footer"]')).not.toHaveAttribute('data-hidden');
   });
 });

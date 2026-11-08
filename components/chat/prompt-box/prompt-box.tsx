@@ -27,6 +27,8 @@ type Props = {
   controls?: ReactNode;
   /** Shown below the box, outside the card (the model and effort chips). */
   footer?: ReactNode;
+  /** The footer folds away (smoothly) without unmounting, e.g. while a subagent's chat is open. */
+  footerHidden?: boolean;
   /** Shown above the text (the attached images). */
   attachments?: ReactNode;
   /**
@@ -193,7 +195,13 @@ export function PromptBox({ ref, placeholder = PLACEHOLDER, ...props }: Props) {
         </div>
         {!props.takeover && <Toolbar {...props} />}
       </div>
-      {props.footer && <div className="flex min-w-0 items-center px-1.5 pt-1.5">{props.footer}</div>}
+      {props.footer && (
+        <div data-slot="prompt-box-footer" data-hidden={props.footerHidden ? '' : undefined} inert={props.footerHidden}>
+          <div className="min-h-0 overflow-hidden">
+            <div className="flex min-w-0 items-center px-1.5 pt-1.5">{props.footer}</div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

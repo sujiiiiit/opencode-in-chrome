@@ -4,8 +4,10 @@ import type { PermissionRequest } from '@opencode/client';
 import { Button } from '@/components/ui/button';
 import { DropdownMenu } from '@/components/ui/dropdown-menu';
 import { Icon } from '@/components/ui/icon';
+import { Skeleton } from '@/components/ui/skeleton';
 import { Tooltip, TooltipGroup, TooltipTrigger } from '@/components/ui/tooltip';
 import { Tabs, TabsContent, TabsContentWrapper, useTabPanelActive } from '@/components/ui/tabs';
+import { foregroundAgent } from '@/lib/opencode/background';
 import { ChatSession, INITIAL_CHAT_STATE, pendingMessages, type ChatState } from '@/lib/opencode/chat';
 import type { Turn } from '@/lib/opencode/timeline';
 import { PINNED_SERVER_VERSION } from '@/lib/opencode/client';
@@ -13,6 +15,7 @@ import type { Connection } from '@/lib/opencode/connection';
 import type { EventHub } from '@/lib/opencode/events';
 import type { Selection } from '@/lib/opencode/models/selection';
 import { displayTitle, isUntitled } from '@/lib/opencode/sessions';
+import { BackgroundProvider } from './flow/background';
 import { ShellOutputProvider, useLingering, useNow } from './flow/live';
 import { formatDuration } from '@/lib/opencode/flow';
 import { MorphText } from './flow/morph-text';
@@ -32,7 +35,7 @@ import { PermissionMenu } from './prompt-box/permission-menu';
 import { AttachmentStrip } from './prompt-box/attachment-strip';
 import { PromptBox, type PromptBoxHandle } from './prompt-box/prompt-box';
 import { useChatSession, useComposer, useEventHub, useHistory, useLatest } from './use-chat';
-import { SubagentTabs } from './subagent-tabs';
+import { SubagentTabs, useSubagentPath, type SubagentPath } from './subagent-tabs';
 
 type Props = {
   connection: Connection;
@@ -214,6 +217,15 @@ function PermissionCard({ permission, chat, rootID }: { permission: PermissionRe
   );
 }
 
+/** Only the requests one child chat is waiting on (its approvals and questions, browser ones too). */
+function requestsFor(state: ChatState, sessionID: string): ChatState {
+  return {
+    ...state,
+    permissions: state.permissions.filter((p) => p.sessionID === sessionID),
+    forms: state.forms.filter((f) => f.sessionID === sessionID),
+  };
+}
+
 function paneQuestion({ chat, state }: Pick<ReturnType<typeof useChatSession>, 'chat' | 'state'>): ReactNode {
   const permission = state.permissions?.[0];
   if (permission) return <PermissionCard permission={permission} chat={chat} rootID={state.timeline?.sessionID} />;
@@ -257,16 +269,18 @@ type ChatComposerProps = {
   active: boolean;
   /** A question the agent asks, shown in the box in place of the editor. */
   question: ReactNode;
+  /** A subagent's chat is open: the box shows its requests or status, and the chips fold away. */
+  subagent: boolean;
 };
 
 /**
  * The prompt box with its attach menu, attached images and model chips, and the drop zone that
  * covers the whole pane (the overlay is placed against the pane, its nearest positioned box).
  */
-function ChatComposer({ box, composer, models, active, question }: ChatComposerProps) {
-  // History, sliding over the chat, takes no drops.
+function ChatComposer({ box, composer, models, active, question, subagent }: ChatComposerProps) {
+  // History, sliding over the chat, takes no drops; nor does a subagent's chat (no editor shows).
   const panelActive = useTabPanelActive();
-  const dragging = useFileDrop(composer.addFiles, active && panelActive);
+  const dragging = useFileDrop(composer.addFiles, active && panelActive && !subagent);
   return (
     <>
       <DropOverlay visible={dragging} />
@@ -274,6 +288,7 @@ function ChatComposer({ box, composer, models, active, question }: ChatComposerP
         ref={box}
         controls={<><AttachMenu onFiles={composer.addFiles} /><PermissionMenu /></>}
         footer={<ComposerFooter models={models} />}
+        footerHidden={subagent}
         attachments={<AttachmentStrip images={composer.images} onRemove={composer.removeImage} />}
         takeover={question}
         placeholder={composer.placeholder}
@@ -290,6 +305,28 @@ function ChatComposer({ box, composer, models, active, question }: ChatComposerP
   );
 }
 
+/**
+ * The open subagent (if any) and what the prompt box shows for it. The box stays put while the
+ * header and transcript above it slide between chats: on a subagent's chat it shows that chat's
+ * approvals and questions (browser ones too), else its status.
+ */
+function useSubagentView(session: ReturnType<typeof useChatSession>, connection: Connection, hub: EventHub | null, onUnauthorized: () => void) {
+  const { chat, state, activeID } = session;
+  const nav = useSubagentPath(activeID && hub ? activeID : null);
+  const child = useChildSession(nav.child, connection, hub, onUnauthorized);
+  // Only a subagent the main chat itself is waiting on can be moved: the server moves the
+  // parent's foreground work, and a nested subagent's parent is not loaded here.
+  const movable = !!nav.child && nav.path.length === 1 && foregroundAgent(state.timeline?.turns.at(-1)?.reply, nav.child);
+  const question = nav.child
+    ? paneQuestion({ chat, state: requestsFor(state, nav.child) }) ??
+      <SubagentStatus state={child.state} chat={child.chat} onBackground={movable ? () => moveAside(chat) : undefined} />
+    : paneQuestion(session);
+  return { nav, child, question };
+}
+
+/** Moves the chat's foreground subagents and shell commands to the background. */
+const moveAside = (chat: ChatSession | null) => chat?.moveToBackground() ?? Promise.resolve();
+
 /** The conversation and the composer. */
 function ChatPane({ connection, session, models, hub, onUnauthorized, active, onHistory, onNewChat, historyActivity }: ChatPaneProps) {
   const { chat, state, activeID } = session;
@@ -303,27 +340,23 @@ function ChatPane({ connection, session, models, hub, onUnauthorized, active, on
   const store = models.store;
   const picker = usePicker(models);
   const title = useChatTitle(activeID, state.title);
-  const transcript = (
-    <>
-      <TranscriptList chat={chat} state={state} models={models} />
-      <div className="mx-auto w-full max-w-chat">
-        <PaneNotice session={session} models={models} />
-        <ChatComposer box={box} composer={composer} models={models} active={active} question={paneQuestion(session)} />
-      </div>
-      {store && (
-        <ModelPicker store={store} state={models.state} onClose={() => picker.onOpenChange(false)} />
-      )}
-    </>
-  );
+  const { nav, child, question } = useSubagentView(session, connection, hub, onUnauthorized);
 
   return (
     <DropdownMenu open={picker.picking} onOpenChange={picker.onOpenChange}>
     <div className="relative flex h-full min-h-0 flex-col">
-      <SessionBranch activeID={activeID} hub={hub} connection={connection} models={models} onUnauthorized={onUnauthorized} chat={chat} state={state}>
+      <SessionBranch activeID={activeID} hub={hub} nav={nav} child={child} models={models} state={state}>
         <ChatHeader title={title} activeID={activeID} onHistory={onHistory} onNewChat={onNewChat} historyActivity={historyActivity} />
         <ConnectionBanners connection={connection} />
-        {transcript}
+        <TranscriptList chat={chat} state={state} models={models} />
+        <div className="mx-auto w-full max-w-chat"><PaneNotice session={session} models={models} /></div>
       </SessionBranch>
+      <div className="mx-auto w-full max-w-chat shrink-0">
+        <ChatComposer box={box} composer={composer} models={models} active={active} question={question} subagent={!!nav.child} />
+      </div>
+      {store && (
+        <ModelPicker store={store} state={models.state} onClose={() => picker.onOpenChange(false)} />
+      )}
     </div>
     </DropdownMenu>
   );
@@ -335,56 +368,66 @@ function useTranscript(chat: ChatSession | null, state: typeof INITIAL_CHAT_STAT
   const { timeline, local } = state;
   const pending = useMemo(() => pendingMessages({ timeline, local }, chat?.previewFiles), [timeline, local, chat]);
   const loadEarlier = useCallback(() => void chat?.loadEarlier(), [chat]);
-  return { timeline, pending, loadEarlier };
+  const finished = timeline?.finished;
+  const background = useMemo(() => ({ finished }), [finished]);
+  return { timeline, pending, loadEarlier, background };
 }
 
 function TranscriptList({ chat, state, models }: { chat: ChatSession | null; state: ChatState; models: Models }) {
-  const { timeline, pending, loadEarlier } = useTranscript(chat, state);
+  const { timeline, pending, loadEarlier, background } = useTranscript(chat, state);
   return (
     <ShellOutputProvider value={chat?.shellOutput ?? null}>
-      <ModelCatalogProvider catalog={models.state.catalog ?? models.state.cached}>
-        <MessageList turns={timeline?.turns ?? NO_TURNS} switches={timeline?.switches} pending={pending}
-          previewFiles={chat?.previewFiles} hasEarlier={state.hasEarlier} loadingEarlier={state.loadingEarlier} onLoadEarlier={loadEarlier} />
-      </ModelCatalogProvider>
+      <BackgroundProvider value={background}>
+        <ModelCatalogProvider catalog={models.state.catalog ?? models.state.cached}>
+          <MessageList turns={timeline?.turns ?? NO_TURNS} switches={timeline?.switches} pending={pending}
+            previewFiles={chat?.previewFiles} hasEarlier={state.hasEarlier} loadingEarlier={state.loadingEarlier} onLoadEarlier={loadEarlier} />
+        </ModelCatalogProvider>
+      </BackgroundProvider>
     </ShellOutputProvider>
   );
 }
 
-function SessionBranch({ activeID, hub, connection, models, onUnauthorized, children, chat, state }: {
-  activeID: string | null; hub: EventHub | null; connection: Connection; models: Models; onUnauthorized: () => void;
-  chat: ChatSession | null; state: ChatState;
+type ChildSession = { chat: ChatSession | null; state: ChatState };
+
+/** The open subagent's own chat session (its transcript and status), or none on the root chat. */
+function useChildSession(sessionID: string | null, connection: Connection, hub: EventHub | null, onUnauthorized: () => void): ChildSession {
+  const [chat, setChat] = useState<ChatSession | null>(null);
+  useEffect(() => {
+    if (!sessionID || !hub) return;
+    const child = new ChatSession({ connection, events: hub, sessionID, onUnauthorized });
+    setChat(child);
+    void child.load();
+    return () => {
+      child.dispose();
+      setChat(null);
+    };
+  }, [connection, hub, sessionID, onUnauthorized]);
+  const state = useSyncExternalStore(chat?.subscribe ?? noSubscribe, chat?.getState ?? (() => INITIAL_CHAT_STATE));
+  return { chat, state };
+}
+
+function SessionBranch({ activeID, hub, nav, child, models, state, children }: {
+  activeID: string | null; hub: EventHub | null; nav: SubagentPath; child: ChildSession; models: Models;
+  state: ChatState;
   children: ReactNode;
 }) {
-  if (!activeID || !hub) return children;
+  if (!activeID || !hub) return <div className="flex min-h-0 flex-1 flex-col">{children}</div>;
   return (
-    <SubagentTabs rootID={activeID} pendingSessionIDs={[...state.permissions.map((p) => p.sessionID), ...state.forms.map((f) => f.sessionID)]}
-      renderChild={(id) => <SubagentTranscript key={id} sessionID={id} connection={connection} hub={hub} models={models} onUnauthorized={onUnauthorized} requestChat={chat} requestState={state} />}>
+    <SubagentTabs rootID={activeID} nav={nav} pendingSessionIDs={[...state.permissions.map((p) => p.sessionID), ...state.forms.map((f) => f.sessionID)]}
+      renderChild={() => <SubagentTranscript child={child} models={models} />}>
       <div className="flex h-full min-h-0 flex-col">{children}</div>
     </SubagentTabs>
   );
 }
 
-function SubagentTranscript({ sessionID, connection, hub, models, onUnauthorized, requestChat, requestState }: {
-  sessionID: string; connection: Connection; hub: EventHub; models: Models; onUnauthorized: () => void;
-  requestChat: ChatSession | null; requestState: ChatState;
-}) {
-  const [chat, setChat] = useState<ChatSession | null>(null);
-  useEffect(() => {
-    const child = new ChatSession({ connection, events: hub, sessionID, onUnauthorized });
-    setChat(child);
-    void child.load();
-    return () => child.dispose();
-  }, [connection, hub, sessionID, onUnauthorized]);
-  const state = useSyncExternalStore(chat?.subscribe ?? noSubscribe, chat?.getState ?? (() => INITIAL_CHAT_STATE));
+function SubagentTranscript({ child: { chat, state }, models }: { child: ChildSession; models: Models }) {
   return (
     <div className="flex h-full min-h-0 flex-col">
       <TranscriptList chat={chat} state={state} models={models} />
-      {state.error && <Notice text={state.error} />}
-      {state.notice && <Notice text={state.notice} onDismiss={() => chat?.dismissNotice()} />}
-      {(requestState.permissions.some((p) => p.sessionID === sessionID) || requestState.forms.some((f) => f.sessionID === sessionID)) && (
-        <div className="mx-auto w-full max-w-chat px-3">{paneQuestion({ chat: requestChat, state: { ...requestState, permissions: requestState.permissions.filter((p) => p.sessionID === sessionID), forms: requestState.forms.filter((f) => f.sessionID === sessionID) } })}</div>
-      )}
-      <SubagentStatus state={state} chat={chat} />
+      <div className="mx-auto w-full max-w-chat">
+        {state.error && <Notice text={state.error} />}
+        {state.notice && <Notice text={state.notice} onDismiss={() => chat?.dismissNotice()} />}
+      </div>
     </div>
   );
 }
@@ -393,36 +436,80 @@ function subagentOutcome(state: ChatState): string {
   return state.sessionInfo?.outcome ?? state.timeline?.turns.at(-1)?.reply.status ?? 'idle';
 }
 
-function subagentFinishedText(state: ChatState, started: number | undefined): string {
-  const labels: Record<string, string> = { interrupted: 'Interrupted', failed: 'Failed', succeeded: 'Completed' };
-  const label = labels[subagentOutcome(state)] ?? 'Loading…';
-  const ended = state.timeline?.idleAt ?? state.sessionInfo?.ended;
-  return started === undefined || ended == null ? label : `${label} · ${formatDuration(ended - started)}`;
+const SUBAGENT_LABELS: Record<string, string> = { running: 'Running', interrupted: 'Interrupted', failed: 'Failed', succeeded: 'Completed' };
+
+/** How long the run has gone on (live) or took, once its start is known. */
+function subagentElapsed(timeline: NonNullable<ChatState['timeline']>, info: ChatState['sessionInfo'], now: number): string | undefined {
+  const started = info?.started ?? timeline.turns[0]?.created;
+  const ended = timeline.working ? now : timeline.idleAt ?? info?.ended;
+  return started === undefined || ended == null ? undefined : formatDuration(ended - started);
 }
 
-function subagentStatusText(state: ChatState, now: number): string {
-  const timeline = state.timeline;
-  if (!timeline) return 'Loading…';
-  const started = state.sessionInfo?.started ?? timeline.turns[0]?.created;
-  if (timeline.working) return started === undefined ? 'Running' : formatDuration(now - started);
-  return subagentFinishedText(state, started);
+/** The run's state word and its elapsed time; null until the session says how it stands. */
+function subagentStatusParts(state: ChatState, now: number): { key: string; label: string; elapsed?: string } | null {
+  if (!state.timeline) return null;
+  const key = state.timeline.working ? 'running' : subagentOutcome(state);
+  const label = SUBAGENT_LABELS[key];
+  return label ? { key, label, elapsed: subagentElapsed(state.timeline, state.sessionInfo, now) } : null;
 }
 
-function SubagentStatus({ state, chat }: { state: ChatState; chat: ChatSession | null }) {
+/** The status line's shape ("Running · 2m 4s · Explore") while the subagent's session loads. */
+function SubagentStatusSkeleton() {
+  return (
+    <span role="status" aria-label="Loading subagent status" className="flex min-w-0 flex-1 items-center gap-1.5">
+      <Skeleton className="h-3 w-16 rounded-md" />
+      <Skeleton className="h-3 w-10 rounded-md" />
+      <Skeleton className="h-3 w-14 rounded-md" />
+    </span>
+  );
+}
+
+/** A dot between two status parts; the row's gap spaces it evenly on both sides. */
+const Dot = () => <span aria-hidden="true" className="shrink-0 text-text-tertiary">·</span>;
+
+/**
+ * Moves the subagent the main chat is waiting on to the background, so the main agent carries on
+ * while it runs. Disabled once pressed, until the call returns and the button goes.
+ */
+function MoveToBackground({ onMove }: { onMove: () => Promise<void> }) {
+  const [moving, setMoving] = useState(false);
+  const onClick = () => {
+    setMoving(true);
+    void onMove().finally(() => setMoving(false));
+  };
+  return (
+    <Button type="button" variant="ghost" size="sm" disabled={moving} onClick={onClick} className="shrink-0 animate-reveal gap-1.5 text-text-secondary">
+      <Icon name="background" />
+      Move to background
+    </Button>
+  );
+}
+
+function SubagentStatus({ state, chat, onBackground }: {
+  state: ChatState;
+  chat: ChatSession | null;
+  /** Set while the main chat waits on this subagent in the foreground. */
+  onBackground?: () => Promise<void>;
+}) {
   const working = state.timeline?.working === true;
   const now = useNow(working);
-  const status = subagentStatusText(state, now);
+  const parts = subagentStatusParts(state, now);
+  const agent = state.durable?.agent;
   return (
-    <div className="mx-auto flex w-full max-w-chat shrink-0 items-center gap-3 p-4 type-work text-text-secondary">
-      <span className="flex min-w-0 flex-1 items-center overflow-hidden tabular-nums">
-        <MorphText id={working ? 'running' : subagentOutcome(state)} text={status} steady className="shrink-0" />
-        {state.durable?.agent && <span className="min-w-0 truncate">{` · ${state.durable.agent}`}</span>}
-      </span>
-      {working && <Button type="button" size="icon-sm" aria-label="Stop subagent" title="Stop subagent"
+    <section aria-label="Subagent status" className="flex min-h-13 w-full items-center gap-3 py-2 pr-2 pl-4 type-work text-text-secondary">
+      {parts ? (
+        <span className="flex min-w-0 flex-1 animate-reveal items-center gap-1.5 overflow-hidden whitespace-nowrap tabular-nums">
+          <MorphText id={parts.key} text={parts.label} steady className="shrink-0" />
+          {parts.elapsed && <><Dot /><span className="shrink-0">{parts.elapsed}</span></>}
+          {agent && <><Dot /><span className="min-w-0 truncate capitalize">{agent}</span></>}
+        </span>
+      ) : <SubagentStatusSkeleton />}
+      {working && onBackground && <MoveToBackground onMove={onBackground} />}
+      {working && <Button type="button" size="icon" aria-label="Stop subagent" title="Stop subagent"
         disabled={state.interrupting} onClick={() => void chat?.stop(false)}>
         <Icon name="stop" className="[&_path]:fill-current" />
       </Button>}
-    </div>
+    </section>
   );
 }
 

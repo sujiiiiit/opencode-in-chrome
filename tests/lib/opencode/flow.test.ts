@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { formatDuration, groupSpan, replyFlow, type FlowItem } from '@/lib/opencode/flow';
+import { awaitingPickup, formatDuration, groupSpan, replyFlow, type FlowItem } from '@/lib/opencode/flow';
 import type { ReplyPart, ReplyState, ReplyStatus, ReplyTextPart, ReplyToolPart } from '@/lib/opencode/reply';
 import { SESSION_ID } from '@/tests/support/testkit';
 
@@ -31,9 +31,32 @@ const reply = (status: ReplyStatus, ...steps: ReplyPart[][]): ReplyState => ({
 
 /** The flow as `work[a,b]` / `answer:x` strings. */
 const shape = (items: FlowItem[]) =>
-  items.map((item) => (item.type === 'work' ? `work[${item.parts.map((p) => p.id).join(',')}]` : `answer:${item.part.id}`));
+  items.map((item) => {
+    if (item.type === 'work') return `work[${item.parts.map((p) => p.id).join(',')}]`;
+    if (item.type === 'agents') return `agents[${item.parts.map((p) => p.id).join(',')}]`;
+    return `answer:${item.part.id}`;
+  });
 
 describe('replyFlow', () => {
+  it('sets subagent calls apart where they were made, stacking the ones started together', () => {
+    const agent = (id: string) => tool(id, { name: 'subagent' });
+    const flow = replyFlow(reply('succeeded', [reasoning('r1'), agent('a1'), agent('a2')], [tool('t1'), agent('a3'), text('done')]));
+    expect(shape(flow)).toEqual(['work[r1]', 'agents[a1,a2]', 'work[t1]', 'agents[a3]', 'answer:done']);
+  });
+
+  it('starts new work where the reply picked up after a background completion', () => {
+    const base = reply('running', [tool('t1')], [tool('t2'), text('done')]);
+    const flow = replyFlow({ ...base, notices: [{ id: 'n1', afterStep: 1 }] });
+    expect(shape(flow)).toEqual(['work[t1]', 'work[t2]', 'answer:done']);
+    // Keyed by the completion, so the placeholder that stood in for it is the same group.
+    expect(flow[1]!.key).toBe('work:after:n1');
+    // Delivered before the next step arrives: the work is unsplit, and the reply awaits the pickup.
+    const before = { ...base, notices: [{ id: 'n1', afterStep: 2 }] };
+    expect(shape(replyFlow(before))).toEqual(['work[t1,t2]', 'answer:done']);
+    expect(awaitingPickup(before)).toBe('n1');
+    expect(awaitingPickup({ ...base, notices: [{ id: 'n1', afterStep: 1 }] })).toBeUndefined();
+  });
+
   it('folds the work before the last tool call and keeps the answer after it outside', () => {
     const flow = replyFlow(
       reply('succeeded', [reasoning('r1'), text('t1', { phase: 'commentary' }), tool('x1')], [reasoning('r2'), tool('x2')], [text('answer')]),

@@ -1,7 +1,8 @@
 // How one reply reads on screen, ported from opencode's timeline projection: the work (reasoning,
 // tool calls and explicitly labelled commentary) folds into a collapsible group, and the
 // answer (the text after the last tool call) stands outside it, in the order it all happened.
-import { replyParts, type ReplyPart, type ReplyState, type ReplyTextPart, type ReplyToolPart } from './reply';
+import { isAgentTool } from './background';
+import type { ReplyPart, ReplyState, ReplyTextPart, ReplyToolPart } from './reply';
 
 export type WorkGroup = {
   type: 'work';
@@ -12,7 +13,13 @@ export type WorkGroup = {
 
 export type AnswerText = { type: 'answer'; key: string; part: ReplyTextPart };
 
-export type FlowItem = WorkGroup | AnswerText;
+/**
+ * Subagent calls made one after another (agents started together): a row each in the reply,
+ * where they were made, outside the folded work. The first call's ID keys it while it grows.
+ */
+export type AgentsItem = { type: 'agents'; key: string; parts: ReplyToolPart[] };
+
+export type FlowItem = WorkGroup | AnswerText | AgentsItem;
 
 const visible = (part: ReplyPart) => part.kind === 'tool' || part.text.trim() !== '';
 
@@ -22,21 +29,53 @@ const visible = (part: ReplyPart) => part.kind === 'tool' || part.text.trim() !=
  */
 const commentary = (part: ReplyTextPart): boolean => part.phase === 'commentary';
 
-/** The reply as work groups and answer texts, in order. */
+/** The key of the work the reply picked up with after background completion `id`. */
+export const pickupKey = (id: string) => `work:after:${id}`;
+
+/**
+ * Adds a part to the flow. `pickup` (a completion's id) is set for the first part after a
+ * background subagent finished: it starts an item of its own instead of joining the one before.
+ */
+function addPart(items: FlowItem[], part: ReplyPart, pickup?: string) {
+  if (part.kind === 'text' && !commentary(part)) items.push({ type: 'answer', key: `answer:${part.id}`, part });
+  else if (part.kind === 'tool' && isAgentTool(part)) addAgent(items, part, pickup);
+  else addWork(items, part, pickup);
+}
+
+function addAgent(items: FlowItem[], part: ReplyToolPart, pickup?: string) {
+  const last = pickup ? undefined : items.at(-1);
+  if (last?.type === 'agents') last.parts.push(part);
+  else items.push({ type: 'agents', key: `agents:${part.id}`, parts: [part] });
+}
+
+function addWork(items: FlowItem[], part: ReplyPart, pickup?: string) {
+  const last = pickup ? undefined : items.at(-1);
+  if (last?.type === 'work') last.parts.push(part);
+  else items.push({ type: 'work', key: pickup ? pickupKey(pickup) : `work:${part.id}`, parts: [part] });
+}
+
+/**
+ * The reply as work groups, answer texts and subagent calls, in order. Where a background
+ * subagent finished and the main agent picked up again, the work after starts a group of its own.
+ */
 export function replyFlow(reply: ReplyState): FlowItem[] {
-  const parts = replyParts(reply).filter(visible);
+  const notices = reply.notices ?? [];
   const items: FlowItem[] = [];
-  for (const part of parts) {
-    if (part.kind === 'text' && !commentary(part)) {
-      items.push({ type: 'answer', key: `answer:${part.id}`, part });
-      continue;
+  let pickup: string | undefined;
+  reply.steps.forEach((step, index) => {
+    pickup = notices.findLast((notice) => notice.afterStep === index)?.id ?? pickup;
+    for (const part of step.parts) {
+      if (!visible(part)) continue;
+      addPart(items, part, pickup);
+      pickup = undefined;
     }
-    const last = items.at(-1);
-    if (last?.type === 'work') last.parts.push(part);
-    else items.push({ type: 'work', key: `work:${part.id}`, parts: [part] });
-  }
+  });
   return items;
 }
+
+/** A background completion the main agent is picking up from, before its first new step arrives. */
+export const awaitingPickup = (reply: ReplyState): string | undefined =>
+  reply.notices?.findLast((notice) => notice.afterStep >= reply.steps.length)?.id;
 
 export const groupTools = (group: WorkGroup) => group.parts.filter((p): p is ReplyToolPart => p.kind === 'tool');
 

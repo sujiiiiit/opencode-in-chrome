@@ -1,6 +1,7 @@
 // How each tool call reads in the timeline: its family, its title while it works and once it is
 // done, and the one-line subject (the command, the file, the query). Pure and defensive: tool
 // input and metadata are untyped at runtime (plugin tools send whatever they like).
+import { isBackgroundCall, type NoticeState } from './background';
 import { browserCalls, browserStepsText, isBrowserPart } from './browser-steps';
 import { isRecord, type ReplyToolPart } from './reply';
 
@@ -166,16 +167,39 @@ export const toolPending = (part: ReplyToolPart, live: boolean) =>
 export const toolStopped = (part: ReplyToolPart, live: boolean) =>
   part.aborted === true || (!live && (part.status === 'streaming' || part.status === 'running'));
 
-/** The tool's title for its state: "Running" while it works, "Ran" once done. */
+/**
+ * The tool's title for its state: "Running" while it works, "Ran" once done. A subagent row reads
+ * its own state instead (agentState, agentLabel), which follows a background run past its call.
+ */
 export function toolTitle(part: ReplyToolPart, live: boolean): string {
   if (isBrowserPart(part)) return toolPending(part, live) ? 'Browsing' : 'Browsed';
   const spec = toolSpec(part.name);
-  if (spec.category === 'agent') {
-    const name = toolField(part, 'subagent_type', true) ?? toolField(part, 'agent', true) ?? str(part.metadata.agent);
-    if (name) return `${toolPending(part, live) ? 'Running' : 'Ran'} ${name} agent`;
-  }
-  return toolPending(part, live) ? spec.active : spec.done;
+  if (spec.category !== 'agent') return toolPending(part, live) ? spec.active : spec.done;
+  return agentTitle(part, toolPending(part, live) ? 'Running' : 'Ran');
 }
+
+/** "Ran explore agent", "Running background explore agent": the verb, then which agent. */
+function agentTitle(part: ReplyToolPart, verb: string): string {
+  const name = toolField(part, 'subagent_type', true) ?? toolField(part, 'agent', true) ?? str(part.metadata.agent);
+  return `${verb} ${isBackgroundCall(part) ? 'background ' : ''}${name ? `${name} agent` : 'agent'}`;
+}
+
+export type AgentState = 'running' | 'stopped' | 'failed' | 'done';
+
+const AGENT_VERBS: Record<AgentState, string> = { running: 'Running', stopped: 'Stopped', failed: 'Failed', done: 'Ran' };
+
+/**
+ * Where a subagent stands: still working, stopped (the reply was interrupted mid-call, or a
+ * background run was cancelled), failed, or done. `outcome` is a background run's reported end.
+ */
+export function agentState(part: ReplyToolPart, live: boolean, outcome?: NoticeState): AgentState {
+  if (toolPending(part, live) || (isBackgroundCall(part) && !outcome)) return 'running';
+  if (toolStopped(part, live) || outcome === 'cancelled') return 'stopped';
+  return part.status === 'error' || outcome === 'error' ? 'failed' : 'done';
+}
+
+/** The subagent row's label: only the verb changes between states ("Running" → "Ran"). */
+export const agentLabel = (part: ReplyToolPart, state: AgentState) => agentTitle(part, AGENT_VERBS[state]);
 
 /** The call as one sentence for a summary line: `Searching for "TODO"`, `Ran npm test`. */
 export function toolLabel(part: ReplyToolPart, live: boolean): string {
@@ -257,7 +281,6 @@ const PIECES: readonly [Bucket, string, string][] = [
   ['websearch', 'web search', 'web searches'],
   ['page', 'page opened', 'pages opened'],
   ['browser', 'browser step', 'browser steps'],
-  ['agent', 'agent', 'agents'],
 ];
 
 /** "3 Chrome navigate calls" when one plugin tool did them all, else "3 tool calls". */
