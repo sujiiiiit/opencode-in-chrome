@@ -37,6 +37,7 @@ import { PromptBox, type PromptBoxHandle } from './prompt-box/prompt-box';
 import { useChatSession, useComposer, useEventHub, useHistory, useLatest } from './use-chat';
 import { useMentions } from './use-mentions';
 import { useGoal } from './use-goal';
+import type { Goal } from '@/lib/opencode/goal';
 import { ComposerTray } from './prompt-box/composer-tray';
 import { GoalRow, showsGoal } from './prompt-box/goal-tray';
 import type { MentionItem } from '@/lib/opencode/mentions';
@@ -380,7 +381,7 @@ function ChatPane({ connection, session, models, hub, onUnauthorized, active, on
       <SessionBranch activeID={activeID} hub={hub} nav={nav} child={child} models={models} state={state}>
         <ChatHeader title={title} activeID={activeID} onHistory={onHistory} onNewChat={onNewChat} historyActivity={historyActivity} />
         <ConnectionBanners connection={connection} />
-        <TranscriptList chat={chat} state={state} models={models} />
+        <TranscriptList chat={chat} state={state} models={models} goal={goal.goal} />
         <div className="mx-auto w-full max-w-chat"><PaneNotice session={session} models={models} /></div>
       </SessionBranch>
       <div className="mx-auto w-full max-w-chat shrink-0">
@@ -405,13 +406,13 @@ function useTranscript(chat: ChatSession | null, state: typeof INITIAL_CHAT_STAT
   return { timeline, pending, loadEarlier, background };
 }
 
-function TranscriptList({ chat, state, models }: { chat: ChatSession | null; state: ChatState; models: Models }) {
+function TranscriptList({ chat, state, models, goal }: { chat: ChatSession | null; state: ChatState; models: Models; goal?: Goal | null }) {
   const { timeline, pending, loadEarlier, background } = useTranscript(chat, state);
   return (
     <ShellOutputProvider value={chat?.shellOutput ?? null}>
       <BackgroundProvider value={background}>
         <ModelCatalogProvider catalog={models.state.catalog ?? models.state.cached}>
-          <MessageList turns={timeline?.turns ?? NO_TURNS} switches={timeline?.switches} pending={pending}
+          <MessageList turns={timeline?.turns ?? NO_TURNS} switches={timeline?.switches} pending={pending} goal={goal}
             previewFiles={chat?.previewFiles} hasEarlier={state.hasEarlier} loadingEarlier={state.loadingEarlier} onLoadEarlier={loadEarlier} />
         </ModelCatalogProvider>
       </BackgroundProvider>

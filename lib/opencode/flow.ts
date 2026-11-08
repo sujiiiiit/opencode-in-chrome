@@ -2,7 +2,7 @@
 // tool calls and explicitly labelled commentary) folds into a collapsible group, and the
 // answer (the text after the last tool call) stands outside it, in the order it all happened.
 import { isAgentTool } from './background';
-import type { ReplyPart, ReplyState, ReplyTextPart, ReplyToolPart } from './reply';
+import type { ReplyNotice, ReplyPart, ReplyState, ReplyTextPart, ReplyToolPart } from './reply';
 
 export type WorkGroup = {
   type: 'work';
@@ -19,7 +19,10 @@ export type AnswerText = { type: 'answer'; key: string; part: ReplyTextPart };
  */
 export type AgentsItem = { type: 'agents'; key: string; parts: ReplyToolPart[] };
 
-export type FlowItem = WorkGroup | AnswerText | AgentsItem;
+/** A goal round: the reviewer sent the work back, so the reply picks up below this divider. */
+export type RoundDivider = { type: 'round'; key: string; label: string };
+
+export type FlowItem = WorkGroup | AnswerText | AgentsItem | RoundDivider;
 
 const visible = (part: ReplyPart) => part.kind === 'tool' || part.text.trim() !== '';
 
@@ -55,14 +58,43 @@ function addWork(items: FlowItem[], part: ReplyPart, pickup?: string) {
 }
 
 /**
+ * A round's divider label. The kickoff is round 1, so the reviewer's first send-back starts round
+ * 2; a resume restarts the count, as the goal's round budget does.
+ */
+function roundLabels(notices: ReplyNotice[]): Map<string, string> {
+  const labels = new Map<string, string>();
+  let round = 1;
+  for (const notice of notices) {
+    if (!notice.goal) continue;
+    if (notice.goal.resumed) {
+      round = 1;
+      labels.set(notice.id, 'Goal resumed');
+      continue;
+    }
+    round += 1;
+    labels.set(notice.id, notice.goal.reason ? `Round ${round} · ${notice.goal.reason}` : `Round ${round}`);
+  }
+  return labels;
+}
+
+/**
  * The reply as work groups, answer texts and subagent calls, in order. Where a background
- * subagent finished and the main agent picked up again, the work after starts a group of its own.
+ * subagent finished or a goal round began and the main agent picked up again, the work after
+ * starts a group of its own; a goal round also gets a divider there.
  */
 export function replyFlow(reply: ReplyState): FlowItem[] {
   const notices = reply.notices ?? [];
+  const labels = roundLabels(notices);
   const items: FlowItem[] = [];
+  const dividers = (at: (afterStep: number) => boolean) => {
+    for (const notice of notices) {
+      const label = labels.get(notice.id);
+      if (label && at(notice.afterStep)) items.push({ type: 'round', key: `round:${notice.id}`, label });
+    }
+  };
   let pickup: string | undefined;
   reply.steps.forEach((step, index) => {
+    dividers((afterStep) => afterStep === index);
     pickup = notices.findLast((notice) => notice.afterStep === index)?.id ?? pickup;
     for (const part of step.parts) {
       if (!visible(part)) continue;
@@ -70,6 +102,8 @@ export function replyFlow(reply: ReplyState): FlowItem[] {
       pickup = undefined;
     }
   });
+  // Rounds the reply has not picked up from yet (no step after them so far).
+  dividers((afterStep) => afterStep >= reply.steps.length);
   return items;
 }
 

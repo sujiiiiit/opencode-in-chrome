@@ -23,6 +23,35 @@ function setup(props: Partial<Props> = {}) {
 const steer = (id: string, text: string, status: PendingMessage['status'], local = false): PendingMessage => ({ id, text, status, local });
 const bubble = (text: string) => screen.getByText(text).closest<HTMLElement>('[data-slot="user-message"]')!;
 
+describe('MessageList goal turns', () => {
+  const goalTurn = (r: ReplyState): Turn => ({ id: 'k1', text: '', goal: { id: 'g1', objective: 'Make the tests pass' }, reply: r });
+  const goal = (status: 'active' | 'paused' | 'complete', reason?: string) => ({ id: 'g1', objective: 'Make the tests pass', status, rounds: 2, maxRounds: 50, reason });
+
+  it('opens a goal turn with its objective instead of a user bubble', () => {
+    setup({ turns: [goalTurn(reply('running', 'Working'))], goal: goal('active') });
+    expect(screen.getByText('Goal · Make the tests pass')).toBeInTheDocument();
+    expect(document.querySelector('[data-slot="user-message"]')).toBeNull();
+    expect(document.querySelector('[data-slot="goal-outcome"]')).toBeNull();
+  });
+
+  it('marks each round where the reply picked up again', () => {
+    const r = reply('running', 'Round one');
+    r.notices = [{ id: 'r1', afterStep: 1, goal: { reason: 'Two tests still fail', resumed: false } }];
+    setup({ turns: [goalTurn(r)], goal: goal('active') });
+    expect(screen.getByText('Round 2 · Two tests still fail')).toBeInTheDocument();
+  });
+
+  it('closes the goal turn with how it ended', () => {
+    setup({ turns: [goalTurn(reply('succeeded', 'Done'))], goal: goal('complete', 'All 986 tests pass') });
+    expect(screen.getByText('Goal met · All 986 tests pass')).toBeInTheDocument();
+  });
+
+  it('says why a goal paused', () => {
+    setup({ turns: [goalTurn(reply('succeeded', 'Stuck'))], goal: goal('paused', 'Not making progress') });
+    expect(screen.getByText('Goal paused · Not making progress')).toBeInTheDocument();
+  });
+});
+
 describe('MessageList', () => {
   it('renders model and variant switches in the conversation', () => {
     const model = { providerID: 'p', modelID: 'new' };
@@ -453,6 +482,53 @@ describe('MessageList: scrolling', () => {
     content.height = 1148;
     act(() => callbacks.forEach((callback) => callback([], {} as ResizeObserver)));
     expect(viewport.scrollTop).toBe(200);
+  });
+
+  it('lets a reply fill the follow space so no scroll is left below a sent prompt', () => {
+    const frame = frames();
+    const turns = [first];
+    const { rerender } = render(<MessageList turns={turns} pending={[]} />);
+    // Real layout: the content ends at `end`, then the spacer, then the list's 12px padding.
+    const layout = { end: 1000 };
+    const viewport = document.querySelector<HTMLElement>('[data-slot="scroll-area-viewport"]')!;
+    const spacer = () => document.querySelector<HTMLElement>('[data-slot="stream-space"]')!;
+    const offsetTop = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'offsetTop');
+    Object.defineProperty(HTMLElement.prototype, 'offsetTop', {
+      configurable: true,
+      get(this: HTMLElement) { return this.dataset.slot === 'stream-space' ? layout.end : 0; },
+    });
+    Object.defineProperty(viewport, 'clientHeight', { configurable: true, get: () => 200 });
+    Object.defineProperty(viewport, 'scrollHeight', {
+      configurable: true,
+      get: () => layout.end + (Number.parseFloat(spacer().style.height) || 0) + 12,
+    });
+    const leftBelow = () => viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop;
+    try {
+      layout.end = 1100;
+      rerender(<MessageList turns={turns} pending={[steer('p1', 'next', 'starting')]} />);
+      frame(performance.now() + 240);
+      expect(spacer()).toHaveStyle({ height: '138px' });
+      expect(leftBelow()).toBe(0);
+      const sentAt = viewport.scrollTop;
+
+      // The server admits it: its footer and the reply's Thinking row grow the content.
+      layout.end = 1180;
+      rerender(<MessageList turns={[first, turn('p1', 'next', reply('running'))]} pending={[]} />);
+      expect(viewport.scrollTop).toBe(sentAt);
+      expect(spacer()).toHaveStyle({ height: '58px' });
+      expect(leftBelow()).toBe(0);
+
+      // Text reaching the viewport's bottom turns the page, with the whole follow space again.
+      layout.end = 1260;
+      rerender(<MessageList turns={[first, turn('p1', 'next', reply('running', 'a'))]} pending={[]} />);
+      frame(performance.now() + 720);
+      expect(spacer()).toHaveStyle({ height: '138px' });
+      expect(leftBelow()).toBe(0);
+      expect(viewport.scrollTop).toBeGreaterThan(sentAt);
+    } finally {
+      if (offsetTop) Object.defineProperty(HTMLElement.prototype, 'offsetTop', offsetTop);
+      else delete (HTMLElement.prototype as { offsetTop?: number }).offsetTop;
+    }
   });
 
   it('hides the bottom button when only empty follow space remains below', () => {

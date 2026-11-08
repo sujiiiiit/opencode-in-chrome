@@ -70,8 +70,11 @@ export type ReplyStep = {
   tokens?: StepTokens;
 };
 
-/** A background subagent's completion, placed before the step the reply picked up with. */
-export type ReplyNotice = { id: string; afterStep: number };
+/**
+ * Where the reply picked up again, placed before that step: a background subagent's completion,
+ * or (with `goal`) the goal reviewer sending the work back for another round, and why.
+ */
+export type ReplyNotice = { id: string; afterStep: number; goal?: { reason?: string; resumed: boolean } };
 
 export type ReplyState = {
   sessionID: string;
@@ -79,7 +82,7 @@ export type ReplyState = {
   steps: ReplyStep[];
   error?: ReplyError;
   interruptReason?: string;
-  /** Background subagents that finished during this turn and woke the main agent again. */
+  /** Background subagents that finished during this turn and goal rounds: each woke the agent again. */
   notices?: ReplyNotice[];
 };
 

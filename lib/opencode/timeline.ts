@@ -3,21 +3,24 @@
 // step boundary and starts a new turn mid-execution, and a queued prompt is delivered (one at a
 // time) once every steer has drained. Assistant output always belongs to the latest delivered turn.
 import { subagentNotice, type BackgroundNotice, type NoticeState } from './background';
+import { goalMarker, type GoalMarker } from './goal-marker';
 import { initialReply, isRecord, parseError, reduceReply, snapshotStep, type ReplyState, type StepModel } from './reply';
 import { parseSentFiles, withFiles, type SentFile } from './sent-files';
 import type { ServerEvent } from './sse';
 
 export type Delivery = 'steer' | 'queue';
 /** A user prompt in the inbox, in the server's admission order. `files`: its attachments. */
-export type PendingPrompt = { id: string; text: string; delivery: Delivery; created: number; files?: SentFile[] };
+export type PendingPrompt = { id: string; text: string; delivery: Delivery; created: number; files?: SentFile[]; goal?: GoalStart };
+/** A turn a `/goal` started (its kickoff), in place of a prompt the reader wrote. */
+export type GoalStart = { id: string; objective: string };
 /**
  * A non-prompt inbox item (compaction, move, a synthetic note). A queued one blocks reordering the
  * queue. `notice`: the item reports a background subagent's completion.
  */
-export type ControlItem = { id: string; delivery: Delivery; notice?: BackgroundNotice };
+export type ControlItem = { id: string; delivery: Delivery; notice?: BackgroundNotice; goal?: GoalMarker };
 /** `created`: server time (ms) the prompt was sent, when known. `files`: its attachments. */
 export type ModelSwitch = { id: string; model: StepModel; previous?: StepModel };
-export type Turn = { id: string; text: string; reply: ReplyState; created?: number; files?: SentFile[]; switches?: ModelSwitch[] };
+export type Turn = { id: string; text: string; reply: ReplyState; created?: number; files?: SentFile[]; switches?: ModelSwitch[]; goal?: GoalStart };
 /**
  * Where a pending prompt stands, as in opencode's data layer: `starting` is promoted at the next
  * idle boundary, `steering` waits for the next step boundary of an execution that already
@@ -80,11 +83,16 @@ function replaceLastTurn(t: Timeline, update: (turn: Turn) => Turn): Timeline {
   return next === last ? t : { ...t, turns: [...t.turns.slice(0, -1), next] };
 }
 
-/** A non-prompt inbox item; a synthetic one may carry a background subagent's completion. */
+/** A non-prompt inbox item; a synthetic one may carry a background subagent's completion or a goal's work. */
 function parseControl(id: string, item: Record<string, unknown>, mode: Delivery): ControlItem {
   const notice = item.type === 'synthetic' ? subagentNotice(id, item.payload) : null;
-  return { id, delivery: mode, ...(notice && { notice }) };
+  const goal = item.type === 'synthetic' ? goalMarker(id, item.payload) : null;
+  return { id, delivery: mode, ...(notice && { notice }), ...(goal && { goal }) };
 }
+
+/** The goal a kickoff starts (a `start` marker), as its turn carries it. */
+const goalStart = (marker: GoalMarker | null): GoalStart | undefined =>
+  marker?.kind === 'start' ? { id: marker.goalID, objective: marker.objective } : undefined;
 
 /** Parses one inbox item (from an event or GET .../inbox) into a prompt or a control item. */
 function parseInboxItem(
@@ -96,8 +104,14 @@ function parseInboxItem(
   const mode = delivery(item.delivery);
   if (!mode) return null;
   if (item.type !== 'user') return { control: parseControl(id, item, mode) };
-  const payload = isRecord(item.payload) ? item.payload : {};
-  return { prompt: { id, text: str(payload.text) ?? '', delivery: mode, created, ...withFiles(parseSentFiles(payload.files)) } };
+  return { prompt: parsePrompt(id, isRecord(item.payload) ? item.payload : {}, mode, created) };
+}
+
+/** A user inbox item's prompt. A `/goal` with attachments kicks off as one: its text is the kickoff, not the reader's. */
+function parsePrompt(id: string, payload: Record<string, unknown>, mode: Delivery, created: number): PendingPrompt {
+  const goal = goalStart(goalMarker(id, payload));
+  const text = goal ? '' : (str(payload.text) ?? '');
+  return { id, text, delivery: mode, created, ...withFiles(parseSentFiles(payload.files)), ...(goal && { goal }) };
 }
 
 /** Marks a background subagent finished: its completion was admitted, so it runs no more. */
@@ -135,6 +149,26 @@ function resumeWithNotice(t: Timeline, notice: BackgroundNotice): Timeline {
   });
 }
 
+type GoalRound = Extract<GoalMarker, { kind: 'round' }>;
+
+/**
+ * The reviewer sent the goal back for another round: the continuation enters the latest turn (the
+ * goal's), where its reply picks up again, with a divider naming the round and the reason.
+ */
+function resumeWithRound(t: Timeline, marker: GoalRound): Timeline {
+  return replaceLastTurn(t, (turn) => {
+    if (turn.reply.notices?.some((item) => item.id === marker.id)) return turn;
+    const next = withRound(turn, marker);
+    return { ...next, reply: { ...next.reply, status: 'running' } };
+  });
+}
+
+function withRound(turn: Turn, marker: GoalRound): Turn {
+  const { error: _error, interruptReason: _reason, ...reply } = turn.reply;
+  const goal = { resumed: marker.resumed, ...(marker.reason ? { reason: marker.reason } : {}) };
+  return { ...turn, reply: { ...reply, notices: [...(reply.notices ?? []), { id: marker.id, afterStep: reply.steps.length, goal }] } };
+}
+
 /** The turn with a completion note where its reply picks up; the earlier run's error no longer stands. */
 function withNotice(turn: Turn, notice: BackgroundNotice): Turn {
   const { error: _error, interruptReason: _reason, ...reply } = turn.reply;
@@ -143,8 +177,20 @@ function withNotice(turn: Turn, notice: BackgroundNotice): Turn {
 
 function deliver(t: Timeline, id: string, at: number | undefined): Timeline {
   const control = t.controls.find((c) => c.id === id);
-  if (control) return control.notice ? resumeWithNotice(withoutInbox(t, id), control.notice) : withoutInbox(t, id);
-  const prompt = t.pending.find((p) => p.id === id);
+  if (control) return deliverControl(t, control, at);
+  return openTurn(t, id, t.pending.find((p) => p.id === id), at);
+}
+
+/** A delivered control item: a background completion or a goal round resumes the latest turn; a goal kickoff starts one. */
+function deliverControl(t: Timeline, control: ControlItem, at: number | undefined): Timeline {
+  if (control.notice) return resumeWithNotice(withoutInbox(t, control.id), control.notice);
+  if (control.goal?.kind === 'round') return resumeWithRound(withoutInbox(t, control.id), control.goal);
+  const goal = goalStart(control.goal ?? null);
+  return goal ? openTurn(t, control.id, undefined, at, goal) : withoutInbox(t, control.id);
+}
+
+/** A delivered prompt (or goal kickoff) starts a turn, closing the one before. */
+function openTurn(t: Timeline, id: string, prompt: PendingPrompt | undefined, at: number | undefined, goal?: GoalStart): Timeline {
   const rest = withoutInbox(t, id);
   if (hasTurn(t, id)) return rest;
   // The previous turn ends where the new prompt enters the conversation.
@@ -153,17 +199,27 @@ function deliver(t: Timeline, id: string, at: number | undefined): Timeline {
   );
   return {
     ...closed,
-    turns: [...closed.turns, deliveredTurn(t, id, prompt, at)],
+    turns: [...closed.turns, deliveredTurn(t, id, prompt, at, goal)],
     switches: [],
     deliveredSinceIdle: true,
   };
 }
 
 /** The turn a delivered prompt starts: its text and files, from when it was sent (else delivered). */
-function deliveredTurn(t: Timeline, id: string, prompt: PendingPrompt | undefined, at: number | undefined): Turn {
+function deliveredTurn(t: Timeline, id: string, prompt: PendingPrompt | undefined, at: number | undefined, start?: GoalStart): Turn {
   const reply: ReplyState = { ...initialReply(t.sessionID), status: t.working ? 'running' : 'idle' };
-  const created = prompt?.created ?? at;
-  return { id, text: prompt?.text ?? '', reply, ...(created !== undefined ? { created } : {}), ...withFiles(prompt?.files), ...(t.switches.length ? { switches: t.switches } : {}) };
+  const turn: Turn = { id, text: prompt?.text ?? '', reply, ...withFiles(prompt?.files), ...switchesBefore(t) };
+  return withOptional(turn, prompt?.created ?? at, start ?? prompt?.goal);
+}
+
+/** The model switches made since the last turn, which go with the next one. */
+const switchesBefore = (t: Timeline): Pick<Turn, 'switches'> => (t.switches.length ? { switches: t.switches } : {});
+
+/** The turn with its send time and the goal it starts, when known. */
+function withOptional(turn: Turn, created: number | undefined, goal: GoalStart | undefined): Turn {
+  if (created !== undefined) turn.created = created;
+  if (goal) turn.goal = goal;
+  return turn;
 }
 
 function changeDelivery(t: Timeline, id: string, mode: Delivery): Timeline {
@@ -305,9 +361,11 @@ type SnapshotMessage = Record<string, unknown> & { id: string; type: string };
 const SNAPSHOT_READERS: Record<string, (acc: SnapshotAcc, m: SnapshotMessage, sessionID: string) => SnapshotAcc> = {
   user: (acc, m, sessionID) => {
     const created = isRecord(m.time) && typeof m.time.created === 'number' ? m.time.created : undefined;
+    const goal = goalStart(goalMarker(m.id, m));
     acc.turns.push({
       id: m.id,
-      text: str(m.text) ?? '',
+      text: goal ? '' : (str(m.text) ?? ''),
+      ...(goal && { goal }),
       reply: { ...initialReply(sessionID), status: 'succeeded' },
       ...(created !== undefined ? { created } : {}),
       ...withFiles(parseSentFiles(m.files)),
@@ -327,7 +385,9 @@ const SNAPSHOT_READERS: Record<string, (acc: SnapshotAcc, m: SnapshotMessage, se
   },
   // A background subagent's completion: the main agent picked up again in the same turn, so the
   // run after it belongs to that turn until the next idle marker closes it.
-  synthetic: (acc, m) => {
+  synthetic: (acc, m, sessionID) => {
+    const marker = goalMarker(m.id, m);
+    if (marker) return readGoalMarker(acc, marker, m, sessionID);
     const notice = subagentNotice(m.id, m);
     if (!notice) return acc;
     const last = acc.turns.at(-1);
@@ -340,6 +400,25 @@ const SNAPSHOT_READERS: Record<string, (acc: SnapshotAcc, m: SnapshotMessage, se
     return { ...acc, idleAt: createdAt(m), sinceIdle: false };
   },
 };
+
+/** A goal's kickoff starts a turn of its own; a round puts its divider in the latest turn. */
+function readGoalMarker(acc: SnapshotAcc, marker: GoalMarker, m: SnapshotMessage, sessionID: string): SnapshotAcc {
+  if (marker.kind === 'round') {
+    const last = acc.turns.at(-1);
+    if (last) acc.turns[acc.turns.length - 1] = withRound(last, marker);
+    return { ...acc, sinceIdle: true };
+  }
+  const created = isRecord(m.time) && typeof m.time.created === 'number' ? m.time.created : undefined;
+  acc.turns.push({
+    id: m.id,
+    text: '',
+    goal: { id: marker.goalID, objective: marker.objective },
+    reply: { ...initialReply(sessionID), status: 'succeeded' },
+    ...(created !== undefined ? { created } : {}),
+    ...(acc.switches.length ? { switches: acc.switches } : {}),
+  });
+  return { ...acc, switches: [], sinceIdle: true };
+}
 
 /** Folds one snapshot message into the turns being rebuilt. */
 function readSnapshotMessage(acc: SnapshotAcc, m: unknown, sessionID: string): SnapshotAcc {

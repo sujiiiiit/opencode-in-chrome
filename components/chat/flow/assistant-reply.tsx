@@ -79,6 +79,10 @@ export const AssistantReply = memo(function AssistantReply({
           </div>
         ) : item.type === 'work' ? (
           <WorkGroup key={reactKey(item, index)} group={item} live={live} active={live && index === items.length - 1} />
+        ) : item.type === 'round' ? (
+          <div key={item.key} className="my-3">
+            <NoticeDivider slot="goal-round" label={item.label} />
+          </div>
         ) : (
           <div
             key={item.key}

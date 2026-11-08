@@ -28,6 +28,7 @@ import {
   prependHistory,
   reduceTimeline,
   timelineFromSnapshot,
+  type GoalStart,
   type PendingPrompt,
   type PendingStatus,
   type Timeline,
@@ -874,7 +875,7 @@ export class ChatSession extends Store<ChatState> {
   }
 }
 
-export type PendingMessage = { id: string; text: string; status: PendingStatus; local: boolean; files?: SentFile[] };
+export type PendingMessage = { id: string; text: string; status: PendingStatus; local: boolean; files?: SentFile[]; goal?: GoalStart };
 
 /**
  * Prompts waiting for delivery, shown after the conversation: the ones the server holds (in its
@@ -889,6 +890,7 @@ export function pendingMessages(state: Pick<ChatState, 'timeline' | 'local'>, pr
     status: t ? pendingStatus(t, item) : ('starting' as PendingStatus),
     local: false,
     files: previewFiles?.(item.id) ?? item.files,
+    ...(item.goal && { goal: item.goal }),
   }));
   // Runs on every streamed update: skip the id set when this panel has nothing unadmitted.
   if (state.local.length === 0) return admitted;

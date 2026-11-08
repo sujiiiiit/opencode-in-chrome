@@ -6,6 +6,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import type { PendingMessage } from '@/lib/opencode/chat';
 import { replyParts } from '@/lib/opencode/reply';
 import type { ModelSwitch, Turn } from '@/lib/opencode/timeline';
+import type { Goal } from '@/lib/opencode/goal';
 import { turnStats } from '@/lib/opencode/turn-stats';
 import { CollapsibleText } from './collapsible-text';
 import { AssistantReply } from './flow/assistant-reply';
@@ -59,12 +60,34 @@ function SwitchNotice({ notice }: { notice: ModelSwitch }) {
   return <NoticeDivider slot="model-switch" label={label} />;
 }
 
+/** The reader's prompt opens its turn: the bubble, and (once delivered) its footer. */
+function UserOpening({ id, text, files, pending, turn }: { id: string; text: string; files?: SentFile[]; pending: boolean; turn?: Turn }) {
+  return (
+    <div data-slot="user-message" data-footer-host={turn ? '' : undefined} data-pending={pending || undefined} className="flex flex-col items-end gap-2">
+      <UserContent id={id} text={text} files={files} pending={pending} />
+      {turn && <UserMessageFooter text={turn.text} created={turn.created} />}
+    </div>
+  );
+}
+
+/** A `/goal` kickoff opens its turn with the objective: the plugin's prompt, not the reader's words. */
+function GoalOpening({ id, objective, files, pending }: { id: string; objective: string; files?: SentFile[]; pending: boolean }) {
+  return (
+    <div data-slot="goal-start" className="mb-2">
+      <NoticeDivider slot="goal-start-label" icon="goal" label={`Goal · ${objective}`} />
+      {!!files?.length && <UserContent id={id} text="" files={files} pending={pending} />}
+    </div>
+  );
+}
+
 /** One stable component per message ID, from local send through admission and delivery. */
-const MessageEntry = memo(function MessageEntry({ turn, pending, latest, files }: {
+const MessageEntry = memo(function MessageEntry({ turn, pending, latest, files, outcome }: {
   turn?: Turn;
   pending?: PendingMessage;
   latest: boolean;
   files?: SentFile[];
+  /** How the goal this turn started ended (met, or paused and why); shown after its reply. */
+  outcome?: string;
 }) {
   const message = turn ?? pending!;
   const id = message.id;
@@ -75,19 +98,36 @@ const MessageEntry = memo(function MessageEntry({ turn, pending, latest, files }
   const inFlight = useInFlight(id);
   return (
     <div className="flex flex-col gap-2">
-      {!!turn?.switches?.length && (
-        <div className="mb-4 flex flex-col gap-2">
-          {turn.switches.map((notice) => <SwitchNotice key={notice.id} notice={notice} />)}
-        </div>
+      <TurnSwitches switches={turn?.switches} />
+      {message.goal ? (
+        <GoalOpening id={id} objective={message.goal.objective} files={files} pending={waiting} />
+      ) : (
+        <UserOpening id={id} text={message.text} files={files} pending={waiting} turn={turn} />
       )}
-      <div data-slot="user-message" data-footer-host={turn ? '' : undefined} data-pending={waiting || undefined} className="flex flex-col items-end gap-2">
-        <UserContent id={id} text={message.text} files={files} pending={waiting} />
-        {turn && <UserMessageFooter text={turn.text} created={turn.created} />}
-      </div>
       {turn && !inFlight && <AssistantReply reply={turn.reply} stats={stats!} latest={latest} />}
+      {outcome && <GoalOutcome label={outcome} />}
     </div>
   );
 });
+
+/** The model switches made before a turn's prompt, above it. */
+function TurnSwitches({ switches }: { switches?: ModelSwitch[] }) {
+  if (!switches?.length) return null;
+  return (
+    <div className="mb-4 flex flex-col gap-2">
+      {switches.map((notice) => <SwitchNotice key={notice.id} notice={notice} />)}
+    </div>
+  );
+}
+
+/** How the goal a turn started ended, closing that turn. */
+function GoalOutcome({ label }: { label: string }) {
+  return (
+    <div className="mt-3">
+      <NoticeDivider slot="goal-outcome" label={label} />
+    </div>
+  );
+}
 
 /** Turn the page when streamed content reaches the viewport's bottom, leaving room below it. */
 const STICK_PX = 48;
@@ -97,6 +137,8 @@ const EDGE_AT = 1;
 /** Room kept below the content for page turns; a short viewport keeps at least 25% of it for text. */
 const FOLLOW_SPACE_PX = 300;
 const MAX_FOLLOW_SHARE = 0.75;
+/** The list's bottom padding, part of the follow space; the spacer element supplies the rest. */
+const LIST_PAD_PX = 12;
 const SCROLL_MS = 200;
 /** Unread content below the viewport before the scroll-to-bottom button appears... */
 const SHOW_BUTTON_PX = 120;
@@ -105,6 +147,20 @@ const HIDE_BUTTON_PX = 24;
 const PAGE_TURN_MS = 650;
 
 type Motion = { id: number; target: number; from: number; start: number; end: number; lastNow: number };
+/** Where the content ends: the spacer's top, measured within the list so scrolling cannot move it. */
+const contentBottom = (spacer: HTMLElement | null) => spacer?.offsetTop ?? 0;
+
+/**
+ * Size the spacer so content grown past the anchor fills the follow space instead of adding to it:
+ * the true bottom stays where a send or page turn put it. Returns the room left, padding included.
+ */
+function fitSpacer(spacer: HTMLElement, anchor: number | null, space: number): number {
+  const grown = anchor === null ? 0 : Math.max(0, spacer.offsetTop - anchor);
+  const height = Math.max(0, space - LIST_PAD_PX - grown);
+  spacer.style.height = `${height}px`;
+  return Math.min(space, height + LIST_PAD_PX);
+}
+
 const bottom = (element: HTMLElement) => Math.max(0, element.scrollHeight - element.clientHeight);
 const easeOutCubic = (progress: number) => 1 - (1 - progress) ** 3;
 
@@ -134,15 +190,43 @@ type Props = {
   switches?: ModelSwitch[];
   pending: PendingMessage[];
   previewFiles?: (id: string) => SentFile[] | undefined;
+  /** The session's goal: the turn its kickoff started closes with how it ended. */
+  goal?: Goal | null;
   /** Older messages exist beyond the loaded ones. */
   hasEarlier?: boolean;
   loadingEarlier?: boolean;
   onLoadEarlier?: () => void;
 };
 
+/**
+ * The spacer that keeps the follow space below the content. Its full height is laid out at an
+ * anchor (a send or a page turn); content that grows after that fills it rather than adding to it.
+ */
+function useFollowRoom(spaceRef: { current: number }) {
+  const spacer = useRef<HTMLDivElement>(null);
+  /** Where the content ended (the spacer's top) when the follow space was last laid out in full. */
+  const anchor = useRef<number | null>(null);
+  /** The follow space actually left below the content, padding included. */
+  const roomRef = useRef(0);
+  const fitRoom = () => {
+    if (spacer.current) roomRef.current = fitSpacer(spacer.current, anchor.current, spaceRef.current);
+  };
+  /** Lay out the full follow space below the content as it is now. */
+  const anchorRoom = () => {
+    anchor.current = contentBottom(spacer.current);
+    fitRoom();
+  };
+  /** Turns added above moved the content's end from `before` without the reply growing into the space. */
+  const keepRoom = (before: number) => {
+    if (anchor.current !== null) anchor.current += contentBottom(spacer.current) - before;
+    fitRoom();
+  };
+  return { spacer, roomRef, fitRoom, anchorRoom, keepRoom };
+}
+
 function usePageTurn(turns: Turn[], pending: PendingMessage[]) {
   const ref = useRef<HTMLDivElement>(null);
-  const previous = useRef<Edges & { height: number }>({ height: 0 });
+  const previous = useRef<Edges & { height: number; end: number }>({ height: 0, end: 0 });
   /** The reader is at (or near) the bottom, so new content should stay in view. */
   const stick = useRef(true);
   const motion = useRef<Motion | null>(null);
@@ -155,6 +239,7 @@ function usePageTurn(turns: Turn[], pending: PendingMessage[]) {
     setAwayFromBottomState(away);
   };
   const spaceRef = useRef(0);
+  const { spacer, roomRef, fitRoom, anchorRoom, keepRoom } = useFollowRoom(spaceRef);
   const followAfterSpace = useRef(false);
   // A newly sent prompt can grow after its first layout (attachments, fonts, follow space).
   // Keep its scrollbar at the real bottom until the reply starts or the reader scrolls up.
@@ -187,6 +272,18 @@ function usePageTurn(turns: Turn[], pending: PendingMessage[]) {
     spaceRef.current = next;
     setSpace(next);
     return true;
+  };
+
+  /** Bring text that reached the viewport's bottom up, with the whole follow space below it again. */
+  const turnPage = (element: HTMLElement) => {
+    anchorRoom();
+    follow(element, PAGE_TURN_MS);
+  };
+
+  /** Snap to the true bottom with the whole follow space below, for a prompt just sent. */
+  const settle = (element: HTMLElement) => {
+    anchorRoom();
+    follow(element, 0);
   };
 
   const cancelMotion = () => {
@@ -234,7 +331,7 @@ function usePageTurn(turns: Turn[], pending: PendingMessage[]) {
   };
 
   /** Where the content ends, in px from the viewport's top (the follow space below is excluded). */
-  const contentEnd = (element: HTMLElement) => element.scrollHeight - spaceRef.current - element.scrollTop;
+  const contentEnd = (element: HTMLElement) => element.scrollHeight - roomRef.current - element.scrollTop;
 
   const considerTurn = (element: HTMLElement) => {
     const current = stream.current;
@@ -246,7 +343,7 @@ function usePageTurn(turns: Turn[], pending: PendingMessage[]) {
       return;
     }
     const position = contentEnd(element) / element.clientHeight;
-    if (position >= EDGE_AT) follow(element, PAGE_TURN_MS);
+    if (position >= EDGE_AT) turnPage(element);
   };
 
   // Follow the reader: scrolling up to read stops the list from pulling them back down.
@@ -303,10 +400,12 @@ function usePageTurn(turns: Turn[], pending: PendingMessage[]) {
     const content = ref.current;
     const observer = content && new ResizeObserver(() => {
       syncSpace(element);
-      if (settleSentPrompt.current && stick.current && !stream.current) follow(element, 0);
+      fitRoom();
+      if (settleSentPrompt.current && stick.current && !stream.current) settle(element);
       else considerTurn(element);
       syncAwayFromBottom(element);
       previous.current.height = element.scrollHeight;
+      previous.current.end = contentBottom(spacer.current);
     });
     if (content) observer?.observe(content);
     observer?.observe(element);
@@ -330,13 +429,16 @@ function usePageTurn(turns: Turn[], pending: PendingMessage[]) {
     const element = viewport();
     if (!element) return;
     const spaceChanged = syncSpace(element);
+    fitRoom();
     const edges = edgesOf(turns, pending);
     if (prepended(previous.current, edges, turns)) {
+      keepRoom(previous.current.end);
       cancelMotion();
       element.scrollTop += element.scrollHeight - previous.current.height;
     } else if (edges.last !== previous.current.last) {
-      // Sending a message takes the scrollbar to the true bottom immediately.
-      follow(element, 0);
+      // Sending a message takes the scrollbar to the true bottom immediately, with the whole
+      // follow space below it for the reply to fill.
+      settle(element);
       setAwayFromBottom(false);
       stick.current = true;
       settleSentPrompt.current = true;
@@ -345,13 +447,13 @@ function usePageTurn(turns: Turn[], pending: PendingMessage[]) {
       followAfterSpace.current = spaceChanged;
     } else if (followAfterSpace.current && stick.current) {
       followAfterSpace.current = false;
-      follow(element, 0);
+      settle(element);
       setAwayFromBottom(false);
     } else if (stick.current) {
       if (stream.current) settleSentPrompt.current = false;
       considerTurn(element);
     }
-    previous.current = { ...edges, height: element.scrollHeight };
+    previous.current = { ...edges, height: element.scrollHeight, end: contentBottom(spacer.current) };
   }, [turns, pending, space]);
 
   const goToBottom = () => {
@@ -363,7 +465,7 @@ function usePageTurn(turns: Turn[], pending: PendingMessage[]) {
     follow(element);
   };
 
-  return { ref, space, awayFromBottom, goToBottom };
+  return { ref, spacer, awayFromBottom, goToBottom };
 }
 
 /** Which chat, from which oldest turn, a list shows. A new key is a chat opened or older turns loaded. */
@@ -395,8 +497,28 @@ export const MessageList = memo(function MessageList(props: Props) {
   return <TurnList {...useStagedList(props)} />;
 });
 
-const TurnList = memo(function TurnList({ turns, switches = [], pending, previewFiles, hasEarlier = false, loadingEarlier = false, onLoadEarlier }: Props) {
-  const { ref, space, awayFromBottom, goToBottom } = usePageTurn(turns, pending);
+/** How a settled goal ended, for the divider after its turn; nothing while it runs or once cleared. */
+function goalOutcome(goal: Goal | null | undefined): string | undefined {
+  if (!goal || goal.status === 'active') return undefined;
+  const head = goal.status === 'complete' ? 'Goal met' : 'Goal paused';
+  return goal.reason ? `${head} · ${goal.reason}` : head;
+}
+
+/**
+ * The outcome divider for the turn a settled goal started: its latest kickoff turn (a resumed goal
+ * keeps its id, so the last one is the live one), and nothing for any other turn.
+ */
+function useGoalOutcome(turns: Turn[], goal: Goal | null | undefined): { turnID?: string; label?: string } {
+  return useMemo(() => {
+    const label = goalOutcome(goal);
+    if (!label || !goal) return {};
+    return { turnID: turns.findLast((turn) => turn.goal?.id === goal.id)?.id, label };
+  }, [turns, goal]);
+}
+
+const TurnList = memo(function TurnList({ turns, switches = [], pending, previewFiles, goal, hasEarlier = false, loadingEarlier = false, onLoadEarlier }: Props) {
+  const outcome = useGoalOutcome(turns, goal);
+  const { ref, spacer, awayFromBottom, goToBottom } = usePageTurn(turns, pending);
   const empty = turns.length === 0 && pending.length === 0 && switches.length === 0;
   const streaming = turns.at(-1)?.reply.status === 'running';
 
@@ -407,7 +529,8 @@ const TurnList = memo(function TurnList({ turns, switches = [], pending, preview
   return (
     <div className="relative min-h-0 flex-1">
       <ScrollArea fade className="h-full">
-        <div ref={ref} className="mx-auto flex w-full max-w-chat flex-col gap-6 p-4">
+        {/* relative: the spacer's offsetTop is measured from here, unaffected by scrolling. */}
+        <div ref={ref} className="relative mx-auto flex w-full max-w-chat flex-col gap-6 p-4">
           {hasEarlier && (
             <Button variant="ghost" size="sm" className="self-center" disabled={loadingEarlier} onClick={onLoadEarlier}>
               {loadingEarlier ? 'Loading…' : 'Load earlier messages'}
@@ -415,13 +538,13 @@ const TurnList = memo(function TurnList({ turns, switches = [], pending, preview
           )}
           {[
             ...turns.map((turn, index) => <MessageEntry key={turn.id} turn={turn} files={previewFiles?.(turn.id) ?? turn.files}
-              latest={index === turns.length - 1 && pending.length === 0} />),
+              latest={index === turns.length - 1 && pending.length === 0} outcome={turn.id === outcome.turnID ? outcome.label : undefined} />),
             ...switches.map((notice) => <SwitchNotice key={`switch-${notice.id}`} notice={notice} />),
             ...pending.map((message) => <MessageEntry key={message.id} pending={message}
               files={previewFiles?.(message.id) ?? message.files} latest={false} />),
           ]}
-          {/* Cancel the list gap; p-3 already supplies 12px below this spacer. */}
-          <div data-slot="stream-space" aria-hidden="true" className="-mt-6" style={{ height: Math.max(0, space - 12) }} />
+          {/* Cancel the list gap; the list padding supplies the rest. Its height is set by usePageTurn. */}
+          <div ref={spacer} data-slot="stream-space" aria-hidden="true" className="-mt-6" />
         </div>
       </ScrollArea>
       <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 h-16 overflow-hidden">
