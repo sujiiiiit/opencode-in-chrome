@@ -5,6 +5,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/component
 import { Icon } from '@/components/ui/icon';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import SquiggleLoader from '@/components/ui/squiggle-loader';
+import { useTextColor } from '@/components/ui/use-text-color';
 import { formatDuration, groupSpan, groupTools, reasoningHeading, type WorkGroup as Group } from '@/lib/opencode/flow';
 import type { ReplyPart } from '@/lib/opencode/reply';
 import { toolLabel, toolPending, toolStopped, toolSummary } from '@/lib/opencode/tool-info';
@@ -81,11 +82,7 @@ const SPINNER_MS = 300;
  */
 function WorkSpinner({ active }: { active: boolean }) {
   const shown = useLingering(active, SPINNER_MS);
-  const box = useRef<HTMLSpanElement>(null);
-  const [color, setColor] = useState<string>();
-  useLayoutEffect(() => {
-    if (box.current) setColor(getComputedStyle(box.current).color);
-  }, []);
+  const [box, color] = useTextColor<HTMLSpanElement>();
   return (
     <span
       ref={box}
