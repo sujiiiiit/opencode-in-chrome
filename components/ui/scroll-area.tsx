@@ -53,22 +53,19 @@ function ScrollArea({
           {children}
         </ScrollAreaPrimitive.Content>
       </ScrollAreaPrimitive.Viewport>
-      {horizontal ? (
-        <ScrollBar
-          orientation="horizontal"
-          className={cn(
-            "opacity-0 transition-opacity duration-200 data-hovering:opacity-100 data-scrolling:opacity-100",
-            scrollbarClassName
-          )}
-        />
-      ) : (
-        <ScrollBar className={scrollbarClassName} />
-      )}
+      <ScrollBar orientation={horizontal ? "horizontal" : "vertical"} className={scrollbarClassName} />
       <ScrollAreaPrimitive.Corner />
     </ScrollAreaPrimitive.Root>
   )
 }
 
+/**
+ * The scrollbar shows only while the pointer is over the area (`data-hovering`) or it is scrolling
+ * (`data-scrolling`, which Base UI keeps for 500ms after the last scroll), as Radix's default
+ * `type="hover"` did. Base UI has no such prop and always renders the bar, and shadcn's Base UI
+ * port does not hide it, so without this the bar never goes away. It fades out after a short
+ * delay, so moving the pointer off and back on does not flicker it.
+ */
 function ScrollBar({
   className,
   orientation = "vertical",
@@ -80,7 +77,7 @@ function ScrollBar({
       data-orientation={orientation}
       orientation={orientation}
       className={cn(
-        "flex touch-none p-px transition-colors select-none data-[orientation=horizontal]:h-2.5 data-[orientation=horizontal]:flex-col data-[orientation=horizontal]:border-t data-[orientation=horizontal]:border-t-transparent data-[orientation=vertical]:h-full data-[orientation=vertical]:w-2.5 data-[orientation=vertical]:border-l data-[orientation=vertical]:border-l-transparent",
+        "flex touch-none p-px opacity-0 transition-opacity delay-300 duration-200 select-none motion-reduce:transition-none data-hovering:opacity-100 data-hovering:delay-0 data-scrolling:opacity-100 data-scrolling:delay-0 data-[orientation=horizontal]:h-2.5 data-[orientation=horizontal]:flex-col data-[orientation=horizontal]:border-t data-[orientation=horizontal]:border-t-transparent data-[orientation=vertical]:h-full data-[orientation=vertical]:w-2.5 data-[orientation=vertical]:border-l data-[orientation=vertical]:border-l-transparent",
         className
       )}
       {...props}
