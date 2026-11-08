@@ -9,20 +9,24 @@ const buttonVariants = cva(
       variant: {
         default: "bg-primary text-primary-foreground hover:bg-primary/80",
         outline:
-          "border-border bg-background hover:bg-muted hover:text-foreground aria-expanded:bg-muted aria-expanded:text-foreground dark:bg-transparent dark:hover:bg-input/30",
+          "border-border bg-background hover:bg-muted hover:text-foreground aria-expanded:bg-muted aria-expanded:text-foreground data-popup-open:bg-muted data-popup-open:text-foreground dark:bg-transparent dark:hover:bg-input/30",
         secondary:
           "bg-secondary text-secondary-foreground hover:bg-[color-mix(in_oklch,var(--secondary),var(--foreground)_5%)] aria-expanded:bg-secondary aria-expanded:text-secondary-foreground",
         ghost: [
           'text-text-primary',
           'hover:bg-background-tertiary-transparent',
           'active:bg-[rgb(from_var(--color-background-tertiary-transparent)_r_g_b_/_calc(alpha_*_(1_+_1_*_1)))]',
-          'dark:active:bg-[rgb(from_var(--color-background-tertiary-transparent)_r_g_b_/_calc(alpha_*_(1_+_0.5_*_1)))]'
+          'dark:active:bg-[rgb(from_var(--color-background-tertiary-transparent)_r_g_b_/_calc(alpha_*_(1_+_0.5_*_1)))]',
+          // Base UI sets data-popup-open on a menu/popover trigger while its popup is open: keep it pressed.
+          'data-popup-open:bg-[rgb(from_var(--color-background-tertiary-transparent)_r_g_b_/_calc(alpha_*_(1_+_1_*_1)))]',
+          'dark:data-popup-open:bg-[rgb(from_var(--color-background-tertiary-transparent)_r_g_b_/_calc(alpha_*_(1_+_0.5_*_1)))]'
         ].join(' '),
         // Secondary text that comes forward on hover: disclosure rows in a reply's work group.
         quiet: [
           'text-text-secondary',
           'hover:bg-background-secondary-transparent hover:text-text-primary',
           'aria-expanded:text-text-primary',
+          'data-popup-open:bg-background-secondary-transparent data-popup-open:text-text-primary',
         ].join(' '),
         // Controls on the image viewer's dark stage: a white tint that firms up on hover.
         viewer: 'bg-viewer-control text-viewer-text hover:bg-viewer-control-hover focus-visible:ring-viewer-text/40',
