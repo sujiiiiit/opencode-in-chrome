@@ -15,6 +15,9 @@ import {
   Delete02Icon,
   File01Icon,
   Folder01Icon,
+  PauseIcon,
+  PlayIcon,
+  Target02Icon,
   Scroll01Icon,
   SlashIcon,
   FileEditIcon,
@@ -53,6 +56,18 @@ import { HugeiconsIcon, type HugeiconsIconProps } from '@hugeicons/react';
  * Every icon the app uses, by name. Import icons here (only listed icons are bundled), then
  * render them anywhere with a single import: `<Icon name="arrow-up" />`.
  */
+/**
+ * Solid icons the free Hugeicons set lacks, in its own data format so `Icon` renders them the same
+ * way. Icons from Solar by 480 Design,
+ * CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/); recoloured to `currentColor`.
+ */
+const SolidPauseIcon = [
+  ['path', { d: 'M2 6c0-1.886 0-2.828.586-3.414S4.114 2 6 2s2.828 0 3.414.586S10 4.114 10 6v12c0 1.886 0 2.828-.586 3.414S7.886 22 6 22s-2.828 0-3.414-.586S2 19.886 2 18zm12 0c0-1.886 0-2.828.586-3.414S16.114 2 18 2s2.828 0 3.414.586S22 4.114 22 6v12c0 1.886 0 2.828-.586 3.414S19.886 22 18 22s-2.828 0-3.414-.586S14 19.886 14 18z', fill: 'currentColor', key: '0' }],
+] as const;
+const SolidPlayIcon = [
+  ['path', { d: 'M21.409 9.353a2.998 2.998 0 0 1 0 5.294L8.597 21.614C6.534 22.737 4 21.277 4 18.968V5.033c0-2.31 2.534-3.769 4.597-2.648z', fill: 'currentColor', key: '0' }],
+] as const;
+
 const icons = {
   'ai-search-lines': AiSearchLinesIcon,
   'arrow-left': ArrowLeft01Icon,
@@ -71,6 +86,7 @@ const icons = {
   edit: Pen01Icon,
   file: File01Icon,
   folder: Folder01Icon,
+  goal: Target02Icon,
   'file-edit': FileEditIcon,
   'file-search': FileSearchIcon,
   forward: Forward02Icon,
@@ -93,6 +109,10 @@ const icons = {
   'loader-circle': LoaderCircleIcon,
   more: MoreHorizontalIcon,
   'new-chat': MessageCirclePlusIcon,
+  pause: PauseIcon,
+  'pause-solid': SolidPauseIcon,
+  play: PlayIcon,
+  'play-solid': SolidPlayIcon,
   plus: PlusSignIcon,
   search: Search01Icon,
   settings: Settings01Icon,

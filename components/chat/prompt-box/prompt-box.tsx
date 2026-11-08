@@ -65,6 +65,8 @@ type Props = {
   footerHidden?: boolean;
   /** Shown above the text (the attached images). */
   attachments?: ReactNode;
+  /** A tab tucked behind the top of the card, outside it (the session's goal). */
+  tray?: ReactNode;
   /**
    * Shown inside the card in place of the editor and its toolbar (a question the agent asks).
    * The editor stays mounted, hidden, so the draft and its images are there again afterwards.
@@ -203,6 +205,7 @@ export function PromptBox({ ref, placeholder, ...props }: Props) {
 
   return (
     <div className="px-3 pb-3 pt-1">
+      {props.tray}
       {/* Notion-style surface: no CSS border (the 1px hairline is the first shadow layer).
           Elevation tokens live in global.css: rest -> hover -> focus. Hover only applies while
           the box is not focused, so moving the mouse never weakens the focused lift. The card

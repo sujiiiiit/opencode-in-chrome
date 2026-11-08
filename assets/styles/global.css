@@ -375,6 +375,8 @@
   --ease-standard: ease-in-out; /* CSS keyword curve Notion uses, not Tailwind's ease-in-out */
   /* A long, soft settle (ease-out-quint): starts moving at once, then glides to rest. */
   --ease-calm: cubic-bezier(0.22, 1, 0.36, 1);
+  /* A sheet sliding out from behind a surface (the composer tray): even, then settling. */
+  --ease-slide: cubic-bezier(0.32, 0.72, 0, 1);
 }
 
 /* 4. Base styles =========================================================== */
@@ -679,6 +681,63 @@
   @media (prefers-reduced-motion: reduce) {
     animation: none;
   }
+}
+
+/* The composer tray (prompt-box/composer-tray.tsx): a tab behind the top of the prompt box.
+ * The tray and each of its rows open and shut by their height (entering from nothing too, with
+ * @starting-style), and the chat above follows frame by frame (the message list watches its
+ * viewport), so the box, the tray and the chat move as one.
+ *
+ * The content hangs from the fold's top edge and the fold's bottom edge is the box's top, so as
+ * the room opens the tray slides up out from behind the box, top edge first, and slides back down
+ * behind it as it shuts (cleared, or the goal met). Only one fold moves at a time: a row that
+ * arrives with the tray (`data-static`) or leaves with it stays full height while the tray moves,
+ * and a row added to an open tray slides up on its own, pushing the rows above it up.
+ *
+ * A row's details open inside the tray, under its header, on the same timing: the tray grows up
+ * from behind the box and the chat moves up with it. */
+[data-slot="tray-fold"] {
+  display: grid;
+  /* minmax(0, …): a long objective truncates instead of widening the column past the tray. */
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: 1fr;
+  transition: grid-template-rows 320ms var(--ease-slide);
+  & > * {
+    min-width: 0;
+    min-height: 0;
+    overflow: hidden;
+  }
+  &[data-hidden] {
+    grid-template-rows: 0fr;
+  }
+  &:not([data-static]) {
+    @starting-style {
+      grid-template-rows: 0fr;
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    transition: none;
+  }
+}
+
+/* A row leaving with the whole tray keeps its height, so the tray alone slides away. */
+[data-slot="tray-fold"][data-hidden] [data-slot="tray-fold"][data-hidden] {
+  grid-template-rows: 1fr;
+}
+
+[data-slot="composer-tray"] {
+  /* Always rounded on top, open or not. */
+  border-top-left-radius: 0.875rem;
+  border-top-right-radius: 0.875rem;
+  & [data-slot="tray-fold"] + [data-slot="tray-fold"] {
+    border-top: 1px solid var(--border);
+  }
+}
+
+/* A row's details, under its header inside the tray: the same slide as the tray's own fold. */
+[data-slot="composer-tray"] [data-tray-details] {
+  transition-duration: 320ms;
+  transition-timing-function: var(--ease-slide);
 }
 
 /* The wave is an entrance: once History has settled (`data-settled`), rows that a

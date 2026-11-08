@@ -36,6 +36,9 @@ import { AttachmentStrip } from './prompt-box/attachment-strip';
 import { PromptBox, type PromptBoxHandle } from './prompt-box/prompt-box';
 import { useChatSession, useComposer, useEventHub, useHistory, useLatest } from './use-chat';
 import { useMentions } from './use-mentions';
+import { useGoal } from './use-goal';
+import { ComposerTray } from './prompt-box/composer-tray';
+import { GoalRow, showsGoal } from './prompt-box/goal-tray';
 import type { MentionItem } from '@/lib/opencode/mentions';
 import { SubagentTabs, useSubagentPath, type SubagentPath } from './subagent-tabs';
 
@@ -274,13 +277,15 @@ type ChatComposerProps = {
   /** A subagent's chat is open: the box shows its requests or status, and the chips fold away. */
   subagent: boolean;
   mentions: ReturnType<typeof useMentions>;
+  /** The session's `/goal`, shown as a tab behind the box while it has one. */
+  goal: ReturnType<typeof useGoal>;
 };
 
 /**
  * The prompt box with its attach menu, attached images and model chips, and the drop zone that
  * covers the whole pane (the overlay is placed against the pane, its nearest positioned box).
  */
-function ChatComposer({ box, composer, models, active, question, subagent, mentions }: ChatComposerProps) {
+function ChatComposer({ box, composer, models, active, question, subagent, mentions, goal }: ChatComposerProps) {
   // History, sliding over the chat, takes no drops; nor does a subagent's chat (no editor shows).
   const panelActive = useTabPanelActive();
   const dragging = useFileDrop(composer.addFiles, active && panelActive && !subagent);
@@ -293,6 +298,12 @@ function ChatComposer({ box, composer, models, active, question, subagent, menti
       <PromptBox
         ref={box}
         mentions={source}
+        tray={
+          // Rows to come go here, each with its own `shown`; the tray is open while any row is.
+          <ComposerTray open={showsGoal(goal.goal) && !subagent}>
+            <GoalRow goal={goal.goal} notice={goal.notice} onAction={goal.run} />
+          </ComposerTray>
+        }
         controls={
           <>
             <AttachMenu
@@ -350,6 +361,7 @@ function ChatPane({ connection, session, models, hub, onUnauthorized, active, on
   const { chat, state, activeID } = session;
   const box = useRef<PromptBoxHandle>(null);
   const mentions = useMentions(connection, hub, onUnauthorized);
+  const goal = useGoal(connection, hub, activeID, onUnauthorized);
   const composer = useComposer({
     chat,
     state,
@@ -372,7 +384,7 @@ function ChatPane({ connection, session, models, hub, onUnauthorized, active, on
         <div className="mx-auto w-full max-w-chat"><PaneNotice session={session} models={models} /></div>
       </SessionBranch>
       <div className="mx-auto w-full max-w-chat shrink-0">
-        <ChatComposer box={box} composer={composer} models={models} active={active} question={question} subagent={!!nav.child} mentions={mentions} />
+        <ChatComposer box={box} composer={composer} models={models} active={active} question={question} subagent={!!nav.child} mentions={mentions} goal={goal} />
       </div>
       {store && (
         <ModelPicker store={store} state={models.state} onClose={() => picker.onOpenChange(false)} />
