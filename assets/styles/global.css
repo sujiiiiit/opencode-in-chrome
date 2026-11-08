@@ -49,6 +49,7 @@
   --viewer-control: #ffffff1a; /* 10% */
   --viewer-control-hover: #ffffff2e; /* 18% */
   --tile-shade: #00000061; /* 38%: under a gallery's "+N", frosted */
+  --tile-shade-strong: #0000008f; /* 56%: a remove x over a picture, on hover */
   --tile-hover: #00000014; /* 8%: a picture that opens, under the pointer */
   /* The drop overlay (components/chat/drop-overlay), as ChatGPT's: the panel fades behind an
    * 80% white veil, under fanned cards in three blues (code behind, file in the middle,
@@ -231,6 +232,7 @@
   --color-viewer-control: var(--viewer-control);
   --color-viewer-control-hover: var(--viewer-control-hover);
   --color-tile-shade: var(--tile-shade);
+  --color-tile-shade-strong: var(--tile-shade-strong);
   --color-tile-hover: var(--tile-hover);
   --color-drop-veil: var(--drop-veil);
   --color-drop-art-back: var(--drop-art-back);

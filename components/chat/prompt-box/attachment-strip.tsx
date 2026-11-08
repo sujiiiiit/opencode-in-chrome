@@ -23,7 +23,7 @@ const Thumb = memo(function Thumb({ image, at, onOpen, onRemove }: ThumbProps) {
         variant="viewer"
         size="icon-xs"
         aria-label={`Remove ${image.name}`}
-        className="absolute top-1 right-1 size-5 bg-tile-shade opacity-0 backdrop-blur-xs transition-opacity duration-200 ease-(--ease-calm) group-hover/thumb:opacity-100 group-focus-within/thumb:opacity-100 [&_svg]:size-3"
+        className="absolute top-1 right-1 size-5 bg-tile-shade opacity-0 hover:bg-tile-shade-strong backdrop-blur-xs duration-200 transition-[opacity,background-color] ease-(--ease-calm) group-hover/thumb:opacity-100 group-focus-within/thumb:opacity-100 [&_svg]:size-3"
         onClick={() => onRemove(image.id)}
       >
         <Icon name="close" />
