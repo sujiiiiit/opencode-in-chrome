@@ -98,6 +98,10 @@ const EDGE_AT = 1;
 const FOLLOW_SPACE_PX = 300;
 const MAX_FOLLOW_SHARE = 0.75;
 const SCROLL_MS = 200;
+/** Unread content below the viewport before the scroll-to-bottom button appears... */
+const SHOW_BUTTON_PX = 120;
+/** ...and how close to the end the reader gets before it goes away (a gap, so it never flickers at the edge). */
+const HIDE_BUTTON_PX = 24;
 const PAGE_TURN_MS = 650;
 
 type Motion = { id: number; target: number; from: number; start: number; end: number; lastNow: number };
@@ -144,7 +148,12 @@ function usePageTurn(turns: Turn[], pending: PendingMessage[]) {
   const motion = useRef<Motion | null>(null);
   const lastSet = useRef<number | null>(null);
   const [space, setSpace] = useState(0);
-  const [awayFromBottom, setAwayFromBottom] = useState(false);
+  const [awayFromBottom, setAwayFromBottomState] = useState(false);
+  const awayRef = useRef(false);
+  const setAwayFromBottom = (away: boolean) => {
+    awayRef.current = away;
+    setAwayFromBottomState(away);
+  };
   const spaceRef = useRef(0);
   const followAfterSpace = useRef(false);
   // A newly sent prompt can grow after its first layout (attachments, fonts, follow space).
@@ -186,8 +195,15 @@ function usePageTurn(turns: Turn[], pending: PendingMessage[]) {
   };
 
   const syncAwayFromBottom = (element: HTMLElement) => {
-    // The follow spacer is empty breathing room, not unread conversation.
-    setAwayFromBottom(contentEnd(element) > element.clientHeight + 1);
+    // A follow animation is already heading to the bottom: re-measuring mid-flight would show the
+    // button again on its first frames, so it would flicker instead of hiding. The scroll event
+    // after the last frame measures once it lands.
+    if (motion.current && stick.current) return;
+    // The follow spacer is empty breathing room, not unread conversation. Showing needs a bigger
+    // gap than hiding does, so a scroll settling near the threshold cannot toggle the button.
+    const unread = contentEnd(element) - element.clientHeight;
+    const away = unread > (awayRef.current ? HIDE_BUTTON_PX : SHOW_BUTTON_PX);
+    if (away !== awayRef.current) setAwayFromBottom(away);
   };
 
   const follow = (element: HTMLElement, duration = SCROLL_MS) => {
@@ -257,7 +273,10 @@ function usePageTurn(turns: Turn[], pending: PendingMessage[]) {
     };
     const onIntent = () => {
       intentAt = performance.now();
+      const interrupted = !!motion.current;
       cancelMotion();
+      // Stopped mid-way down: bring the button back if the reader is still far from the end.
+      if (interrupted) syncAwayFromBottom(element);
     };
     const onHold = () => {
       holding = true;
