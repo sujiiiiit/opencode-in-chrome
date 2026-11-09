@@ -33,7 +33,7 @@ describe('step metadata', () => {
       created: 1005,
       streamed: 3005,
       completed: 3100,
-      tokens: { output: 30, reasoning: 10 },
+      tokens: { input: 9, output: 30, reasoning: 10, cacheRead: 0, cacheWrite: 0 },
     });
   });
 
@@ -83,8 +83,8 @@ describe('turnStats', () => {
   it('measures the turn from the prompt to its last step, and speed over streaming time only', () => {
     const steps: ReplyStep[] = [
       // A tool step: 1s streaming, then the tool runs for a long time.
-      { id: 'a1', parts: [], created: 1000, streamed: 2000, completed: 2100, tokens: { output: 10, reasoning: 10 } },
-      { id: 'a2', parts: [text('done')], model: { providerID: 'p', modelID: 'm' }, created: 9000, streamed: 10_000, completed: 10_500, tokens: { output: 20, reasoning: 0 } },
+      { id: 'a1', parts: [], created: 1000, streamed: 2000, completed: 2100, tokens: { input: 0, output: 10, reasoning: 10, cacheRead: 0, cacheWrite: 0 } },
+      { id: 'a2', parts: [text('done')], model: { providerID: 'p', modelID: 'm' }, created: 9000, streamed: 10_000, completed: 10_500, tokens: { input: 0, output: 20, reasoning: 0, cacheRead: 0, cacheWrite: 0 } },
     ];
     const stats = turnStats(turn(steps, 500));
     expect(stats.durationMs).toBe(10_000);
@@ -93,7 +93,7 @@ describe('turnStats', () => {
   });
 
   it('reports no speed until every step has streamed, and no duration before any step ends', () => {
-    const stats = turnStats(turn([{ id: 'a1', parts: [text('x')], created: 1000, tokens: { output: 5, reasoning: 0 } }], 500));
+    const stats = turnStats(turn([{ id: 'a1', parts: [text('x')], created: 1000, tokens: { input: 0, output: 5, reasoning: 0, cacheRead: 0, cacheWrite: 0 } }], 500));
     expect(stats.tokensPerSecond).toBeUndefined();
     expect(stats.durationMs).toBeUndefined();
   });

@@ -62,6 +62,13 @@
   --sidebar: var(--background-secondary);
   /* Terminal output in a shell tool's details. */
   --console: var(--background-secondary);
+  /* The context meter (model row): its ring, and the segments of the bar in its popover. */
+  --context-track: var(--border-primary);
+  --context-ring-warn: var(--orange-mid);
+  --context-ring-full: var(--red-mid);
+  --context-input: var(--blue-mid);
+  --context-output: var(--orange-mid);
+  --context-reasoning: var(--purple-mid);
 
   /* Text ------------------------------------------------------------------
    * `foreground` is the shadcn default; the text-* scale is Notion's palette

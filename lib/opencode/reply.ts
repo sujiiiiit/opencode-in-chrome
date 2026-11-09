@@ -54,8 +54,11 @@ export type ReplyPart = ReplyTextPart | ReplyToolPart;
 
 /** The model a step ran on, as opencode's `{id, providerID, variant?}` reference. */
 export type StepModel = { providerID: string; modelID: string; variant?: string };
-/** Tokens the step generated (the input side is not needed for speed). */
-export type StepTokens = { output: number; reasoning: number };
+/**
+ * The step's token usage. `output` and `reasoning` are what it generated (turn speed); with the
+ * prompt side (`input`, cache reads and writes) they make up how full the context window is.
+ */
+export type StepTokens = { input: number; output: number; reasoning: number; cacheRead: number; cacheWrite: number };
 
 export type ReplyStep = {
   id: string;
@@ -76,6 +79,20 @@ export type ReplyStep = {
  */
 export type ReplyNotice = { id: string; afterStep: number; goal?: { reason?: string; resumed: boolean } };
 
+/**
+ * A compaction of the conversation, placed before step `afterStep` of the reply it ran in:
+ * `queued` waits in the inbox, `running` streams its summary, then it ends `completed` or
+ * `failed` (an interruption or a cancel fails it too; `error.type` tells which).
+ */
+export type ReplyCompaction = {
+  id: string;
+  afterStep: number;
+  status: 'queued' | 'running' | 'completed' | 'failed';
+  /** The summary the conversation was folded into (streams while running). */
+  summary: string;
+  error?: ReplyError;
+};
+
 export type ReplyState = {
   sessionID: string;
   status: ReplyStatus;
@@ -84,6 +101,8 @@ export type ReplyState = {
   interruptReason?: string;
   /** Background subagents that finished during this turn and goal rounds: each woke the agent again. */
   notices?: ReplyNotice[];
+  /** Compactions that ran during (or right after) this turn, in order. */
+  compactions?: ReplyCompaction[];
 };
 
 export const initialReply = (sessionID: string): ReplyState => ({ sessionID, status: 'idle', steps: [] });
@@ -91,7 +110,13 @@ export const initialReply = (sessionID: string): ReplyState => ({ sessionID, sta
 export const isRecord = (v: unknown): v is Record<string, unknown> =>
   typeof v === 'object' && v !== null && !Array.isArray(v);
 
-const str = (v: unknown): string | undefined => (typeof v === 'string' ? v : undefined);
+export const str = (v: unknown): string | undefined => (typeof v === 'string' ? v : undefined);
+
+/** `list` with `item` in place of the entry with its id, or appended when there is none. */
+export function upsert<T extends { id: string }>(list: T[], item: T): T[] {
+  const index = list.findIndex((entry) => entry.id === item.id);
+  return index === -1 ? [...list, item] : list.map((entry, i) => (i === index ? item : entry));
+}
 const int = (v: unknown): number | undefined => (typeof v === 'number' && Number.isInteger(v) && v >= 0 ? v : undefined);
 const num = (v: unknown): number | undefined => (typeof v === 'number' && Number.isFinite(v) ? v : undefined);
 /** A `{id, providerID, variant?}` model reference, or undefined when malformed. */
@@ -106,7 +131,15 @@ function parseTokens(value: unknown): StepTokens | undefined {
   const output = num(value.output);
   const reasoning = num(value.reasoning);
   if (output === undefined && reasoning === undefined) return undefined;
-  return { output: Math.max(0, output ?? 0), reasoning: Math.max(0, reasoning ?? 0) };
+  const cache = isRecord(value.cache) ? value.cache : {};
+  const count = (v: unknown) => Math.max(0, num(v) ?? 0);
+  return {
+    input: count(value.input),
+    output: count(output),
+    reasoning: count(reasoning),
+    cacheRead: count(cache.read),
+    cacheWrite: count(cache.write),
+  };
 }
 
 const phaseOf = (native: unknown): TextPhase | undefined => {

@@ -610,7 +610,7 @@ describe('MessageList footers', () => {
         created: 1000,
         streamed: 3000,
         completed: 3500,
-        tokens: { output: 50, reasoning: 0 },
+        tokens: { input: 0, output: 50, reasoning: 0, cacheRead: 0, cacheWrite: 0 },
       },
     ],
   });

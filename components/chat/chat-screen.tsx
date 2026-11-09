@@ -10,6 +10,8 @@ import { Tabs, TabsContent, TabsContentWrapper, useTabPanelActive } from '@/comp
 import { foregroundAgent } from '@/lib/opencode/background';
 import { ChatSession, INITIAL_CHAT_STATE, pendingMessages, type ChatState } from '@/lib/opencode/chat';
 import type { Turn } from '@/lib/opencode/timeline';
+import { contextUsage } from '@/lib/opencode/context-usage';
+import { findModel } from '@/lib/opencode/models/catalog';
 import { PINNED_SERVER_VERSION } from '@/lib/opencode/client';
 import type { Connection } from '@/lib/opencode/connection';
 import type { EventHub } from '@/lib/opencode/events';
@@ -23,6 +25,7 @@ import { MarqueeTitle } from './marquee-title';
 import { HistoryView } from './history/history-view';
 import { MessageList } from './message-list';
 import { ModelControls } from './model/model-controls';
+import { ContextMeter } from './model/context-meter';
 import { ModelPicker } from './model/model-picker';
 import { ModelCatalogProvider } from './model/model-names';
 import { useModelShortcuts, useModelStore, useModelSync } from './model/use-models';
@@ -193,14 +196,23 @@ function PaneNotice({ session, models }: { session: ReturnType<typeof useChatSes
   return null;
 }
 
-/** The model and effort chips under the composer, once the store exists. */
-function ComposerFooter({ models }: { models: Models }) {
+/** The model and effort chips under the composer, once the store exists, and how full the context is. */
+function ComposerFooter({ models, turns }: { models: Models; turns: Turn[] }) {
   const store = models.store;
+  const catalog = models.state.catalog ?? models.state.cached;
+  const selected = models.controls.model.current;
+  const usage = useMemo(
+    () => contextUsage(turns, (model) => (model && findModel(catalog, model)?.context) || selected?.context || 0),
+    [turns, catalog, selected],
+  );
   return (
-    <ModelControls
-      controls={models.controls}
-      pending={!store || models.state.phase === 'idle' || models.state.phase === 'loading'}
-    />
+    <>
+      <ModelControls
+        controls={models.controls}
+        pending={!store || models.state.phase === 'idle' || models.state.phase === 'loading'}
+      />
+      {usage && <div className="ml-auto flex shrink-0 items-center"><ContextMeter usage={usage} /></div>}
+    </>
   );
 }
 
@@ -284,13 +296,15 @@ type ChatComposerProps = {
   goal: ReturnType<typeof useGoal>;
   /** The agent's todo list, shown as a row under the goal. */
   todos: Todo[];
+  /** The chat's turns, for the context meter. */
+  turns: Turn[];
 };
 
 /**
  * The prompt box with its attach menu, attached images and model chips, and the drop zone that
  * covers the whole pane (the overlay is placed against the pane, its nearest positioned box).
  */
-function ChatComposer({ box, composer, models, active, question, subagent, mentions, goal, todos }: ChatComposerProps) {
+function ChatComposer({ box, composer, models, active, question, subagent, mentions, goal, todos, turns }: ChatComposerProps) {
   // History, sliding over the chat, takes no drops; nor does a subagent's chat (no editor shows).
   const panelActive = useTabPanelActive();
   const dragging = useFileDrop(composer.addFiles, active && panelActive && !subagent);
@@ -322,7 +336,7 @@ function ChatComposer({ box, composer, models, active, question, subagent, menti
             <PermissionMenu />
           </>
         }
-        footer={<ComposerFooter models={models} />}
+        footer={<ComposerFooter models={models} turns={turns} />}
         footerHidden={subagent}
         attachments={<AttachmentStrip images={composer.images} onRemove={composer.removeImage} />}
         takeover={question}
@@ -392,7 +406,7 @@ function ChatPane({ connection, session, models, hub, onUnauthorized, active, on
         <div className="mx-auto w-full max-w-chat"><PaneNotice session={session} models={models} /></div>
       </SessionBranch>
       <div className="mx-auto w-full max-w-chat shrink-0">
-        <ChatComposer box={box} composer={composer} models={models} active={active} question={question} subagent={!!nav.child} mentions={mentions} goal={goal} todos={todos} />
+        <ChatComposer box={box} composer={composer} models={models} active={active} question={question} subagent={!!nav.child} mentions={mentions} goal={goal} todos={todos} turns={turns ?? NO_TURNS} />
       </div>
       {store && (
         <ModelPicker store={store} state={models.state} onClose={() => picker.onOpenChange(false)} />
