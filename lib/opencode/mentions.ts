@@ -22,6 +22,8 @@ export type MentionItem = {
   description?: string;
   /** An absolute path (a reference) or a workspace-relative one (a file). */
   path?: string;
+  /** A command the panel runs itself instead of sending it to the server (`/compact`). */
+  builtin?: true;
 };
 
 export type MentionCatalog = {
@@ -43,7 +45,18 @@ export type PromptRefs = {
   files: { uri: string; name: string; mention: Span }[];
 };
 
-export const EMPTY_CATALOG: MentionCatalog = { commands: [], skills: [], agents: [], references: [] };
+/**
+ * The command the panel runs itself, as opencode's app does: `/compact` asks the server to
+ * summarise the conversation (POST .../compact); it is not one of the server's prompt commands.
+ */
+const COMPACT: MentionItem = { id: 'command:compact', kind: 'command', name: 'compact', label: '/compact', description: 'Summarize the chat to free up context', builtin: true };
+
+/** The server's commands with `/compact`, unless the server has its own by that name. */
+export const withBuiltins = (commands: MentionItem[]): MentionItem[] =>
+  commands.some((command) => command.name === COMPACT.name) ? commands : [...commands, COMPACT].sort(byName);
+
+/** The catalog before anything loads: the built-in command works from the start. */
+export const EMPTY_CATALOG: MentionCatalog = { commands: [COMPACT], skills: [], agents: [], references: [] };
 
 // ─── Parsing ──────────────────────────────────────────────────────────────
 
@@ -283,7 +296,7 @@ export class MentionStore extends Store<MentionState> {
       settle(this.client.agent.list({ location }, { signal }), parseAgents, []),
       settle(this.client.reference.list({ location }, { signal }), parseReferences, []),
     ]);
-    this.set({ directory, catalog: { commands, skills, agents, references } });
+    this.set({ directory, catalog: { commands: withBuiltins(commands), skills, agents, references } });
   }
 
   /** Workspace files matching `query` (none for an empty query); an aborted or failed search finds none. */

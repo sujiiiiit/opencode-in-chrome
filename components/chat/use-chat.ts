@@ -326,6 +326,11 @@ export function useComposer(input: {
   /** Runs a slash command; a failed one puts the text (as typed text) and images back. */
   const runCommand = async (chat: ChatSession, command: { name: string; args: string }, text: string) => {
     setText('');
+    // `/compact`, the built-in command, runs here; the draft's images stay attached for the next prompt.
+    if (commands?.some((item) => item.name === command.name && item.builtin)) {
+      if (!(await chat.compact())) setText(joinDraft(draftRef.current, text), true);
+      return;
+    }
     const attached = attachments.take();
     const files = await readImages(attached, notify);
     if (files && (await chat.command(command.name, command.args, selection, files))) return;
