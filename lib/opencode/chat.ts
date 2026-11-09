@@ -820,11 +820,18 @@ export class ChatSession extends Store<ChatState> {
    * local bubble is staged. Returns false when nothing was sent.
    */
   async command(name: string, args: string, selection?: Selection, files?: readonly PromptFile[]): Promise<boolean> {
+    return this.sending(async () => {
+      const sessionID = await this.readyToSend(selection);
+      await this.client.session.command({ sessionID, name, text: args, ...(files?.length ? { files } : {}) }, { signal: this.signal });
+    });
+  }
+
+  /** Runs one request a send makes, flagging the chat as submitting meanwhile. False when it failed or could not start. */
+  private async sending(send: () => Promise<void>): Promise<boolean> {
     if (this.disposed || this.state.phase !== 'ready' || this.state.submitting) return false;
     this.set({ submitting: true, notice: null });
     try {
-      const sessionID = await this.readyToSend(selection);
-      await this.client.session.command({ sessionID, name, text: args, ...(files?.length ? { files } : {}) }, { signal: this.signal });
+      await send();
       return true;
     } catch (error) {
       this.sendFailed(error);
@@ -832,6 +839,23 @@ export class ChatSession extends Store<ChatState> {
     } finally {
       this.set({ submitting: false });
     }
+  }
+
+  /**
+   * Asks the server to compact this chat (`/compact`): it summarises the conversation so far and
+   * goes on from the summary. Behind a running turn it waits in the queue; the compaction's events
+   * then show it in the chat. Returns false when nothing was sent.
+   */
+  async compact(): Promise<boolean> {
+    const sessionID = this.sessionID;
+    const timeline = this.state.timeline;
+    if (!sessionID || !timeline?.turns.length) {
+      this.set({ notice: 'Nothing to compact yet.' });
+      return false;
+    }
+    return this.sending(async () => {
+      await this.client.session.compact({ sessionID, ...(timeline.working ? { delivery: 'queue' as const } : {}) }, { signal: this.signal });
+    });
   }
 
   override dispose(): void {

@@ -1,15 +1,15 @@
-import { memo, useEffect, useLayoutEffect, useRef, useState, type RefObject } from 'react';
+import { memo, useLayoutEffect, useRef, useState } from 'react';
 import { cn } from 'cn';
-import { Button } from '@/components/ui/button';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
-import { Icon } from '@/components/ui/icon';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import SquiggleLoader from '@/components/ui/squiggle-loader';
 import { useTextColor } from '@/components/ui/use-text-color';
 import { formatDuration, groupSpan, groupTools, reasoningHeading, type WorkGroup as Group } from '@/lib/opencode/flow';
 import type { ReplyPart } from '@/lib/opencode/reply';
 import { toolLabel, toolPending, toolStopped, toolSummary } from '@/lib/opencode/tool-info';
+import { DisclosureButton, DisclosureChevron } from './disclosure';
 import { useLingering, useNow } from './live';
+import { useFollowBottom } from './use-follow-bottom';
 import { MorphText } from './morph-text';
 import { Markdown } from './markdown';
 import { ToolRow } from './tool-row';
@@ -150,41 +150,6 @@ function GroupPart({ part, live, animate }: { part: ReplyPart; live: boolean; an
   return <Markdown text={part.text} animate={animate} size="work" className="text-text-secondary" />;
 }
 
-function pinWorkBottom(viewport: HTMLElement, lastSet: RefObject<number | null>) {
-  const bottom = Math.max(0, viewport.scrollHeight - viewport.clientHeight);
-  lastSet.current = bottom;
-  if (Math.abs(viewport.scrollTop - bottom) >= 1) viewport.scrollTop = bottom;
-}
-
-function observeWorkScroll(
-  viewport: HTMLElement,
-  element: HTMLElement,
-  active: boolean,
-  following: RefObject<boolean>,
-  lastSet: RefObject<number | null>,
-) {
-  const onScroll = () => {
-    if (following.current && lastSet.current !== null && Math.abs(viewport.scrollTop - lastSet.current) < 1) return;
-    following.current = viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop <= 24;
-  };
-  const onWheel = (event: WheelEvent) => {
-    if (event.deltaY < 0) following.current = false;
-  };
-  const observer = new ResizeObserver(() => {
-    if (!active || !following.current) return;
-    pinWorkBottom(viewport, lastSet);
-  });
-  viewport.addEventListener('scroll', onScroll, { passive: true });
-  viewport.addEventListener('wheel', onWheel, { passive: true });
-  observer.observe(element);
-  observer.observe(viewport);
-  return () => {
-    viewport.removeEventListener('scroll', onScroll);
-    viewport.removeEventListener('wheel', onWheel);
-    observer.disconnect();
-  };
-}
-
 type Props = {
   group: Group;
   /** The reply is still running. */
@@ -200,10 +165,7 @@ export const WorkGroup = memo(function WorkGroup({ group, live, active }: Props)
   const [choice, setChoice] = useState<boolean | undefined>(() => chosen.get(group.key));
   const [revealed, setRevealed] = useState(() => chosen.get(group.key) === true);
   const wasActive = useRef(active);
-  const wasOpen = useRef(false);
   const content = useRef<HTMLDivElement>(null);
-  const following = useRef(true);
-  const lastSet = useRef<number | null>(null);
   const open = choice ?? false;
   const thinking = group.parts.every((part) => part.kind === 'reasoning');
   const { started, ended } = groupSpan(group);
@@ -221,32 +183,7 @@ export const WorkGroup = memo(function WorkGroup({ group, live, active }: Props)
     wasActive.current = active;
   }, [active, group.key]);
 
-  useLayoutEffect(() => {
-    const viewport = content.current?.closest<HTMLElement>('[data-slot="scroll-area-viewport"]');
-    if (!open) {
-      wasOpen.current = false;
-      return;
-    }
-    if (!wasOpen.current) {
-      following.current = true;
-      lastSet.current = null;
-    }
-    wasOpen.current = true;
-    if (!viewport) return;
-    if (!active) {
-      if (lastSet.current === null) viewport.scrollTop = 0;
-      return;
-    }
-    if (!following.current) return;
-    pinWorkBottom(viewport, lastSet);
-  }, [open, active, group]);
-
-  useEffect(() => {
-    const element = content.current;
-    const viewport = element?.closest<HTMLElement>('[data-slot="scroll-area-viewport"]');
-    if (!open || !active || !element || !viewport) return;
-    return observeWorkScroll(viewport, element, active, following, lastSet);
-  }, [open, active]);
+  useFollowBottom(content, open, active, group);
 
   const onOpenChange = (next: boolean) => {
     if (next) setRevealed(true);
@@ -256,26 +193,13 @@ export const WorkGroup = memo(function WorkGroup({ group, live, active }: Props)
 
   return (
     <Collapsible open={open} onOpenChange={onOpenChange} disabled={empty} data-slot="work-group" data-active={active || undefined}>
-      {/* The label's shimmer takes its colour from this variable, so it follows the button's own
-          colour (secondary, primary on hover or when open), as the finished label's text does. */}
-      <CollapsibleTrigger
-        render={
-          <Button
-            variant="quiet"
-            size="disclosure"
-            className="-ml-1.5 w-auto max-w-full gap-0 [--shimmer-text-highlight-color:var(--text-secondary)] hover:[--shimmer-text-highlight-color:var(--text-primary)] aria-expanded:[--shimmer-text-highlight-color:var(--text-primary)]"
-          />
-        }
-      >
+      <CollapsibleTrigger render={<DisclosureButton />}>
         <WorkSpinner active={active} />
         <WorkLabel thinking={thinking} stopped={stopped} started={started} ended={ended} active={active} activity={activity} />
         {/* Counts (files edited, commands, searches) are hidden for now:
         <WorkSummary group={group} active={active} /> */}
         {/* Faded in, not mounted, once there is something to open: the label never shifts for it. */}
-        <Icon
-          name="chevron-down"
-          className={cn('ml-1.5 shrink-0 transition-[rotate,translate,opacity] duration-200', !open && '-rotate-90', empty && 'opacity-0')}
-        />
+        <DisclosureChevron open={open} hidden={empty} />
       </CollapsibleTrigger>
       {/* Mount on first open, then keep tool rows and their disclosure state while folded. */}
       <CollapsibleContent keepMounted>

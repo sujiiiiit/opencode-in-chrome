@@ -13,6 +13,10 @@ export type ServerEvent = {
   location?: unknown;
 };
 
+/** The message an event stands for: its id as a message id (`evt_` → `msg_`), else one from `prefix` and its time. */
+export const eventMessageID = (event: ServerEvent, prefix: string) =>
+  (event.id ?? `${prefix}-${event.created ?? Date.now()}`).replace(/^evt_/, 'msg_');
+
 export class SseIdleError extends Error {
   override readonly name = 'SseIdleError';
   constructor() {

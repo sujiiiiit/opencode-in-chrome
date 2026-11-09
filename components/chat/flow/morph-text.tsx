@@ -163,7 +163,9 @@ function useMeasuredWidth(box: RefObject<HTMLSpanElement | null>, measure: RefOb
     if (!element || !ruler) return;
     let settle: ReturnType<typeof setTimeout> | undefined;
     const apply = () => {
-      const width = `${Math.ceil(ruler.getBoundingClientRect().width)}px`;
+      // The layout width, not the on-screen one: inside a popup still zooming in, a transformed
+      // rect is smaller than the text and would leave it truncated once the zoom ends.
+      const width = `${Math.ceil(parseFloat(getComputedStyle(ruler).width) || ruler.getBoundingClientRect().width)}px`;
       if (element.style.width === width) return;
       if (element.hasAttribute('data-ready') && !reducedMotion()) {
         element.setAttribute('data-moving', '');

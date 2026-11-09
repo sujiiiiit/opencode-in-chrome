@@ -1,12 +1,13 @@
 import { memo, useMemo } from 'react';
 import { replyErrorText } from '@/lib/opencode/chat';
-import { awaitingPickup, pickupKey, replyFlow, type FlowItem, type WorkGroup as Group } from '@/lib/opencode/flow';
+import { awaitingPickup, pickupKey, replyFlow, type AnswerText, type FlowItem, type WorkGroup as Group } from '@/lib/opencode/flow';
 import type { ReplyState } from '@/lib/opencode/reply';
 import type { TurnStats } from '@/lib/opencode/turn-stats';
 import { AnswerFooter } from '../message-footer';
 import { NoticeDivider } from '../notice-divider';
 import { Markdown, ReplyLive } from './markdown';
 import { AgentRow } from './agent-rows';
+import { CompactionRow } from './compaction-row';
 import { WorkGroup } from './work-group';
 
 /** Each subagent call's place among the reply's subagents, in the order they were made. */
@@ -28,6 +29,63 @@ function ErrorLine({ text }: { text: string | null }) {
       </ReplyLive>
     </div>
   );
+}
+
+type EntryProps = {
+  item: FlowItem;
+  live: boolean;
+  /** The reply's last item: where a live reply is working now. */
+  last: boolean;
+  /** The item before it is a work group (an answer then sits a little lower). */
+  afterWork: boolean;
+  agentIndex: Map<string, number>;
+};
+
+/** One item of the reply's flow. */
+function FlowEntry({ item, live, last, afterWork, agentIndex }: EntryProps) {
+  switch (item.type) {
+    case 'agents':
+      return (
+        <div data-slot="agent-rows" className="flex flex-col">
+          {item.parts.map((part) => <AgentRow key={part.id} part={part} index={agentIndex.get(part.id) ?? 0} live={live} />)}
+        </div>
+      );
+    case 'work':
+      return <WorkGroup group={item} live={live} active={live && last} />;
+    case 'compaction':
+      return <CompactionRow item={item.compaction} />;
+    case 'round':
+      return (
+        <div className="my-3">
+          <NoticeDivider slot="goal-round" label={item.label} />
+        </div>
+      );
+    default:
+      return (
+        <div data-slot="assistant-answer" className={afterWork ? 'mt-1' : undefined}>
+          {/* An answer keeps its streamed words' wrappers until the whole reply finishes (markdown.tsx). */}
+          <ReplyLive value={live}>
+            <Markdown text={item.part.text} animate={live && last} />
+          </ReplyLive>
+        </div>
+      );
+  }
+}
+
+/**
+ * What the reply shows, in order (`items`), and what comes after its footer (`tail`).
+ * Before anything arrives, an empty work group stands in ("Thinking"). The first real group takes
+ * over its React key, so the header stays in place and its label morphs, not remounts. The same
+ * stands in after a background completion, under the key the work it picks up with gets. A
+ * compaction after a finished reply's last step reads after its footer, as the next thing that
+ * happened; while the reply runs it stays in place, so the work before it is not taken as current.
+ */
+function layout(reply: ReplyState, flow: FlowItem[], live: boolean): { items: FlowItem[]; tail: FlowItem[] } {
+  const pickup = live ? awaitingPickup(reply) : undefined;
+  const pending = pickup ? { ...PENDING, key: pickupKey(pickup) } : live && flow.length === 0 ? PENDING : undefined;
+  const all = pending ? [...flow, pending] : flow;
+  const cut = live ? all.length : all.findLastIndex((item) => item.type !== 'compaction') + 1;
+  return cut === all.length ? { items: all, tail: [] } : { items: all.slice(0, cut), tail: all.slice(cut) };
 }
 
 /**
@@ -53,15 +111,9 @@ export const AssistantReply = memo(function AssistantReply({
     return { flow: items, agentIndex: agentOrder(items) };
   }, [reply]);
   const live = reply.status === 'running';
-  // Before anything arrives, an empty work group stands in ("Thinking"). The first real group
-  // takes over its React key, so the header stays in place and its label morphs, not remounts.
-  // The same stands in after a background completion, under the key the work it picks up with gets.
-  const pickup = live ? awaitingPickup(reply) : undefined;
-  const pending = pickup ? { ...PENDING, key: pickupKey(pickup) } : live && flow.length === 0 ? PENDING : undefined;
-  const items: FlowItem[] = pending ? [...flow, pending] : flow;
+  const { items, tail } = useMemo(() => layout(reply, flow, live), [reply, flow, live]);
   const reactKey = (item: FlowItem, index: number) => (item.type === 'work' && index === 0 ? FIRST_WORK : item.key);
-  const lastAnswer = live ? undefined : flow.findLast((item) => item.type === 'answer' && item.part.text.trim() !== '');
-  const footerText = lastAnswer?.type === 'answer' ? lastAnswer.part.text : undefined;
+  const footerText = live ? undefined : flow.findLast((item): item is AnswerText => item.type === 'answer' && item.part.text.trim() !== '')?.part.text;
   const errorText = replyErrorText(reply);
   const interrupted = reply.status === 'interrupted';
 
@@ -72,33 +124,20 @@ export const AssistantReply = memo(function AssistantReply({
       data-footer-latest={(footerText !== undefined && latest) || undefined}
       className="flex min-w-0 max-w-full flex-col gap-2 type-body"
     >
-      {items.map((item, index) =>
-        item.type === 'agents' ? (
-          <div key={item.key} data-slot="agent-rows" className="flex flex-col">
-            {item.parts.map((part) => <AgentRow key={part.id} part={part} index={agentIndex.get(part.id) ?? 0} live={live} />)}
-          </div>
-        ) : item.type === 'work' ? (
-          <WorkGroup key={reactKey(item, index)} group={item} live={live} active={live && index === items.length - 1} />
-        ) : item.type === 'round' ? (
-          <div key={item.key} className="my-3">
-            <NoticeDivider slot="goal-round" label={item.label} />
-          </div>
-        ) : (
-          <div
-            key={item.key}
-            data-slot="assistant-answer"
-            className={index > 0 && flow[index - 1]?.type === 'work' ? 'mt-1' : undefined}
-          >
-            {/* An answer keeps its streamed words' wrappers until the whole reply finishes (markdown.tsx). */}
-            <ReplyLive value={live}>
-              <Markdown text={item.part.text} animate={live && index === items.length - 1} />
-            </ReplyLive>
-          </div>
-        ),
-      )}
+      {items.map((item, index) => (
+        <FlowEntry
+          key={reactKey(item, index)}
+          item={item}
+          live={live}
+          last={index === items.length - 1}
+          afterWork={index > 0 && flow[index - 1]?.type === 'work'}
+          agentIndex={agentIndex}
+        />
+      ))}
       {!interrupted && <ErrorLine text={errorText} />}
       {footerText !== undefined && <AnswerFooter text={footerText} stats={stats} />}
       {interrupted && errorText && <NoticeDivider slot="reply-interrupted" label={errorText} />}
+      {tail.map((item) => <FlowEntry key={item.key} item={item} live={live} last={false} afterWork={false} agentIndex={agentIndex} />)}
     </div>
   );
 });

@@ -2,7 +2,7 @@
 // tool calls and explicitly labelled commentary) folds into a collapsible group, and the
 // answer (the text after the last tool call) stands outside it, in the order it all happened.
 import { isAgentTool } from './background';
-import type { ReplyNotice, ReplyPart, ReplyState, ReplyTextPart, ReplyToolPart } from './reply';
+import type { ReplyCompaction, ReplyNotice, ReplyPart, ReplyState, ReplyTextPart, ReplyToolPart } from './reply';
 
 export type WorkGroup = {
   type: 'work';
@@ -22,7 +22,10 @@ export type AgentsItem = { type: 'agents'; key: string; parts: ReplyToolPart[] }
 /** A goal round: the reviewer sent the work back, so the reply picks up below this divider. */
 export type RoundDivider = { type: 'round'; key: string; label: string };
 
-export type FlowItem = WorkGroup | AnswerText | AgentsItem | RoundDivider;
+/** A compaction of the conversation: the work before it is summarised, the work after starts anew. */
+export type CompactionItem = { type: 'compaction'; key: string; compaction: ReplyCompaction };
+
+export type FlowItem = WorkGroup | AnswerText | AgentsItem | RoundDivider | CompactionItem;
 
 const visible = (part: ReplyPart) => part.kind === 'tool' || part.text.trim() !== '';
 
@@ -79,31 +82,39 @@ function roundLabels(notices: ReplyNotice[]): Map<string, string> {
 
 /**
  * The reply as work groups, answer texts and subagent calls, in order. Where a background
- * subagent finished or a goal round began and the main agent picked up again, the work after
- * starts a group of its own; a goal round also gets a divider there.
+ * subagent finished, a goal round began or the conversation was compacted and the main agent
+ * picked up again, the work after starts a group of its own; a goal round also gets a divider
+ * there, and a compaction its own row.
  */
 export function replyFlow(reply: ReplyState): FlowItem[] {
   const notices = reply.notices ?? [];
   const labels = roundLabels(notices);
   const items: FlowItem[] = [];
-  const dividers = (at: (afterStep: number) => boolean) => {
+  const compactions = reply.compactions ?? [];
+  // What happened between steps: goal round dividers, then compactions.
+  const markers = (at: (afterStep: number) => boolean) => {
     for (const notice of notices) {
       const label = labels.get(notice.id);
       if (label && at(notice.afterStep)) items.push({ type: 'round', key: `round:${notice.id}`, label });
     }
+    for (const compaction of compactions) {
+      if (at(compaction.afterStep)) items.push({ type: 'compaction', key: `compaction:${compaction.id}`, compaction });
+    }
   };
+  // A notice there names the work that picks up after it (the reply's placeholder uses its key).
+  const pickups = [...compactions, ...notices];
   let pickup: string | undefined;
   reply.steps.forEach((step, index) => {
-    dividers((afterStep) => afterStep === index);
-    pickup = notices.findLast((notice) => notice.afterStep === index)?.id ?? pickup;
+    markers((afterStep) => afterStep === index);
+    pickup = pickups.findLast((marker) => marker.afterStep === index)?.id ?? pickup;
     for (const part of step.parts) {
       if (!visible(part)) continue;
       addPart(items, part, pickup);
       pickup = undefined;
     }
   });
-  // Rounds the reply has not picked up from yet (no step after them so far).
-  dividers((afterStep) => afterStep >= reply.steps.length);
+  // Markers the reply has not picked up from yet (no step after them so far).
+  markers((afterStep) => afterStep >= reply.steps.length);
   return items;
 }
 

@@ -161,7 +161,7 @@ describe('reduceTimeline', () => {
       ev('session.inbox.enqueued', { inboxID: 'c1', item: { type: 'compaction', payload: {}, delivery: 'queue' } }),
     ]);
     expect(t.pending).toEqual([]);
-    expect(t.controls).toEqual([{ id: 'c1', delivery: 'queue' }]);
+    expect(t.controls).toEqual([{ id: 'c1', delivery: 'queue', compaction: true }]);
     expect(run([ev('session.inbox.delivered', { inboxID: 'c1' })], t).controls).toEqual([]);
   });
 
@@ -212,7 +212,7 @@ describe('syncInbox', () => {
       ['m3', 'c', 'queue', 3],
       ['m2', 'b', 'steer', 2],
     ]);
-    expect(synced.controls).toEqual([{ id: 'c1', delivery: 'queue' }]);
+    expect(synced.controls).toEqual([{ id: 'c1', delivery: 'queue', compaction: true }]);
   });
 
   it('drops listed items that are already turns', () => {
