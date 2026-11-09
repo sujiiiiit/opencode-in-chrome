@@ -40,7 +40,8 @@ export function ComposerTray({ open, children }: { open: boolean; children: Reac
 type RowProps = {
   /** False folds the row away (smoothly); keep its content until the fold ends. */
   shown?: boolean;
-  icon: IconName;
+  /** An icon name, or your own element (a status icon that changes with the row). */
+  icon: IconName | ReactNode;
   /** The row's name (`Goal`, `Goal paused`): the text's size and weight, in the primary colour. */
   label: string;
   /** One line after the label, truncated; it opens the details when there are some. */
@@ -49,6 +50,10 @@ type RowProps = {
   detailsLabel?: string;
   /** Opened from the text as an overlay above the tray, so the chat behind it does not move. */
   details?: ReactNode;
+  /** Quiet text at the end of the header (a count); the chevron then sits after it, at the very end. */
+  meta?: ReactNode;
+  /** Classes for the details' padding (default: indented under the label, past the icon). */
+  detailsClassName?: string;
   /** Buttons at the end of the row (`TrayAction`s). */
   actions?: ReactNode;
 };
@@ -58,7 +63,7 @@ type RowProps = {
  * body under it. The header's text toggles the body, which opens inside the tray: the tray grows
  * up from behind the box and the chat moves up with it.
  */
-export function TrayRow({ shown = true, icon, label, text, details, detailsLabel = 'Show details', actions }: RowProps) {
+export function TrayRow({ shown = true, icon, label, text, details, detailsLabel = 'Show details', meta, detailsClassName = 'pl-9', actions }: RowProps) {
   const [expanded, setExpanded] = useState(false);
   // A row mounted with the tray (or before it opens) rides in with it instead of folding in too.
   const settled = useContext(TraySettled);
@@ -67,10 +72,13 @@ export function TrayRow({ shown = true, icon, label, text, details, detailsLabel
   // Icon, label and text: the whole header but its actions, and the toggle when there are details.
   const heading = (
     <>
-      <Icon name={icon} className="size-4 shrink-0 text-text-secondary" />
+      {typeof icon === 'string' ? <Icon name={icon as IconName} className="size-4 shrink-0 text-text-secondary" /> : icon}
       <span className="shrink-0 text-text-primary">{label}</span>
-      <span className="min-w-0 truncate text-text-secondary">{text}</span>
-      {details && <Icon name="chevron-down" size={14} className="-ml-1 shrink-0 text-text-tertiary transition-transform duration-200 ease-(--ease-calm) group-data-panel-open/tray:rotate-180" />}
+      {/* Clips to the row's width; a block child (MorphText) can't inherit text-overflow from here,
+          so it truncates itself and plain text below truncates its own span instead. */}
+      <span className="min-w-0 overflow-hidden text-text-secondary">{text}</span>
+      {meta && <span className="ml-auto shrink-0 pl-2 tabular-nums text-text-tertiary">{meta}</span>}
+      {details && <Icon name="chevron-down" size={14} className={cn('shrink-0 text-text-tertiary transition-transform duration-200 ease-(--ease-calm) group-data-panel-open/tray:rotate-180', meta ? '-ml-0.5' : '-ml-1')} />}
     </>
   );
   const headingCn = 'flex h-9 min-w-0 flex-1 items-center gap-2 pl-3 type-work';
@@ -95,7 +103,7 @@ export function TrayRow({ shown = true, icon, label, text, details, detailsLabel
           {details && (
             <CollapsibleContent data-tray-details="">
               <ScrollArea viewportClassName="max-h-48">
-                <div className="px-3 pb-3 pl-9 type-work text-text-secondary">{details}</div>
+                <div className={cn('px-3 pb-3 type-work text-text-secondary', detailsClassName)}>{details}</div>
               </ScrollArea>
             </CollapsibleContent>
           )}

@@ -31,7 +31,13 @@ export const GoalRow = memo(function GoalRow({ goal, notice, onAction }: Props) 
       shown={showsGoal(goal)}
       icon="goal"
       label={LABEL[shown.status]}
-      text={notice ? <span role="alert" className="text-text-primary">{notice}</span> : shown.objective}
+      text={
+        notice ? (
+          <span role="alert" className="block truncate text-text-primary">{notice}</span>
+        ) : (
+          <span className="block truncate">{shown.objective}</span>
+        )
+      }
       detailsLabel="Show goal"
       details={
         <>

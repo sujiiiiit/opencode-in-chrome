@@ -729,8 +729,32 @@
   /* Always rounded on top, open or not. */
   border-top-left-radius: 0.875rem;
   border-top-right-radius: 0.875rem;
-  & [data-slot="tray-fold"] + [data-slot="tray-fold"] {
-    border-top: 1px solid var(--border);
+  /* The divider between two shown rows belongs to the one that leaves, so it folds away with it:
+   * a row under a shown row draws it on its top, and a leaving row above a shown row draws it on
+   * its bottom. It is an inset shadow on the row's clipping box, so a folded row (0 height) draws
+   * nothing; a border would keep 1px there and double the tray's top edge. */
+  & [data-slot="tray-fold"]:not([data-hidden]) ~ [data-slot="tray-fold"] > * {
+    box-shadow: inset 0 1px 0 var(--border);
+  }
+  & [data-slot="tray-fold"][data-hidden]:has(~ [data-slot="tray-fold"]:not([data-hidden])) > * {
+    box-shadow: inset 0 -1px 0 var(--border);
+  }
+}
+
+/* A finished todo is struck through (components/chat/prompt-box/todo-tray.tsx): a real
+ * line-through whose colour fades in, so it appears without the text moving. */
+[data-slot="todo-text"] {
+  text-decoration: line-through;
+  text-decoration-color: transparent;
+  text-decoration-thickness: 1px;
+  transition:
+    text-decoration-color 300ms var(--ease-calm),
+    color 300ms var(--ease-calm);
+  &[data-struck] {
+    text-decoration-color: currentColor;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    transition: none;
   }
 }
 
@@ -1158,11 +1182,17 @@ body {
 .morph-text {
   display: block;
   overflow: hidden;
+}
+
+/* The words' own block truncates: text-overflow does not reach into a block child, so on
+ * .morph-text alone plain (non-shimmer) text was cut off with no ellipsis. */
+.morph-text > span {
+  overflow: hidden;
   text-overflow: ellipsis;
 }
 
 /* An ellipsis would flicker at the moving edge: clip until the width settles. */
-.morph[data-moving] > .morph-text {
+.morph[data-moving] > .morph-text > span {
   text-overflow: clip;
 }
 
@@ -1254,8 +1284,9 @@ body {
   );
 }
 
-/* The fade replaces the ellipsis, which would sit under it. */
-.marquee .morph-text { text-overflow: clip; }
+/* The fade replaces the ellipsis, which would sit under it, and the words overflow their block
+ * so sliding it shows the rest. */
+.marquee .morph-text > span { overflow: visible; text-overflow: clip; }
 
 .marquee[data-overflow] .morph-text > span {
   transition: transform 300ms var(--ease-calm);

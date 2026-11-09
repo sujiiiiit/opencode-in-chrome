@@ -40,6 +40,8 @@ import { useGoal } from './use-goal';
 import type { Goal } from '@/lib/opencode/goal';
 import { ComposerTray } from './prompt-box/composer-tray';
 import { GoalRow, showsGoal } from './prompt-box/goal-tray';
+import { TodoRow, showsTodos } from './prompt-box/todo-tray';
+import { sessionTodos, type Todo } from '@/lib/opencode/todos';
 import type { MentionItem } from '@/lib/opencode/mentions';
 import { SubagentTabs, useSubagentPath, type SubagentPath } from './subagent-tabs';
 
@@ -280,13 +282,15 @@ type ChatComposerProps = {
   mentions: ReturnType<typeof useMentions>;
   /** The session's `/goal`, shown as a tab behind the box while it has one. */
   goal: ReturnType<typeof useGoal>;
+  /** The agent's todo list, shown as a row under the goal. */
+  todos: Todo[];
 };
 
 /**
  * The prompt box with its attach menu, attached images and model chips, and the drop zone that
  * covers the whole pane (the overlay is placed against the pane, its nearest positioned box).
  */
-function ChatComposer({ box, composer, models, active, question, subagent, mentions, goal }: ChatComposerProps) {
+function ChatComposer({ box, composer, models, active, question, subagent, mentions, goal, todos }: ChatComposerProps) {
   // History, sliding over the chat, takes no drops; nor does a subagent's chat (no editor shows).
   const panelActive = useTabPanelActive();
   const dragging = useFileDrop(composer.addFiles, active && panelActive && !subagent);
@@ -301,8 +305,9 @@ function ChatComposer({ box, composer, models, active, question, subagent, menti
         mentions={source}
         tray={
           // Rows to come go here, each with its own `shown`; the tray is open while any row is.
-          <ComposerTray open={showsGoal(goal.goal) && !subagent}>
+          <ComposerTray open={(showsGoal(goal.goal) || showsTodos(todos)) && !subagent}>
             <GoalRow goal={goal.goal} notice={goal.notice} onAction={goal.run} />
+            <TodoRow todos={todos} />
           </ComposerTray>
         }
         controls={
@@ -363,6 +368,8 @@ function ChatPane({ connection, session, models, hub, onUnauthorized, active, on
   const box = useRef<PromptBoxHandle>(null);
   const mentions = useMentions(connection, hub, onUnauthorized);
   const goal = useGoal(connection, hub, activeID, onUnauthorized);
+  const turns = state.timeline?.turns;
+  const todos = useMemo(() => (turns ? sessionTodos(turns) : []), [turns]);
   const composer = useComposer({
     chat,
     state,
@@ -385,7 +392,7 @@ function ChatPane({ connection, session, models, hub, onUnauthorized, active, on
         <div className="mx-auto w-full max-w-chat"><PaneNotice session={session} models={models} /></div>
       </SessionBranch>
       <div className="mx-auto w-full max-w-chat shrink-0">
-        <ChatComposer box={box} composer={composer} models={models} active={active} question={question} subagent={!!nav.child} mentions={mentions} goal={goal} />
+        <ChatComposer box={box} composer={composer} models={models} active={active} question={question} subagent={!!nav.child} mentions={mentions} goal={goal} todos={todos} />
       </div>
       {store && (
         <ModelPicker store={store} state={models.state} onClose={() => picker.onOpenChange(false)} />
