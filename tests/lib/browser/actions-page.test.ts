@@ -45,7 +45,7 @@ describe('locate', () => {
     document.elementFromPoint = vi.fn(() => document.querySelector('span')!);
     expect(locate(registry, document, ref('button'))).toEqual({
       error: 'OBSCURED',
-      message: 'button "Buy" is covered by region "Cookie consent" (div#cookie-banner).',
+      message: 'button "Buy" is covered by region "Cookie consent" (div#cookie-banner). Close or accept that first (find its button), then try again.',
     });
   });
 
@@ -53,7 +53,7 @@ describe('locate', () => {
     document.body.innerHTML = '<button disabled>Pay</button><button id="z">Zero</button>';
     const pay = document.querySelector('button')!;
     box(pay, { left: 0, top: 0, width: 50, height: 20 });
-    expect(locate(registry, document, ref('button'))).toMatchObject({ error: 'NOT_INTERACTABLE', message: 'button "Pay" is disabled.' });
+    expect(locate(registry, document, ref('button'))).toMatchObject({ error: 'NOT_INTERACTABLE', message: expect.stringMatching(/^button "Pay" is disabled\. Something must be done first/) });
     expect(locate(registry, document, ref('#z'))).toMatchObject({ error: 'NOT_INTERACTABLE' });
     const gone = ref('#z');
     document.querySelector('#z')!.remove();

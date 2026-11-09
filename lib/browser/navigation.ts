@@ -2,12 +2,16 @@
 // page has loaded and its DOM has been quiet for 500 ms, capped at 15 s overall. Single-page
 // app route changes (history.pushState) count as navigations.
 
+export type NavKind = 'started' | 'committed' | 'loaded' | 'history' | 'error' | 'aborted';
+
 export type NavEvents = {
   /**
    * Subscribes to top-frame navigation events for a tab; returns an unsubscribe.
-   * `committed` marks a new document starting; `loaded` its load finishing.
+   * `started` marks a request for a new document (before the server answers); `committed`
+   * the new document starting; `loaded` its load finishing; `aborted` a navigation that was
+   * cancelled or turned into a download.
    */
-  watch(tabId: number, cb: (outcome: { kind: 'committed' | 'loaded' | 'history' | 'error'; url: string; error?: string }) => void): () => void;
+  watch(tabId: number, cb: (outcome: { kind: NavKind; url: string; error?: string }) => void): () => void;
 };
 
 export type NavResult = {

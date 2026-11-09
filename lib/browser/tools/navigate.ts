@@ -3,6 +3,7 @@ import type { Dialogs } from '../dialogs';
 import { DOM_QUIET_MS, navigateAndWait, navigationText, type NavEvents } from '../navigation';
 import type { PageReader } from '../snapshot/reader';
 import type { Tab, TabScope } from '../tabs';
+import { botCheckNote } from '../bot-check';
 import { ToolError, type ToolDef } from './registry';
 import { tabIdProperty, withScheme } from './tabs';
 import type { ComputerDeps } from './computer';
@@ -17,6 +18,7 @@ export type NavigateDeps = {
     update(tabId: number, url: string): Promise<void>;
     back(tabId: number): Promise<void>;
     forward(tabId: number): Promise<void>;
+    reload(tabId: number): Promise<void>;
     resizeWindowOf(tabId: number, width: number, height: number): Promise<void>;
   };
   guard?: ComputerDeps['guard'];
@@ -28,12 +30,12 @@ export function navigateTools(deps: NavigateDeps): ToolDef[] {
     {
       name: 'navigate',
       description:
-        'Open a URL in the current tab (https:// assumed), or go "back" / "forward" in history. Waits for the page to load and settle (max 15 s) ' +
+        'Open a URL in the current tab (https:// assumed), or go "back" / "forward" in history, or "reload" the page. Waits for the page to load and settle (max 15 s) ' +
         'and returns its URL and title; snapshot: true also returns the interactive page tree. Creates a tab when the session has none.',
       inputSchema: {
         type: 'object',
         properties: {
-          url: { type: 'string', description: 'URL, or "back" / "forward".' },
+          url: { type: 'string', description: 'URL, or "back" / "forward" / "reload".' },
           tabId: tabIdProperty,
           snapshot: { type: 'boolean', description: 'Also return read_page output for the loaded page.' },
         },
@@ -43,7 +45,7 @@ export function navigateTools(deps: NavigateDeps): ToolDef[] {
         const { history, url } = navigationTarget(args.url);
         const tab = await resolveTab(scope, sessionID, args.tabId as number | undefined, !!history);
         dialogs.assertClear(tab.id);
-        await deps.guard?.({ sessionID, tabId: tab.id, tool: 'navigate', action: history ?? 'open', summary: url ? `Opens ${url}` : `Goes ${history}`, target: { url } });
+        await deps.guard?.({ sessionID, tabId: tab.id, tool: 'navigate', action: history ?? 'open', summary: guardSummary(url, history), target: { url } });
         const id = tab.id;
         const result = await navigateAndWait({
           tabId: id,
@@ -84,20 +86,33 @@ export function navigateTools(deps: NavigateDeps): ToolDef[] {
   ];
 }
 
-function navigationTarget(input: unknown): { history: 'back' | 'forward' | undefined; url: string | undefined } {
+type History = 'back' | 'forward' | 'reload';
+
+const guardSummary = (url: string | undefined, history: History | undefined) => (url ? `Opens ${url}` : history === 'reload' ? 'Reloads the page' : `Goes ${history}`);
+
+function navigationTarget(input: unknown): { history: History | undefined; url: string | undefined } {
   const raw = String(input).trim();
-  if (raw === 'back' || raw === 'forward') return { history: raw, url: undefined };
+  if (/^(back|forward|reload)$/.test(raw)) return { history: raw as History, url: undefined };
   const url = withScheme(raw);
   if (!/^https?:/i.test(url)) throw new ToolError('INVALID_INPUT', `Only http and https pages can be opened (got ${JSON.stringify(raw)}).`);
   return { history: undefined, url };
 }
 
+const httpStatus = async (deps: NavigateDeps, tabId: number): Promise<number> => (await deps.reader.callTop<number>(tabId, 'navStatus').catch(() => 0)) || 0;
+const loadedUrl = (outcome: string, url: string | undefined): boolean => outcome === 'loaded' && !!url;
+
+/** A note when the server answered with an error status: the page shown is then an error page. */
+async function httpNote(deps: NavigateDeps, tabId: number, check: boolean): Promise<string> {
+  const status = check ? await httpStatus(deps, tabId) : 0;
+  return status >= 400 ? `. The server answered HTTP ${status}: this is an error page, not the page you asked for.` : '';
+}
+
 async function navigationOutput(deps: NavigateDeps, args: Record<string, unknown>, tabId: number, result: Awaited<ReturnType<typeof navigateAndWait>>, url: string | undefined, sessionID: string): Promise<string[]> {
   const now = await deps.tabs.get(tabId);
   const text = [navigationText(result, { url: now.url ?? '', title: now.title ?? '' }, url)];
+  text[0] += await httpNote(deps, tabId, loadedUrl(result.status, url));
   const extra = await navigationExtra(deps, args, tabId, result, sessionID);
-  if (extra) text.push(extra);
-  return text;
+  return [...text, ...[botCheckNote(now), extra].filter((note): note is string => Boolean(note))];
 }
 
 async function navigationExtra(deps: NavigateDeps, args: Record<string, unknown>, tabId: number, result: Awaited<ReturnType<typeof navigateAndWait>>, sessionID: string): Promise<string | undefined> {
@@ -124,5 +139,6 @@ function canCreateTab(error: unknown, history: boolean): boolean {
 function startNavigation(deps: NavigateDeps, tabId: number, history: string | undefined, url: string | undefined): Promise<void> {
   if (history === 'back') return deps.tabs.back(tabId);
   if (history === 'forward') return deps.tabs.forward(tabId);
+  if (history === 'reload') return deps.tabs.reload(tabId);
   return deps.tabs.update(tabId, url!);
 }

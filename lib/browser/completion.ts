@@ -2,13 +2,14 @@
 // completion.ts: a page action whose result does not show its effect stays unverified until a
 // later observation of that tab, or a later action there with a visible change. `done` refuses
 // "success" while any is open.
+import type { KeyValue } from './tabs';
 import type { ToolOutput } from './tools/registry';
 
 /** Tools that change a page. `computer` counts only for its acting actions. */
 const MUTATING = new Set(['form_input', 'file_upload', 'upload_image']);
 const ACTING = new Set(['left_click', 'right_click', 'double_click', 'triple_click', 'type', 'key', 'scroll', 'hover', 'left_click_drag']);
 /** Reads that show the page as it is now. */
-const OBSERVING = new Set(['read_page', 'find', 'get_page_text']);
+const OBSERVING = new Set(['read_page', 'find', 'get_page_text', 'wait_for', 'extract']);
 const LOOKING = new Set(['screenshot', 'zoom']);
 /** Failures after which the input may still have reached the page. */
 const DELIVERY_UNKNOWN = new Set(['TIMEOUT', 'DEBUGGER_DETACHED', 'INTERNAL']);
@@ -40,6 +41,23 @@ type Debt = { tabId: number; label: string };
 
 export class Completion {
   private readonly open = new Map<string, Debt[]>();
+
+  /** `store` keeps unverified actions across worker restarts (V5), so `done` cannot forget them. */
+  constructor(private readonly store?: KeyValue<Record<string, Debt[]>>) {
+    void store?.get().then(
+      (saved) => {
+        for (const [sessionID, debts] of Object.entries(saved ?? {})) {
+          const current = this.open.get(sessionID) ?? [];
+          this.open.set(sessionID, [...debts.filter((d) => !current.some((c) => c.label === d.label)), ...current]);
+        }
+      },
+      () => undefined,
+    );
+  }
+
+  private save(): void {
+    void this.store?.set(Object.fromEntries(this.open)).catch(() => undefined);
+  }
   /** Actions whose tab closed before they were verified; reported once by `done`. */
   private readonly lost = new Map<string, string[]>();
   private readonly refusals = new Map<string, number>();
@@ -72,6 +90,7 @@ export class Completion {
       if (!gone.length) continue;
       this.open.set(sessionID, debts.filter((d) => d.tabId !== tabId));
       this.lost.set(sessionID, [...(this.lost.get(sessionID) ?? []), ...gone.map((d) => `${d.label}: not verified, the tab closed`)]);
+      this.save();
     }
   }
 
@@ -90,16 +109,19 @@ export class Completion {
     this.open.delete(sessionID);
     this.lost.delete(sessionID);
     this.refusals.delete(sessionID);
+    this.save();
     return { accepted: true, outcome: outcome === 'success' && open.length ? 'partial' : outcome, unverified };
   }
 
   private add(sessionID: string, debt: Debt): void {
     this.open.set(sessionID, [...(this.open.get(sessionID) ?? []).filter((d) => d.label !== debt.label), debt]);
+    this.save();
   }
 
   private clear(sessionID: string, tabId: number): void {
     const left = (this.open.get(sessionID) ?? []).filter((d) => d.tabId !== tabId);
     if (left.length) this.open.set(sessionID, left);
     else this.open.delete(sessionID);
+    this.save();
   }
 }

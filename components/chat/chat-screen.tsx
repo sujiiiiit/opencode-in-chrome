@@ -12,7 +12,6 @@ import { ChatSession, INITIAL_CHAT_STATE, pendingMessages, type ChatState } from
 import type { Turn } from '@/lib/opencode/timeline';
 import { contextUsage } from '@/lib/opencode/context-usage';
 import { findModel } from '@/lib/opencode/models/catalog';
-import { PINNED_SERVER_VERSION } from '@/lib/opencode/client';
 import type { Connection } from '@/lib/opencode/connection';
 import type { EventHub } from '@/lib/opencode/events';
 import type { Selection } from '@/lib/opencode/models/selection';
@@ -69,20 +68,11 @@ function Banner({ children }: { children: string }) {
   );
 }
 
-/** A version mismatch, and a pairing that expires soon. */
+/** A pairing that expires soon. */
 function ConnectionBanners({ connection }: { connection: Connection }) {
   const daysLeft = Math.ceil((connection.expiresAt - Date.now()) / DAY_MS);
-  const mismatch = connection.serverVersion && connection.serverVersion !== PINNED_SERVER_VERSION;
-  return (
-    <>
-      {mismatch && (
-        <Banner>{`Server is ${connection.serverVersion}; this extension was built for ${PINNED_SERVER_VERSION}.`}</Banner>
-      )}
-      {daysLeft <= EXPIRY_WARNING_DAYS && (
-        <Banner>{`Pairing expires in ${daysLeft} ${daysLeft === 1 ? 'day' : 'days'}. Pair again soon.`}</Banner>
-      )}
-    </>
-  );
+  if (daysLeft > EXPIRY_WARNING_DAYS) return null;
+  return <Banner>{`Pairing expires in ${daysLeft} ${daysLeft === 1 ? 'day' : 'days'}. Pair again soon.`}</Banner>;
 }
 
 /** Opens the settings page (entrypoints/settings) in a new browser tab. */

@@ -1,5 +1,7 @@
 import { startBrowserAgent } from '@/lib/browser/agent';
 import { createBrowserRuntime } from '@/lib/browser/runtime';
+import { NATIVE_HOST, startNativeBridge } from '@/lib/browser/native';
+import { isBrowserAccessEnabled } from '@/lib/browser/settings';
 
 interface FirefoxSidebarAction {
   toggle: () => Promise<void>;
@@ -27,6 +29,9 @@ export default defineBackground(() => {
     // The browser agent: tools served to the paired opencode server (lib/browser).
     const runtime = createBrowserRuntime();
     startBrowserAgent({ tools: runtime.tools });
+    // The same tools for any MCP client on this machine (mcp/server.mjs through the native host).
+    const native = startNativeBridge(runtime.tools, () => browser.runtime.connectNative(NATIVE_HOST), isBrowserAccessEnabled, (sessionID) => runtime.scope.release(sessionID));
+    browser.alarms.onAlarm.addListener(() => native.ensure());
     return;
   }
 

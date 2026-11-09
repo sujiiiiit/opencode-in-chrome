@@ -8,8 +8,10 @@ import { Actor } from './actions';
 import { BRIDGE_ALARM } from './agent';
 import { formApprovals } from './approvals';
 import { chromeNavEvents, chromeScriptingApi, chromeTabApi, localValue, sessionValue } from './chrome';
+import { DOM_QUIET_MS, navigateAndWait } from './navigation';
 import { LoopGuard, Policy, type PolicySettings } from './policy';
-import { POLICY_KEY, STOPPED_KEY, TABS_KEY } from './settings';
+import { userMessagesText } from './intent';
+import { COMPLETION_KEY, POLICY_KEY, POLICY_SESSION_KEY, STOPPED_KEY, TABS_KEY } from './settings';
 import { withSafety } from './safety';
 import { attachGuide } from './guidance';
 import { browserStateHooks, TabWatch, trackRevisions } from './state';
@@ -34,6 +36,12 @@ import { navigateTools } from './tools/navigate';
 import { pageTools } from './tools/page';
 import { toMcpTools, type ToolDef } from './tools/registry';
 import { tabTools } from './tools/tabs';
+import { waitTool } from './tools/wait';
+import { isMcpSession } from './native';
+import { popupApprovals } from './popup-approvals';
+import { extractTool } from './tools/extract';
+import { downloadsTool } from './tools/downloads';
+import { DownloadWatch, type DownloadItem } from './downloads';
 
 
 export function createBrowserRuntime() {
@@ -64,18 +72,25 @@ export function createBrowserRuntime() {
       await browser.downloads.download({ url: gifDataUrl(bytes), filename, saveAs: false, conflictAction: 'uniquify' });
     },
   });
+  const downloadWatch = new DownloadWatch({
+    onCreated: (cb) => browser.downloads.onCreated.addListener((item) => cb(item as DownloadItem)),
+    search: async (id) => (await browser.downloads.search({ id }))[0] as DownloadItem | undefined,
+    download: (url, filename) => browser.downloads.download({ url, filename, saveAs: false, conflictAction: 'uniquify' }),
+  });
   const actor = new Actor({
     reader,
     debuggers,
     dialogs,
     scope,
     tab: (tabId) => tabApi.get(tabId),
+    events: chromeNavEvents(),
+    downloads: downloadWatch,
     afterAction: (tabId, sessionID, label, point) => recorder.capture(sessionID, tabId, label.split('\n')[0]!, point),
   });
   const server = serverAccess();
   const vision = new VisionCheck(server);
   const watch = new TabWatch();
-  const completion = new Completion();
+  const completion = new Completion(sessionValue(COMPLETION_KEY));
   const loop = new LoopGuard();
 
   // Listeners first, synchronously: they must exist when the worker is woken by them.
@@ -89,6 +104,14 @@ export function createBrowserRuntime() {
     screenshots.forgetTab(tabId);
     watch.forgetTab(tabId);
     completion.dropTab(tabId);
+  });
+  // A prerender or instant swap replaces a tab's id: the new id takes the old one's place in its session.
+  browser.tabs.onReplaced.addListener((added, removed) => {
+    void scope.replaced(added, removed);
+    reader.forgetTab(removed);
+    screenshots.forgetTab(removed);
+    watch.forgetTab(removed);
+    completion.dropTab(removed);
   });
   // Revisions for the state block: one per top-frame document or same-document navigation.
   trackRevisions(watch, {
@@ -116,13 +139,17 @@ export function createBrowserRuntime() {
   const policy = new Policy({
     store: localValue<PolicySettings>(POLICY_KEY),
     permissionMode: loadPermissionMode,
-    approve: (request) => approve(request),
+    // MCP sessions (mcp/server.mjs) have no chat to show a form in: they get a popup window.
+    approve: (request) => (isMcpSession(request.sessionID) ? approvePopup(request) : approve(request)),
     currentUrl: async (tabId) => {
       const tab = await tabApi.get(tabId);
       return tab.pendingUrl || tab.url || '';
     },
+    userText: async (sessionID) => userMessagesText(await server(), sessionID),
+    sessionState: sessionValue(POLICY_SESSION_KEY),
   });
   const approve = formApprovals(server, { onStop: (cb) => policy.onStop(cb) });
+  const approvePopup = popupApprovals({ onStop: (cb) => policy.onStop(cb) });
   policy.onStop(() => void debuggers.detachAll());
   // A stop outlives a worker restart (until the browser closes or the user resumes).
   void browser.storage.session.get(STOPPED_KEY).then((stored) => {
@@ -132,10 +159,18 @@ export function createBrowserRuntime() {
     await policy.guard(call);
   };
 
+  const navEvents = chromeNavEvents();
   const defs: ToolDef[] = [
     ...tabTools(scope, {
+      // Returns once the page has loaded, so the next read does not meet a blank tab.
       openInNewTab: async (tabId, url) => {
-        await browser.tabs.update(tabId, { url });
+        await navigateAndWait({
+          tabId,
+          url,
+          events: navEvents,
+          start: async () => void (await browser.tabs.update(tabId, { url })),
+          settle: (budget) => reader.callTop(tabId, 'settle', [DOM_QUIET_MS, budget]).then(() => undefined, () => undefined),
+        });
       },
     }),
     ...navigateTools({
@@ -143,12 +178,13 @@ export function createBrowserRuntime() {
       reader,
       dialogs,
       guard,
-      events: chromeNavEvents(),
+      events: navEvents,
       tabs: {
         get: (tabId) => tabApi.get(tabId),
         update: async (tabId, url) => void (await browser.tabs.update(tabId, { url })),
         back: (tabId) => browser.tabs.goBack(tabId),
         forward: (tabId) => browser.tabs.goForward(tabId),
+        reload: (tabId) => browser.tabs.reload(tabId),
         resizeWindowOf: async (tabId, width, height) => {
           const tab = await browser.tabs.get(tabId);
           if (tab.windowId !== undefined) await browser.windows.update(tab.windowId, { width, height, state: 'normal' });
@@ -156,7 +192,13 @@ export function createBrowserRuntime() {
       },
     }),
     ...pageTools(scope, reader),
-    computerTool({ scope, reader, actor, dialogs, screenshots, vision, guard }),
+    waitTool({ scope, reader, dialogs, tab: (tabId) => tabApi.get(tabId) }),
+    extractTool(scope, reader),
+    downloadsTool(downloadWatch),
+    computerTool({
+      scope, reader, actor, dialogs, screenshots, vision, guard,
+      saveImage: (image, name) => downloadWatch.save(`data:${image.mimeType};base64,${image.data}`, `opencode/${name}`),
+    }),
     ...formTools({
       scope,
       reader,
@@ -182,7 +224,8 @@ export function createBrowserRuntime() {
     toMcpTools(guarded, {
       ...browserStateHooks({ watch, context: (sessionID) => scope.context(sessionID), dialog: (tabId) => dialogs.get(tabId), unverified: (sessionID) => completion.labels(sessionID) }),
       // A session another client created gets the browsing guide on its first call (spec browser/agent-guidance).
-      onCall: (sessionID) => void server().then((client) => client && attachGuide(client, sessionID)),
+      // MCP clients get the guide as the server's instructions instead.
+      onCall: (sessionID) => void (isMcpSession(sessionID) ? undefined : server().then((client) => client && attachGuide(client, sessionID))),
       onInternalError: (tool, error) => console.error(`[browser] ${tool} failed`, error),
     });
 

@@ -12,9 +12,60 @@ export type Tab = {
   windowId?: number;
   openerTabId?: number;
   active?: boolean;
+  index?: number;
+  pinned?: boolean;
+  audible?: boolean;
+  mutedInfo?: { muted: boolean };
+  discarded?: boolean;
+  autoDiscardable?: boolean;
+  frozen?: boolean;
+  highlighted?: boolean;
+  status?: 'unloaded' | 'loading' | 'complete';
+  splitViewId?: number;
 };
 
 export type TabInfo = { id: number; title: string; url: string };
+
+/** A tab with the state flags Chrome reports for it (tabs_context shows the ones that are set). */
+export type TabDetails = TabInfo & {
+  active: boolean;
+  pinned: boolean;
+  audible: boolean;
+  muted: boolean;
+  discarded: boolean;
+  frozen: boolean;
+  loading: boolean;
+  /** The split view the tab is in, if any. */
+  splitViewId?: number;
+};
+
+export type TabUpdate = {
+  url?: string;
+  active?: boolean;
+  highlighted?: boolean;
+  muted?: boolean;
+  pinned?: boolean;
+  autoDiscardable?: boolean;
+  openerTabId?: number;
+};
+
+/** The browser's New Tab page (Ctrl+T, the + button): never a page an agent opened. */
+const NEW_TAB_PAGE = /^(chrome|edge|brave|opera|vivaldi):\/\/(newtab|new-tab-page|startpage)\/?$|^about:newtab$/;
+
+function isNewTabPage(tab: { url?: string; pendingUrl?: string }): boolean {
+  const url = tab.pendingUrl || tab.url;
+  return url !== undefined && NEW_TAB_PAGE.test(url);
+}
+
+export type ZoomSettings = {
+  mode?: 'automatic' | 'manual' | 'disabled';
+  scope?: 'per-origin' | 'per-tab';
+  defaultZoomFactor?: number;
+};
+
+export type TabGroup = { id: number; title?: string; color?: string; collapsed?: boolean; windowId?: number };
+
+export const GROUP_COLORS = ['grey', 'blue', 'red', 'yellow', 'green', 'pink', 'purple', 'cyan', 'orange'] as const;
 
 /** The Chrome calls this module needs, injectable for tests. */
 export type TabApi = {
@@ -26,6 +77,27 @@ export type TabApi = {
   ungroup(tabIds: number[]): Promise<void>;
   updateGroup(groupId: number, props: { title?: string; color?: string; collapsed?: boolean }): Promise<unknown>;
   lastFocusedWindowId(): Promise<number | undefined>;
+  update(tabId: number, props: TabUpdate): Promise<Tab>;
+  reload(tabId: number, bypassCache?: boolean): Promise<void>;
+  duplicate(tabId: number): Promise<Tab | undefined>;
+  /** Reorders inside the tab's window; -1 is the end. */
+  move(tabId: number, index: number, windowId?: number): Promise<Tab>;
+  discard(tabId: number): Promise<Tab | undefined>;
+  /** `tabIndexes` are positions in the window, not tab ids. */
+  highlight(windowId: number, tabIndexes: number[]): Promise<void>;
+  getZoom(tabId: number): Promise<number>;
+  /** 0 resets to the default zoom factor. */
+  setZoom(tabId: number, factor: number): Promise<void>;
+  getZoomSettings(tabId: number): Promise<ZoomSettings>;
+  setZoomSettings(tabId: number, settings: ZoomSettings): Promise<void>;
+  detectLanguage(tabId: number): Promise<string>;
+  /** A PNG data URL of the active tab in the window. */
+  captureVisibleTab(windowId?: number): Promise<string>;
+  /** Chrome 155+: returns the split view id. */
+  createSplit(tabIds: [number, number]): Promise<number>;
+  unsplit(splitViewId: number): Promise<void>;
+  getGroup(groupId: number): Promise<TabGroup>;
+  moveGroup(groupId: number, index: number): Promise<void>;
 };
 
 export type KeyValue<T> = { get(): Promise<T | undefined>; set(value: T): Promise<void> };
@@ -70,6 +142,20 @@ const info = (tab: Tab): TabInfo => ({
   title: tab.title ?? '',
   url: tab.pendingUrl || tab.url || '',
 });
+
+const detail = (tab: Tab): TabDetails => ({
+  ...info(tab),
+  active: tab.active === true,
+  pinned: tab.pinned === true,
+  audible: tab.audible === true,
+  muted: tab.mutedInfo?.muted === true,
+  discarded: tab.discarded === true,
+  frozen: tab.frozen === true,
+  loading: tab.status === 'loading',
+  ...(tab.splitViewId !== undefined && tab.splitViewId >= 0 ? { splitViewId: tab.splitViewId } : {}),
+});
+
+const invalid = (message: string) => new ToolError('INVALID_INPUT', message);
 
 export class TabScope {
   private state: State | undefined;
@@ -188,17 +274,24 @@ export class TabScope {
    */
   resolve(sessionID: string, tabId?: number): Promise<TabInfo> {
     return this.locked(async (state) => {
-      const tabs = await this.liveTabs(state, sessionID);
-      const entry = state[sessionID];
-      if (!entry || tabs.length === 0) {
-        throw new ToolError('NO_TAB', 'This session has no tabs yet. Call tabs_context with createIfEmpty: true, or navigate to a URL.');
-      }
-      const id = tabId ?? entry.tabIds.at(-1)!;
-      const tab = tabs.find((t) => t.id === id);
-      if (!tab) throw this.notInGroup(state, sessionID, id);
-      entry.tabIds = [...entry.tabIds.filter((t) => t !== id), id];
+      const tab = await this.ownedTab(state, sessionID, tabId);
+      const entry = state[sessionID]!;
+      entry.tabIds = [...entry.tabIds.filter((t) => t !== tab.id), tab.id!];
       return info(tab);
     });
+  }
+
+  /** A live session tab (the current one by default); fails with NO_TAB or NOT_IN_GROUP. Does not change which tab is current. */
+  private async ownedTab(state: State, sessionID: string, tabId?: number): Promise<Tab> {
+    const tabs = await this.liveTabs(state, sessionID);
+    const entry = state[sessionID];
+    if (!entry || tabs.length === 0) {
+      throw new ToolError('NO_TAB', 'This session has no tabs yet. Call tabs_context with createIfEmpty: true, or navigate to a URL.');
+    }
+    const id = tabId ?? entry.tabIds.at(-1)!;
+    const tab = tabs.find((t) => t.id === id);
+    if (!tab) throw this.notInGroup(state, sessionID, id);
+    return tab;
   }
 
   private notInGroup(state: State, sessionID: string, tabId: number): ToolError {
@@ -261,6 +354,24 @@ export class TabScope {
     });
   }
 
+  /**
+   * The session is over: tabs it opened are closed, tabs the user shared with it leave the
+   * group and stay open. Returns how many tabs it had.
+   */
+  release(sessionID: string): Promise<number> {
+    return this.locked(async (state) => {
+      const tabs = await this.liveTabs(state, sessionID);
+      const entry = state[sessionID];
+      if (!entry) return 0;
+      const shared = tabs.filter((tab) => entry.shared.includes(tab.id!)).map((tab) => tab.id!);
+      const opened = tabs.filter((tab) => !entry.shared.includes(tab.id!)).map((tab) => tab.id!);
+      if (shared.length) await this.api.ungroup(shared).catch(() => undefined);
+      await Promise.all(opened.map((id) => this.api.remove(id).catch(() => undefined)));
+      delete state[sessionID];
+      return tabs.length;
+    });
+  }
+
   private ownerIn(state: State, tabId: number): string | undefined {
     return Object.entries(state).find(([, entry]) => entry.tabIds.includes(tabId))?.[0];
   }
@@ -271,10 +382,14 @@ export class TabScope {
     return this.ownerIn(await this.load(), tabId);
   }
 
-  /** `tabs.onCreated`: a tab opened from an agent tab joins its opener's group. */
+  /**
+   * `tabs.onCreated`: a tab opened from an agent tab joins its opener's group. A blank New Tab
+   * page is the user's own (Chrome names the tab they were on as its opener), so it stays out
+   * and its side panel starts a new chat.
+   */
   adoptPopup(tab: Tab): Promise<{ sessionID: string; tabId: number } | undefined> {
     return this.locked(async (state) => {
-      if (tab.id === undefined || tab.openerTabId === undefined) return undefined;
+      if (tab.id === undefined || tab.openerTabId === undefined || isNewTabPage(tab)) return undefined;
       const sessionID = this.ownerIn(state, tab.openerTabId);
       if (!sessionID) return undefined;
       const entry = state[sessionID]!;
@@ -312,4 +427,172 @@ export class TabScope {
     return [...((await this.load())[sessionID]?.tabIds ?? [])];
   }
 
+  // --- the rest of chrome.tabs, always limited to the session's own tabs ------------------
+
+  private async ownedId(state: State, sessionID: string, tabId?: number): Promise<number> {
+    return (await this.ownedTab(state, sessionID, tabId)).id!;
+  }
+
+  /** Runs `work` on a session tab, serialised with every other state change. */
+  private onOwned<T>(sessionID: string, tabId: number | undefined, work: (id: number) => Promise<T>): Promise<T> {
+    return this.locked(async (state) => work(await this.ownedId(state, sessionID, tabId)));
+  }
+
+  /** The state flags of every session tab. */
+  details(sessionID: string): Promise<{ tabs: TabDetails[]; currentTabId?: number; groupId?: number }> {
+    return this.locked(async (state) => {
+      const tabs = await this.liveTabs(state, sessionID);
+      const entry = state[sessionID];
+      return { tabs: tabs.map(detail), currentTabId: entry?.tabIds.at(-1), groupId: entry?.groupId };
+    });
+  }
+
+  reload(sessionID: string, tabId?: number, bypassCache = false): Promise<TabDetails> {
+    return this.onOwned(sessionID, tabId, async (id) => {
+      await this.api.reload(id, bypassCache);
+      return detail(await this.api.get(id));
+    });
+  }
+
+  /** The copy joins the session's group and becomes its current tab. */
+  duplicate(sessionID: string, tabId?: number): Promise<TabDetails> {
+    return this.locked(async (state) => {
+      const id = await this.ownedId(state, sessionID, tabId);
+      const copy = await this.api.duplicate(id);
+      if (copy?.id === undefined) throw new ToolError('INTERNAL', `Chrome could not duplicate tab ${id}.`);
+      const entry = state[sessionID]!;
+      await this.api.group({ tabIds: [copy.id], groupId: entry.groupId });
+      entry.tabIds.push(copy.id);
+      return detail(copy);
+    });
+  }
+
+  /** Reorders a tab inside its window (-1 is the end). Moving between windows would drop it from the group. */
+  async move(sessionID: string, tabId: number, index: number): Promise<TabDetails> {
+    if (!Number.isInteger(index) || index < -1) throw invalid('index must be an integer, -1 (the end) or higher.');
+    return this.onOwned(sessionID, tabId, async (id) => detail(await this.api.move(id, index)));
+  }
+
+  /** Frees a background tab's memory; it reloads when shown. Chrome refuses the active tab. */
+  discard(sessionID: string, tabId: number): Promise<TabDetails> {
+    return this.onOwned(sessionID, tabId, async (id) => {
+      if ((await this.api.get(id)).active) throw invalid(`Tab ${id} is showing, and Chrome will not discard a tab that is showing.`);
+      const result = await this.api.discard(id);
+      if (!result) throw invalid(`Chrome did not discard tab ${id} (it may already be discarded).`);
+      return detail(result);
+    });
+  }
+
+  /** Mute, highlight and auto-discard flags. Pinning is refused: Chrome removes a pinned tab from its group. */
+  async setState(sessionID: string, tabId: number | undefined, change: { muted?: boolean; highlighted?: boolean; autoDiscardable?: boolean; pinned?: boolean }): Promise<TabDetails> {
+    if (Object.values(change).every((v) => v === undefined)) throw invalid('Nothing to change: give muted, highlighted, autoDiscardable or pinned: false.');
+    if (change.pinned === true) {
+      throw invalid("A pinned tab leaves the chat's tab group, so tabs can't be pinned. Use pinned: false to unpin one.");
+    }
+    return this.onOwned(sessionID, tabId, async (id) => detail(await this.api.update(id, change)));
+  }
+
+  /** Multi-selects session tabs of one window. Chrome makes the first one the shown tab. */
+  async highlight(sessionID: string, tabIds: number[]): Promise<void> {
+    if (tabIds.length === 0) throw invalid('Give at least one tab id to highlight.');
+    return this.locked(async (state) => {
+      const tabs: Tab[] = [];
+      for (const id of tabIds) tabs.push(await this.api.get(await this.ownedId(state, sessionID, id)));
+      const windowId = tabs[0]!.windowId;
+      if (windowId === undefined || tabs.some((t) => t.windowId !== windowId)) throw invalid('Tabs to highlight must all be in the same window.');
+      await this.api.highlight(windowId, tabs.map((t) => t.index ?? 0));
+    });
+  }
+
+  zoom(sessionID: string, tabId?: number): Promise<number> {
+    return this.onOwned(sessionID, tabId, (id) => this.api.getZoom(id));
+  }
+
+  /** `factor` 0 resets to the default zoom. */
+  async setZoom(sessionID: string, tabId: number | undefined, factor: number): Promise<void> {
+    if (!Number.isFinite(factor) || factor < 0) throw invalid('Zoom factor must be 0 (reset) or a positive number such as 1.5.');
+    return this.onOwned(sessionID, tabId, (id) => this.api.setZoom(id, factor));
+  }
+
+  zoomSettings(sessionID: string, tabId?: number): Promise<ZoomSettings> {
+    return this.onOwned(sessionID, tabId, (id) => this.api.getZoomSettings(id));
+  }
+
+  async setZoomSettings(sessionID: string, tabId: number | undefined, settings: ZoomSettings): Promise<void> {
+    if (settings.scope === 'per-origin' && settings.mode !== undefined && settings.mode !== 'automatic') {
+      throw invalid('Scope per-origin only works in automatic mode.');
+    }
+    return this.onOwned(sessionID, tabId, (id) => this.api.setZoomSettings(id, settings));
+  }
+
+  language(sessionID: string, tabId?: number): Promise<string> {
+    return this.onOwned(sessionID, tabId, (id) => this.api.detectLanguage(id));
+  }
+
+  /** A PNG data URL of the visible tab. Only a tab that is showing can be captured; this never changes focus. */
+  capture(sessionID: string, tabId?: number): Promise<string> {
+    return this.onOwned(sessionID, tabId, async (id) => {
+      const tab = await this.api.get(id);
+      if (!tab.active) throw new ToolError('NOT_INTERACTABLE', `Tab ${id} is in the background, so its visible area can't be captured. Use computer screenshot instead.`);
+      return this.api.captureVisibleTab(tab.windowId);
+    });
+  }
+
+  /** Chrome 155+: shows two adjacent session tabs side by side. Returns the split view id. */
+  async split(sessionID: string, tabIds: [number, number]): Promise<number> {
+    if (tabIds[0] === tabIds[1]) throw invalid('A tab cannot be split with itself.');
+    return this.locked(async (state) => {
+      for (const id of tabIds) await this.ownedId(state, sessionID, id);
+      return this.api.createSplit(tabIds);
+    });
+  }
+
+  /** Separates the split view the tab is in. */
+  unsplit(sessionID: string, tabId: number): Promise<void> {
+    return this.onOwned(sessionID, tabId, async (id) => {
+      const viewId = (await this.api.get(id)).splitViewId;
+      if (viewId === undefined || viewId < 0) throw invalid(`Tab ${id} is not in a split view.`);
+      await this.api.unsplit(viewId);
+    });
+  }
+
+  // --- the session's tab group ----------------------------------------------------------------
+
+  private async groupIdOf(sessionID: string): Promise<number> {
+    const { groupId } = await this.context(sessionID);
+    if (groupId === undefined) throw new ToolError('NO_TAB', 'This session has no tabs, so it has no tab group.');
+    return groupId;
+  }
+
+  async groupInfo(sessionID: string): Promise<TabGroup> {
+    return this.api.getGroup(await this.groupIdOf(sessionID));
+  }
+
+  async updateGroupOf(sessionID: string, props: { title?: string; color?: string; collapsed?: boolean }): Promise<TabGroup> {
+    if (Object.values(props).every((v) => v === undefined)) throw invalid('Nothing to change: give title, color or collapsed.');
+    if (props.color !== undefined && !(GROUP_COLORS as readonly string[]).includes(props.color)) {
+      throw invalid(`Group color must be one of ${GROUP_COLORS.join(', ')}.`);
+    }
+    const groupId = await this.groupIdOf(sessionID);
+    await this.api.updateGroup(groupId, props);
+    return this.api.getGroup(groupId);
+  }
+
+  /** Moves the session's whole group within its window (-1 is the end). */
+  async moveGroup(sessionID: string, index: number): Promise<void> {
+    if (!Number.isInteger(index) || index < -1) throw invalid('index must be an integer, -1 (the end) or higher.');
+    await this.api.moveGroup(await this.groupIdOf(sessionID), index);
+  }
+
+  /** `tabs.onReplaced` (prerender or instant swap): the new tab id takes over the old one's place. */
+  replaced(addedTabId: number, removedTabId: number): Promise<void> {
+    return this.locked(async (state) => {
+      const sessionID = this.ownerIn(state, removedTabId);
+      if (!sessionID) return;
+      const entry = state[sessionID]!;
+      const swap = (id: number) => (id === removedTabId ? addedTabId : id);
+      entry.tabIds = entry.tabIds.map(swap);
+      entry.shared = entry.shared.map(swap);
+    });
+  }
 }

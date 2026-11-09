@@ -34,7 +34,7 @@ test('a covered element fails with OBSCURED and no click is sent', async ({ tool
   const tree = (await tool('read_page')).text;
   const result = await tool('computer', { action: 'left_click', ref: refOf(tree, /Buy now/), action_summary: 'Buys the item' });
   expect(result.isError).toBe(true);
-  expect(result.text).toMatch(/^OBSCURED: button "Buy now" is covered by region "Cookie consent" \(div#banner\)\.\n\n<browser-state>/);
+  expect(result.text).toMatch(/^OBSCURED: button "Buy now" is covered by region "Cookie consent" \(div#banner\)\. Close or accept that first \(find its button\), then try again\.\n\n<browser-state>/);
   await expect(page.locator('#covered')).toHaveText('Buy now');
 });
 

@@ -26,3 +26,6 @@ export function createMessageID(): string {
   const bytes = crypto.getRandomValues(new Uint8Array(RANDOM_LENGTH));
   return 'msg_' + time + Array.from(bytes, (byte) => CHARS[byte % 62]).join('');
 }
+
+/** An opencode session ID (`ses_…`); MCP clients' tab groups use `mcp-…` IDs the server rejects. */
+export const isServerSessionID = (id: unknown): id is string => typeof id === 'string' && id.startsWith('ses');

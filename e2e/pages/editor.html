@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Editor</title></head>
+<body>
+  <h1>Compose</h1>
+  <div id="editor" contenteditable="true" role="textbox" aria-label="Message body" aria-multiline="true" style="min-height:80px;border:1px solid #888"></div>
+  <p>Words: <span id="count">0</span></p>
+  <script>
+    const editor = document.getElementById('editor');
+    editor.addEventListener('input', () => {
+      document.getElementById('count').textContent = String(editor.innerText.trim().split(/\s+/).filter(Boolean).length);
+    });
+  </script>
+</body>
+</html>

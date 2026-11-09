@@ -118,6 +118,8 @@ export class DebuggerSessions {
       }
       const target = { tabId };
       for (const domain of DOMAINS) await this.api.sendCommand(target, domain).catch(() => undefined);
+      // A tab in the background reports itself hidden, so mouse events never land and animation-driven pages stall.
+      await this.api.sendCommand(target, 'Emulation.setFocusEmulationEnabled', { enabled: true }).catch(() => undefined);
       await this.api.sendCommand(target, 'Target.setAutoAttach', AUTO_ATTACH).catch(() => undefined);
     })();
     this.tabs.set(tabId, session);

@@ -4,6 +4,7 @@
 // A ref remembers the document it came from, so after a navigation it fails as STALE_REF
 // instead of pointing at an element of the new page.
 import { PAGE_API_KEY, type PageApi, type PageWalk, type PageWalkArgs } from '../page/page-api';
+import type { ProbeArgs, ProbeResult } from '../page/wait-page';
 import type { WalkFilter } from './walker';
 import { applyWindow, type OutlineLine, type WindowMode } from './window';
 import { diffLines, formatDiff } from './diff';
@@ -85,7 +86,24 @@ function textInPage(args: { key: string }): ReturnType<PageApi['text']> | undefi
   return api?.text();
 }
 
-export type PageMethod = 'locate' | 'fill' | 'setFiles' | 'settle' | 'viewport' | 'focused' | 'drop';
+function probeInPage(args: ProbeArgs & { key: string }): ProbeResult | undefined {
+  const api = (globalThis as unknown as Record<string, PageApi | undefined>)[args.key];
+  return api?.probe(args);
+}
+
+export function mergeProbes(answers: ProbeResult[], args: ProbeArgs): ProbeResult | undefined {
+  if (!answers.length) return undefined;
+  const out: ProbeResult = {
+    texts: (args.texts ?? []).map((_, i) => answers.some((a) => a.texts[i] === true)),
+    selectors: (args.selectors ?? []).map((_, i) =>
+      answers.every((a) => a.selectors[i] === null) ? null : answers.some((a) => a.selectors[i] === true),
+    ),
+  };
+  if (args.idleMs !== undefined) out.idle = answers.every((a) => a.idle === true);
+  return out;
+}
+
+export type PageMethod = 'locate' | 'fill' | 'setFiles' | 'settle' | 'viewport' | 'focused' | 'drop' | 'extract' | 'navStatus';
 
 function callInPage(args: { key: string; method: PageMethod; params: unknown[] }): unknown {
   const api = (globalThis as unknown as Record<string, Record<string, (...a: unknown[]) => unknown> | undefined>)[args.key];
@@ -301,7 +319,7 @@ export class PageReader {
     this.remember(sessionID, tabId, outline, last?.options ?? {});
     const full = () => untrusted(outline.lines.join('\n') || '(no matching elements)') + (outline.notes.length ? '\n' + outline.notes.join('\n') : '');
     if (!last) return { kind: 'outline', reason: 'first look at this page in this session', text: full() };
-    if (last.documentId !== outline.documentId) return { kind: 'outline', reason: 'a new document loaded', text: full() };
+    if (last.documentId !== outline.documentId) return { kind: 'outline', reason: 'first look at this page in this session', text: full() };
     const ops = diffLines(last.lines, lines);
     if (!ops) return { kind: 'outline', reason: 'the page is too large to compare', text: full() };
     const changed = formatDiff(ops);
@@ -326,15 +344,27 @@ export class PageReader {
     return { frameId: target.frameId, documentId: target.documentId, walk: walked };
   }
 
-  /** `get_page_text`: title, URL and readable main text of the top frame. */
+  /** `get_page_text`: title, URL and readable main text of the page, with the text of its iframes after it. */
   async text(tabId: number, maxChars = DEFAULT_MAX_CHARS): Promise<string> {
     await this.withTimeout(this.scripting.inject(tabId));
-    const [top] = await this.withTimeout(this.scripting.run({ tabId }, textInPage, { key: PAGE_API_KEY }));
-    const page = top?.result;
+    const results = await this.withTimeout(this.scripting.run({ tabId, allFrames: true }, textInPage, { key: PAGE_API_KEY }));
+    const page = (results.find((r) => r.frameId === 0) ?? results[0])?.result;
     if (!page) throw new ToolError('RESTRICTED_PAGE', 'The page cannot be read (it may still be loading). Wait a moment, or navigate to a web page.');
-    const body = truncate(page.text || '(no text)', maxChars);
+    const framed = results.filter((r) => r.frameId !== 0 && r.result?.text).map((r) => `[iframe ${r.result!.url}]\n${r.result!.text}`);
+    const body = truncate([page.text || (framed.length ? '' : '(no text)'), ...framed].filter(Boolean).join('\n\n'), maxChars);
     const header = `Title: ${page.title}\nURL: ${page.url}\nSource element: ${page.source}\n---`;
     return `${header}\n${untrusted(body.text)}${body.note ? '\n' + body.note : ''}`;
+  }
+
+  /**
+   * One `wait_for` check across every frame: a text or selector holds when any frame has it
+   * (a selector is null only when every frame rejected it), idle when every frame that
+   * answered is idle. Undefined when no frame answered.
+   */
+  async probe(tabId: number, args: ProbeArgs): Promise<ProbeResult | undefined> {
+    await this.withTimeout(this.scripting.inject(tabId));
+    const results = await this.withTimeout(this.scripting.run({ tabId, allFrames: true }, probeInPage, { ...args, key: PAGE_API_KEY }));
+    return mergeProbes(results.map((r) => r.result as ProbeResult | undefined).filter((r): r is ProbeResult => !!r), args);
   }
 
   /** Lines of the whole page with refs (no untrusted wrapper), for `find` and change reports. */

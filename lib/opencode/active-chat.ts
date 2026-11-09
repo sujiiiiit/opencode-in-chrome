@@ -1,4 +1,5 @@
 import { browser } from 'wxt/browser';
+import { isServerSessionID } from './ids';
 
 export const ACTIVE_CHAT_KEY = 'opencode.activeChat';
 const tabChatKey = (tabId: number) => `${ACTIVE_CHAT_KEY}.tab.${tabId}`;
@@ -6,7 +7,7 @@ const tabChatKey = (tabId: number) => `${ACTIVE_CHAT_KEY}.tab.${tabId}`;
 function isStoredChat(value: unknown, baseUrl: string): value is { baseUrl: string; sessionID: string } {
   if (typeof value !== 'object' || value === null) return false;
   const v = value as Record<string, unknown>;
-  return v.baseUrl === baseUrl && typeof v.sessionID === 'string' && v.sessionID !== '';
+  return v.baseUrl === baseUrl && isServerSessionID(v.sessionID);
 }
 
 /** The chat the panel showed last for this server, so reopening the panel resumes it. */

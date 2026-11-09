@@ -4,6 +4,7 @@ import { browser } from 'wxt/browser';
 import type { NavEvents } from './navigation';
 import type { ScriptingApi } from './snapshot/reader';
 import type { KeyValue, TabApi } from './tabs';
+import { ToolError } from './tools/registry';
 
 export function chromeTabApi(): TabApi {
   return {
@@ -24,7 +25,35 @@ export function chromeTabApi(): TabApi {
       const win = await browser.windows.getLastFocused({ windowTypes: ['normal'] }).catch(() => undefined);
       return win?.id;
     },
+    update: async (tabId, props) => (await browser.tabs.update(tabId, props)) ?? browser.tabs.get(tabId),
+    reload: (tabId, bypassCache = false) => browser.tabs.reload(tabId, { bypassCache }),
+    duplicate: (tabId) => browser.tabs.duplicate(tabId),
+    move: async (tabId, index, windowId) => {
+      const moved = await browser.tabs.move(tabId, windowId === undefined ? { index } : { index, windowId });
+      return Array.isArray(moved) ? moved[0]! : moved;
+    },
+    discard: (tabId) => browser.tabs.discard(tabId),
+    highlight: async (windowId, tabIndexes) => void (await browser.tabs.highlight({ windowId, tabs: tabIndexes })),
+    getZoom: (tabId) => browser.tabs.getZoom(tabId),
+    setZoom: (tabId, factor) => browser.tabs.setZoom(tabId, factor),
+    getZoomSettings: (tabId) => browser.tabs.getZoomSettings(tabId),
+    setZoomSettings: (tabId, settings) => browser.tabs.setZoomSettings(tabId, settings),
+    detectLanguage: (tabId) => browser.tabs.detectLanguage(tabId),
+    captureVisibleTab: (windowId) => browser.tabs.captureVisibleTab(windowId as number, { format: 'png' }),
+    createSplit: (tabIds) => splitApi().createSplit(tabIds),
+    unsplit: (splitViewId) => splitApi().unsplit(splitViewId),
+    getGroup: (groupId) => browser.tabGroups.get(groupId),
+    moveGroup: async (groupId, index) => void (await browser.tabGroups.move(groupId, { index })),
   };
+}
+
+/** The Chrome 155 split view calls, which older Chrome (and the typings) lack. */
+function splitApi(): { createSplit(tabIds: [number, number]): Promise<number>; unsplit(splitViewId: number): Promise<void> } {
+  const tabs = browser.tabs as unknown as Partial<ReturnType<typeof splitApi>>;
+  if (!tabs.createSplit || !tabs.unsplit) {
+    throw new ToolError('INVALID_INPUT', 'Split view needs Chrome 155 or newer.');
+  }
+  return tabs as ReturnType<typeof splitApi>;
 }
 
 /** chrome.scripting for the page reader: the snapshot script and page functions, every frame. */
@@ -52,7 +81,10 @@ export function chromeScriptingApi(): ScriptingApi {
   };
 }
 
-/** Top-frame navigation outcomes from webNavigation (aborted loads are ignored: another one replaced them). */
+/**
+ * Top-frame navigation events from webNavigation. An aborted load (`net::ERR_ABORTED`: another
+ * navigation replaced it, or it became a download) is reported as `aborted`, not as an error.
+ */
 export function chromeNavEvents(): NavEvents {
   return {
     watch(tabId, cb) {
@@ -60,15 +92,18 @@ export function chromeNavEvents(): NavEvents {
       const committed = (d: { tabId: number; frameId: number; url: string }) => top(d) && cb({ kind: 'committed', url: d.url });
       const completed = (d: { tabId: number; frameId: number; url: string }) => top(d) && cb({ kind: 'loaded', url: d.url });
       const history = (d: { tabId: number; frameId: number; url: string }) => top(d) && cb({ kind: 'history', url: d.url });
+      const started = (d: { tabId: number; frameId: number; url: string }) => top(d) && cb({ kind: 'started', url: d.url });
       const error = (d: { tabId: number; frameId: number; url: string; error: string }) => {
-        if (top(d) && d.error !== 'net::ERR_ABORTED') cb({ kind: 'error', url: d.url, error: d.error });
+        if (top(d)) cb({ kind: d.error === 'net::ERR_ABORTED' ? 'aborted' : 'error', url: d.url, error: d.error });
       };
+      browser.webNavigation.onBeforeNavigate.addListener(started);
       browser.webNavigation.onCommitted.addListener(committed);
       browser.webNavigation.onCompleted.addListener(completed);
       browser.webNavigation.onHistoryStateUpdated.addListener(history);
       browser.webNavigation.onReferenceFragmentUpdated.addListener(history);
       browser.webNavigation.onErrorOccurred.addListener(error);
       return () => {
+        browser.webNavigation.onBeforeNavigate.removeListener(started);
         browser.webNavigation.onCommitted.removeListener(committed);
         browser.webNavigation.onCompleted.removeListener(completed);
         browser.webNavigation.onHistoryStateUpdated.removeListener(history);

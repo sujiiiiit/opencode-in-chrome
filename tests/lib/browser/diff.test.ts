@@ -61,7 +61,7 @@ describe('PageReader.change', () => {
     // The tab navigates: a new document, whose refs cannot be compared with the old ones.
     frames.load(0, '<button>B</button>');
     const next = await reader.change('s', 7);
-    expect(next).toMatchObject({ kind: 'outline', reason: 'a new document loaded' });
+    expect(next).toMatchObject({ kind: 'outline', reason: 'first look at this page in this session' });
     expect(next.text).toContain('button "B"');
   });
 

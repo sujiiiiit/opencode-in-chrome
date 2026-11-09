@@ -10,6 +10,9 @@ export const POLICY_KEY = 'opencode.browser.policy';
 export const TABS_KEY = 'opencode.browser.tabs';
 /** storage.session: true while the user has stopped all browser activity. */
 export const STOPPED_KEY = 'opencode.browser.stopped';
+/** storage.session: per-session approvals, sensitive reads and unverified actions (V5: survive worker restarts). */
+export const POLICY_SESSION_KEY = 'opencode.browser.policySession';
+export const COMPLETION_KEY = 'opencode.browser.completion';
 
 export async function isBrowserAccessEnabled(): Promise<boolean> {
   const stored = await browser.storage.local.get(BROWSER_ENABLED_KEY);

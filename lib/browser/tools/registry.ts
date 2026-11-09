@@ -18,6 +18,7 @@ const ERROR_CODES = [
   'BLOCKED_SITE',
   'DEBUGGER_DETACHED',
   'INVALID_INPUT',
+  'PAGE_NOT_READY',
   'NO_EFFECT',
   'UNVERIFIED',
   'INTERNAL',
@@ -91,8 +92,27 @@ async function errorWithFooter(code: ErrorCode, message: string, sessionID: stri
   return { content: [{ type: 'text', text: `${code}: ${message}${footer ? `\n\n${footer}` : ''}` }], isError: true };
 }
 
+/** Chrome's own failure texts that the model can act on, as typed errors. */
+const CHROME_FAILURES: Array<{ match: RegExp; code: ErrorCode; message: (found: RegExpExecArray) => string }> = [
+  { match: /Cannot access contents of url "(about:blank)?"/, code: 'PAGE_NOT_READY', message: () => 'The tab has not loaded a page yet (it is blank). Call wait_for {url or text} or try again in a moment.' },
+  { match: /Cannot access contents of url "([^"]+)"/, code: 'RESTRICTED_PAGE', message: (m) => `The extension may not read ${m[1]}. Only ordinary web pages can be read or changed.` },
+  { match: /showing error page/, code: 'PAGE_NOT_READY', message: () => 'The tab is showing a browser error page: the site did not load. Navigate to another URL, or retry this one.' },
+  { match: /Cannot find (a )?(next|previous) page in history/, code: 'INVALID_INPUT', message: (m) => `There is no ${m[2] === 'next' ? 'later' : 'earlier'} page in this tab's history.` },
+];
+
+function chromeFailure(error: unknown): ToolError | undefined {
+  const text = error instanceof Error ? error.message : '';
+  for (const { match, code, message } of CHROME_FAILURES) {
+    const found = match.exec(text);
+    if (found) return new ToolError(code, message(found));
+  }
+  return undefined;
+}
+
 async function failedTool(error: unknown, def: ToolDef, sessionID: string, hooks: RegistryHooks, args: Record<string, unknown>): Promise<ClientMcpToolResult> {
   if (error instanceof ToolError) return errorWithFooter(error.code, error.message, sessionID, hooks, args);
+  const known = chromeFailure(error);
+  if (known) return errorWithFooter(known.code, known.message, sessionID, hooks, args);
   hooks.onInternalError?.(def.name, error);
   const detail = error instanceof Error && error.message ? ` (${error.message})` : '';
   return errorWithFooter('INTERNAL', `The browser tool failed unexpectedly${detail}. Try again, or try a different approach.`, sessionID, hooks, args);
