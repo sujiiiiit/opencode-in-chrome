@@ -9,7 +9,7 @@ import { isRestrictedUrl, type TabScope } from './tabs';
 import { ToolError, type ToolDef, type ToolOutput } from './tools/registry';
 
 /** Tools that read or act on a page, so the page's site must be allowed. */
-const SITE_GATED = new Set(['read_page', 'find', 'get_page_text', 'console', 'network', 'computer', 'form_input', 'file_upload', 'upload_image', 'javascript']);
+const SITE_GATED = new Set(['read_page', 'find', 'get_page_text', 'wait_for', 'extract', 'console', 'network', 'computer', 'form_input', 'file_upload', 'upload_image', 'javascript']);
 /** Actions the no-effect guard counts (Nanobrowser's click, set, type, press). */
 const EFFECT_ACTIONS = new Set(['left_click', 'right_click', 'double_click', 'triple_click', 'type', 'key']);
 /** Calls the repeated-failure guard ignores: they carry other calls, or report state. */

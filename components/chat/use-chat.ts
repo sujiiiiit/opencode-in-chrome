@@ -5,7 +5,7 @@ import { ChatSession, INITIAL_CHAT_STATE, type ChatState } from '@/lib/opencode/
 import type { Connection } from '@/lib/opencode/connection';
 import { EventHub } from '@/lib/opencode/events';
 import { HistoryStore, INITIAL_HISTORY_STATE } from '@/lib/opencode/history';
-import { createMessageID } from '@/lib/opencode/ids';
+import { createMessageID, isServerSessionID } from '@/lib/opencode/ids';
 import { hasRefs, promptRefs, slashCommand, trimMentions, type MentionItem, type PromptRefs } from '@/lib/opencode/mentions';
 import { NO_MODEL_MESSAGE } from '@/lib/opencode/client';
 import type { ModelControls } from '@/lib/opencode/models/controls';
@@ -16,6 +16,7 @@ import { launchSendFlight } from './send-flight';
 import { useAttachedImages } from './use-attachments';
 import { activePanelTab, browserSessionPermissions, ensureBrowserToolsReady, prepareBrowserSession } from '@/lib/browser/guidance';
 import { loadPermissionMode, PERMISSION_MODE_KEY } from '@/lib/opencode/permission-mode';
+import { nudgeUnfinishedTurn } from '@/lib/opencode/turn-end';
 
 const noopSubscribe = () => () => undefined;
 
@@ -60,7 +61,8 @@ function useLastChat(baseUrl: string, resume: (sessionID: string | null) => void
     const owner = tabId === undefined
       ? Promise.resolve(undefined)
       : browser.runtime.sendMessage({ type: 'opencode.browser.session-for-tab', tabId })
-        .then((reply: { sessionID?: string }) => reply?.sessionID).catch(() => undefined);
+        .then((reply: { sessionID?: string }) => (isServerSessionID(reply?.sessionID) ? reply.sessionID : undefined))
+        .catch(() => undefined);
     void owner.then((sessionID) => sessionID ?? loadActiveChat(baseUrl, tabId))
       .catch(() => null)
       .then((sessionID) => {
@@ -92,6 +94,7 @@ function useChatStore(connection: Connection, hub: EventHub | null, target: Targ
       prepare: (client, sessionID) => prepareBrowserSession(client, sessionID, tabId),
       sessionPermissions: browserSessionPermissions,
       beforePrompt: ensureBrowserToolsReady,
+      onTurnEnded: (client, sessionID, turn) => void nudgeUnfinishedTurn(client, sessionID, turn).catch(() => undefined),
       onMissing: () => handlers.current.onMissing(),
       onUnauthorized: () => handlers.current.onUnauthorized(),
     });
@@ -106,7 +109,14 @@ function useChatStore(connection: Connection, hub: EventHub | null, target: Targ
       if (!(await activePanelTab(tabId)) || !(await browserSessionPermissions())) return;
       await session.openBrowserSession();
     }).catch(() => undefined);
-    return () => { browser.storage.onChanged.removeListener(modeChanged); session.dispose(); };
+    // Closing the side panel interrupts the agent it started (switching chats does not: that is a dispose only).
+    const panelClosing = () => session.interruptOnClose();
+    window.addEventListener('pagehide', panelClosing);
+    return () => {
+      window.removeEventListener('pagehide', panelClosing);
+      browser.storage.onChanged.removeListener(modeChanged);
+      session.dispose();
+    };
   }, [connection, hub, target, handlers, tabId]);
   const state = useSyncExternalStore(chat?.subscribe ?? noopSubscribe, chat?.getState ?? (() => INITIAL_CHAT_STATE));
   return { chat, state };

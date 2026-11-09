@@ -50,7 +50,7 @@ test('read_page fails on browser pages and narrows to a subtree by ref', async (
 test('find returns the best match first without a model, and get_page_text reads main text', async ({ tool, sw, pages }) => {
   await openPage(tool, sw, pages.url('/form.html'));
   const found = await tool('find', { query: 'submit order button' });
-  expect(found.text).toMatch(/^<untrusted_page_content[^\n]*\ne\d+: button "Submit order"/);
+  expect(found.text).toMatch(/^<untrusted_page_content[^\n]*\nbutton "Submit order" \[e\d+\]/);
   const none = await tool('find', { query: 'shopping cart' });
   expect(none.text).toMatch(/^No element matched/);
   const text = await tool('get_page_text');

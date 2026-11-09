@@ -23,7 +23,7 @@ export function DisclosureChevron({ open, hidden }: { open: boolean; hidden: boo
   return (
     <Icon
       name="chevron-down"
-      className={cn('ml-1.5 shrink-0 transition-[rotate,translate,opacity] duration-200', !open && '-rotate-90', hidden && 'opacity-0')}
+      className={cn('ml-1.5 shrink-0 transition-[rotate,translate,opacity] duration-260 ease-(--ease-calm)', !open && '-rotate-90', hidden && 'opacity-0')}
     />
   );
 }

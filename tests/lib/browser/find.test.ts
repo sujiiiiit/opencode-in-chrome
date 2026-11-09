@@ -20,16 +20,16 @@ const HN = [
 describe('findInLines', () => {
   it('ranks the login link first for "login link"', () => {
     const { matches } = findInLines(HN, 'login link');
-    expect(matches[0]).toBe('e10: link "login" [e10] href="login?goto=news"');
+    expect(matches[0]).toBe('link "login" [e10] href="login?goto=news"');
   });
 
   it('matches roles by everyday words', () => {
-    expect(findInLines(HN, 'search box').matches[0]).toMatch(/^e40: textbox "Search"/);
-    expect(findInLines(HN, 'github button').matches[0]).toMatch(/^e41: /);
+    expect(findInLines(HN, 'search box').matches[0]).toMatch(/^textbox "Search"/);
+    expect(findInLines(HN, 'github button').matches[0]).toMatch(/^button "Log in with GitHub"/);
   });
 
   it('matches attribute text such as hrefs', () => {
-    expect(findInLines(HN, 'mcp-explained.com').matches[0]).toMatch(/^e19: /);
+    expect(findInLines(HN, 'mcp-explained.com').matches[0]).toMatch(/^link "MCP Explained"/);
   });
 
   it('only returns lines with refs and caps at the limit with a total', () => {
@@ -38,6 +38,16 @@ describe('findInLines', () => {
     const result = findInLines(many, 'item');
     expect(result.matches).toHaveLength(20);
     expect(result.total).toBe(30);
+  });
+
+  it('drops elements that matched only a type word when others matched by name', () => {
+    const page = ['link "Skip to content" [e1]', 'link "The Internet: home" [e2]', 'link "Click Here" [e3] href="/windows/new"', 'link "Sauce Labs" [e4]'];
+    expect(findInLines(page, 'Click Here link').matches).toEqual(['link "Click Here" [e3] href="/windows/new"']);
+  });
+
+  it('still lists by role when the query has only a type word', () => {
+    expect(findInLines(['link "A" [e1]', 'button "B" [e2]', 'link "C" [e3]'], 'links').matches).toEqual(['link "A" [e1]', 'link "C" [e3]']);
+    expect(findInLines(['link "A" [e1]', 'button "B" [e2]', 'link "C" [e3]'], 'link').matches).toEqual(['link "A" [e1]', 'link "C" [e3]']);
   });
 
   it('returns nothing when no word matches', () => {

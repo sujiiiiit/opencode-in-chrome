@@ -1342,11 +1342,6 @@ body {
   height: 0;
 }
 
-/* A live work group grows with tool output. Do not animate every measured height update. */
-[data-slot="work-group"][data-active] > [data-slot="collapsible-content"] {
-  transition: none;
-}
-
 /* Streamed words (Streamdown's animate plugin) fade in; reduced motion shows them at once. */
 @media (prefers-reduced-motion: reduce) {
   [data-slot="collapsible-content"] {

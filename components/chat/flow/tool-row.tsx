@@ -35,14 +35,18 @@ export const ToolRow = memo(function ToolRow({ part, live }: Props) {
   const subject = toolSubject(part);
   const result = outcome(part, live);
 
+  // A long line truncates instead of running past the row: the subject gives way first (its large
+  // shrink takes almost all the overflow), then the title (an MCP tool's title is its whole name),
+  // while the outcome ("Failed") and the chevron always stay whole at the end.
+  const title = toolTitle(part, live);
   const header = (
     <>
       {result?.failed && <Icon name="alert" className="text-destructive" />}
-      <Shimmer active={pending} className="shrink-0">
-        {toolTitle(part, live)}
+      <Shimmer active={pending} className="shrink">
+        {title}
       </Shimmer>
       {subject && (
-        <span className="min-w-0 truncate font-normal text-text-primary" title={subject}>
+        <span className="min-w-0 shrink-1000 truncate font-normal text-text-primary" title={subject}>
           {subject}
         </span>
       )}

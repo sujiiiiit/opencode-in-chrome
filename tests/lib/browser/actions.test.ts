@@ -263,9 +263,52 @@ describe('Actor.report', () => {
     const moved = fp({ url: 'https://a.test/next', title: 'Next', tabIds: [1, 9] });
     const { actor, change } = actorWith(moved, { kind: 'same', text: '' }, { type: 'confirm', message: 'Sure?' });
     expect(await actor.report(1, 'ses_1', fp())).toEqual({
-      text: 'Dialog open: confirm "Sure?"\nURL changed to https://a.test/next\nTitle is now "Next"\nNew tab 9 opened and joined this session',
+      text: 'Dialog open: confirm "Sure?"\nURL changed to https://a.test/next\nTitle is now "Next"\nNew tab 9 opened and joined this session; it is now the current tab (pass tabId to use another)',
       effect: 'changed',
     });
     expect(change).not.toHaveBeenCalled();
+  });
+});
+
+describe('Actor waits for a page load an action starts (W4)', () => {
+  type Emit = Parameters<NavEvents['watch']>[1];
+  const setup = () => {
+    let emit: Emit = () => undefined;
+    const settle = vi.fn(async () => true);
+    const actor = new Actor({
+      reader: { change: async () => ({ kind: 'outline', reason: 'a new document loaded', text: 'heading "Thanks" [e1]' }), callTop: settle } as never,
+      debuggers: {} as never,
+      dialogs: { get: () => undefined, assertClear: () => undefined, opened: () => new Promise(() => undefined) } as never,
+      scope: { tabIdsOf: async () => [1] } as never,
+      tab: async () => ({ url: 'https://shop.test/', title: 'Shop' }),
+      // The load timeout never fires in these tests; short sleeps return at once.
+      sleep: (ms) => (ms >= 10_000 ? new Promise(() => undefined) : Promise.resolve()),
+      events: { watch: (_t, cb) => ((emit = cb), () => (emit = () => undefined)) },
+    });
+    vi.spyOn(actor, 'settle').mockResolvedValue();
+    return { actor, settle, emit: (kind: Parameters<Emit>[0]['kind']) => emit({ kind, url: 'https://shop.test/done' }) };
+  };
+
+  it('waits for the load and the new DOM to settle before reporting', async () => {
+    const { actor, settle, emit } = setup();
+    const result = actor.act(1, 'ses_1', async () => {
+      emit('started');
+      setTimeout(() => emit('loaded'), 0);
+      return 'Clicked Place order.';
+    });
+    const { text } = await result;
+    expect(text).toMatch(/^Clicked Place order\.\nWaited for the new page to load\.\n/);
+    expect(settle).toHaveBeenCalledWith(1, 'settle', [500, 3000]);
+  });
+
+  it('adds nothing when the action starts no load, or the load becomes a download', async () => {
+    const { actor, emit } = setup();
+    expect((await actor.act(1, 'ses_1', async () => 'Clicked Tab.')).text).not.toContain('new page');
+    const download = await actor.act(1, 'ses_1', async () => {
+      emit('started');
+      emit('aborted');
+      return 'Clicked Download.';
+    });
+    expect(download.text).not.toContain('new page');
   });
 });

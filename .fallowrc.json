@@ -6,7 +6,8 @@
     "hooks/**/*.{ts,tsx}",
     "utils/**/*.{ts,tsx}",
     "tests/**/*.{ts,tsx}",
-    "e2e/**/*.ts"
+    "e2e/**/*.ts",
+    "mcp/host.mjs"
   ],
   "ignorePatterns": [".output/**", ".wxt/**", "temp/**", ".claude/**", ".agents/**", "openspec/**", ".code-review-graph/**"],
   "ignoreDependencies": ["vite", "web-ext", "typescript", "fallow", "@fission-ai/openspec"]

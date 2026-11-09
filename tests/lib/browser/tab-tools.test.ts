@@ -103,4 +103,24 @@ describe('withScheme', () => {
     ['http://127.0.0.1:3000/a', 'http://127.0.0.1:3000/a'],
     ['about:blank', 'about:blank'],
   ])('%s → %s', (input, out) => expect(withScheme(input)).toBe(out));
+
+  it('shows an MCP client only the sites of other tabs', async () => {
+    const user = chrome.addUserTab('https://mail.example.com/inbox/secret-thread?token=1');
+    const listed = await call('tabs_context', {}, 'mcp-1a2b3c4d');
+    expect(listed.text).toContain(`  ${user.id} https://mail.example.com`);
+    expect(listed.text).not.toMatch(/secret-thread|token/);
+    expect(listed.text).toContain('sites only');
+  });
+
+  it('tabs_switch makes a session tab current and refuses a tab outside the session', async () => {
+    await call('tabs_create', { url: 'https://a.example/' });
+    await call('tabs_create', { url: 'https://b.example/' });
+    const [first, second] = (await scope.context('ses_1')).tabs.map((t) => t.id);
+    expect((await scope.context('ses_1')).currentTabId).toBe(second);
+    const switched = await call('tabs_switch', { tabId: first });
+    expect(switched.text).toContain(`Tab ${first}`);
+    expect((await scope.context('ses_1')).currentTabId).toBe(first);
+    const stranger = chrome.addUserTab('https://c.example/');
+    expect((await call('tabs_switch', { tabId: stranger.id })).text).toMatch(/^NOT_IN_GROUP:/);
+  });
 });

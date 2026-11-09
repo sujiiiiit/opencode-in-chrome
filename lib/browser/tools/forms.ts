@@ -1,5 +1,6 @@
 // form_input, file_upload, upload_image (spec browser/page-actions, browser/screenshots).
 import type { Actor } from '../actions';
+import { isMcpSession } from '../native';
 import type { FillResult } from '../page/actions-page';
 import { staleRef, type PageReader } from '../snapshot/reader';
 import type { Screenshots } from '../screenshots';
@@ -39,6 +40,21 @@ const MIME: Record<string, string> = {
 const mimeOf = (name: string) => MIME[name.split('.').pop()?.toLowerCase() ?? ''] ?? 'application/octet-stream';
 const baseName = (path: string) => path.split(/[\\/]/).pop() || path;
 
+/**
+ * Files an MCP server read on its own machine (the extension cannot read disk). Only MCP
+ * sessions may pass them; the total stays under the same 10 MB cap as paths.
+ */
+function embeddedFiles(args: Record<string, unknown>, sessionID: string): Array<{ name: string; type: string; base64: string }> | undefined {
+  if (!isMcpSession(sessionID) || !Array.isArray(args.files)) return undefined;
+  const files = (args.files as Array<{ name?: unknown; type?: unknown; base64?: unknown }>).map((f) => {
+    if (typeof f.name !== 'string' || typeof f.base64 !== 'string') throw new ToolError('INVALID_INPUT', 'Each file needs a name and base64 content.');
+    return { name: baseName(f.name), type: typeof f.type === 'string' ? f.type : mimeOf(f.name), base64: f.base64 };
+  });
+  const bytes = files.reduce((sum, f) => sum + (f.base64.length * 3) / 4, 0);
+  if (bytes > UPLOAD_LIMIT_BYTES) throw new ToolError('INVALID_INPUT', `The files add up to more than 10 MB (${(bytes / 1048576).toFixed(1)} MB). Upload fewer or smaller files.`);
+  return files;
+}
+
 export function formTools(deps: FormDeps): ToolDef[] {
   const { scope, reader, actor } = deps;
 
@@ -67,7 +83,7 @@ export function formTools(deps: FormDeps): ToolDef[] {
       name: 'form_input',
       description:
         'Fill a form field by ref: text inputs and textareas (string), selects/comboboxes (option value or text from read_page; do not click the dropdown first), checkboxes and radios (true/false), ' +
-        'editable regions (string). Page frameworks see the change. Reports the previous and new value. Needs action_summary.',
+        'editable regions (string). Page frameworks see the change. Reports the previous and new value.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -79,8 +95,7 @@ export function formTools(deps: FormDeps): ToolDef[] {
         required: ['ref', 'value'],
       },
       async handler(args, { sessionID }) {
-        const summary = typeof args.action_summary === 'string' ? args.action_summary.trim() : '';
-        if (!summary) throw new ToolError('INVALID_INPUT', '`action_summary` is required for form_input: say what the fill does, e.g. "Sets the city to Pune".');
+        const said = typeof args.action_summary === 'string' ? args.action_summary.trim() : '';
         const tab = await requirePage(scope, sessionID, args.tabId);
         const ref = String(args.ref);
         const t = target(tab.id, ref);
@@ -89,9 +104,9 @@ export function formTools(deps: FormDeps): ToolDef[] {
           return undefined;
         });
         if (point?.info.secret) {
-          throw new ToolError('DENIED', `${point.info.label} is a ${point.info.secret} field. Ask the user to fill it in themselves.`);
+          throw new ToolError('DENIED', `${point.info.label} is a ${point.info.secret} field, and the agent never types into those. Ask the user to enter it themselves in this tab (the browser keeps their login), then continue when they say they have. Do not ask them to share it in chat.`);
         }
-        await deps.guard?.({ sessionID, tabId: tab.id, tool: 'form_input', action: 'fill', summary, target: point?.info });
+        await deps.guard?.({ sessionID, tabId: tab.id, tool: 'form_input', action: 'fill', summary: said || `Sets ${point?.info.label ?? ref}`, target: point?.info, text: String(args.value) });
         const done = await actor.act(tab.id, sessionID, async () => {
           const result = await reader.call<FillResult | PageError>(tab.id, t.documentId, 'fill', [t.n, args.value as string | number | boolean]);
           if (isError(result)) {
@@ -119,6 +134,11 @@ export function formTools(deps: FormDeps): ToolDef[] {
       },
       async handler(args, { sessionID }) {
         const tab = await requirePage(scope, sessionID, args.tabId);
+        const embedded = embeddedFiles(args, sessionID);
+        if (embedded) {
+          const done = await putFiles(tab.id, sessionID, String(args.ref), embedded);
+          return { text: [done.text], tabId: tab.id, effect: done.effect };
+        }
         const client = await deps.server();
         if (!client) throw new ToolError('NEEDS_APPROVAL', 'The extension is not paired with an opencode server, so it cannot read files.');
         const directory = await deps.directory();

@@ -151,6 +151,15 @@ describe('sharing and popups', () => {
     expect(await scope.sessionOf(popup.id!)).toBe('ses_1');
   });
 
+  it('leaves a New Tab page opened beside an agent tab out of its session', async () => {
+    const ctx = await scope.context('ses_1', true);
+    const blank = await chrome.create({});
+    const opener = ctx.tabs[0]!.id;
+    expect(await scope.adoptPopup({ ...blank, pendingUrl: 'chrome://newtab/', openerTabId: opener })).toBeUndefined();
+    expect(await scope.adoptPopup({ ...blank, url: 'chrome://new-tab-page/', openerTabId: opener })).toBeUndefined();
+    expect(await scope.sessionOf(blank.id!)).toBeUndefined();
+  });
+
   it('ignores tabs opened from user tabs', async () => {
     await scope.context('ses_1', true);
     const user = chrome.addUserTab('https://example.com/');
@@ -181,6 +190,24 @@ describe('join and leave hooks', () => {
   });
 });
 
+
+describe('release', () => {
+  it('closes the tabs a session opened and gives shared tabs back', async () => {
+    const own = await scope.create('mcp-aaaa1111', 'https://a.example/');
+    const groupId = (await scope.context('mcp-aaaa1111')).groupId;
+    const user = chrome.addUserTab('https://docs.example.com/');
+    await scope.share('mcp-aaaa1111', user.id!);
+    expect(await scope.release('mcp-aaaa1111')).toBe(2);
+    expect(chrome.tabs.has(own.id)).toBe(false);
+    expect(chrome.tabs.has(user.id!)).toBe(true);
+    expect(chrome.tabs.get(user.id!)?.groupId).not.toBe(groupId);
+    expect(await scope.context('mcp-aaaa1111')).toEqual({ tabs: [], currentTabId: undefined, groupId: undefined });
+  });
+
+  it('does nothing for a session without tabs', async () => {
+    expect(await scope.release('mcp-bbbb2222')).toBe(0);
+  });
+});
 
 describe('isRestrictedUrl', () => {
   it.each([

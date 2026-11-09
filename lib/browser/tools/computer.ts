@@ -9,7 +9,7 @@ import type { PageReader } from '../snapshot/reader';
 import type { Screenshots } from '../screenshots';
 import type { VisionCheck } from '../server';
 import type { TabScope } from '../tabs';
-import { ToolError, type ToolDef, type ToolOutput } from './registry';
+import { ToolError, type ToolDef, type ToolImage, type ToolOutput } from './registry';
 import { requirePage, tabIdProperty } from './tabs';
 
 const COMPUTER_ACTIONS = [
@@ -30,9 +30,6 @@ const COMPUTER_ACTIONS = [
 ] as const;
 type Action = (typeof COMPUTER_ACTIONS)[number];
 
-/** Actions that change the page: they need an action_summary (used for approvals and the timeline). */
-const SUMMARY_ACTIONS = new Set<Action>(['left_click', 'right_click', 'double_click', 'triple_click', 'left_click_drag', 'key', 'type']);
-
 const CLICKS: Partial<Record<Action, { button: MouseButton; clicks: number; verb: string }>> = {
   left_click: { button: 'left', clicks: 1, verb: 'Clicked' },
   right_click: { button: 'right', clicks: 1, verb: 'Right-clicked' },
@@ -49,6 +46,8 @@ export type ComputerDeps = {
   dialogs: Dialogs;
   screenshots: Screenshots;
   vision: VisionCheck;
+  /** P5: saves an image for the user (screenshot or zoom with save: true); returns where. */
+  saveImage?: (image: ToolImage, name: string) => Promise<string>;
   /** Policy gate before input reaches the page (design D9); filled in by the safety layer. */
   guard?: (call: { sessionID: string; tabId: number; tool: string; action: string; summary?: string; target?: unknown; text?: string }) => Promise<void>;
 };
@@ -83,7 +82,7 @@ export function computerTool(deps: ComputerDeps): ToolDef {
     description:
       'Click, type, press keys, scroll, drag, hover, wait, answer page dialogs, take a screenshot or zoom into part of the page. ' +
       'Target elements by ref (from read_page/find, preferred) or by coordinate in the latest screenshot frame. ' +
-      'Clicks, drags, key and type need action_summary: a few words stating the effect. Results say what changed on the page. ' +
+      'Results say what changed on the page. action_summary (optional): the effect in a few words, shown when the user is asked to approve. ' +
       'screenshot and zoom need a model that accepts images.',
     inputSchema: {
       type: 'object',
@@ -102,6 +101,7 @@ export function computerTool(deps: ComputerDeps): ToolDef {
         accept: { type: 'boolean', description: 'For dialog: accept (true) or dismiss (false).' },
         region: { type: 'array', items: { type: 'number' }, minItems: 4, maxItems: 4, description: 'For zoom: [x0, y0, x1, y1] in the frame.' },
         scale: { type: 'number', minimum: 0.1, maximum: 1, description: 'For screenshot/zoom: shrink the returned image.' },
+        save: { type: 'boolean', description: 'For screenshot/zoom: also save the image as a file to show the user; returns its path.' },
         action_summary: { type: 'string', description: 'The effect in a few words, e.g. "Opens the Filters menu". No secrets.' },
       },
       required: ['action'],
@@ -109,9 +109,6 @@ export function computerTool(deps: ComputerDeps): ToolDef {
     async handler(args, { sessionID }): Promise<ToolOutput> {
       const action = args.action as Action;
       const summary = typeof args.action_summary === 'string' ? args.action_summary.trim() : '';
-      if (SUMMARY_ACTIONS.has(action) && !summary) {
-        throw new ToolError('INVALID_INPUT', `\`action_summary\` is required for ${action}: say in a few words what it does, e.g. "Opens the Filters menu".`);
-      }
       if (action === 'wait') return waitAction(scope, args, sessionID);
       const tab = await requirePage(scope, sessionID, args.tabId);
       return pageAction(deps, pointOf, needVision, action, args, sessionID, tab.id, summary);
@@ -157,13 +154,20 @@ async function dialogAction(deps: ComputerDeps, args: Record<string, unknown>, t
 }
 
 async function captureAction(deps: ComputerDeps, needVision: NeedVision, action: 'screenshot' | 'zoom', args: Record<string, unknown>, sessionID: string, tabId: number): Promise<ToolOutput> {
-  await needVision(sessionID);
+  const save = args.save === true && !!deps.saveImage;
+  // A saved image is for the user: a model without image input still gets its path.
+  const sees = await needVision(sessionID).then(() => true, (error: unknown) => {
+    if (save) return false;
+    throw error;
+  });
   deps.dialogs.assertClear(tabId);
   const scale = typeof args.scale === 'number' ? args.scale : 1;
   const result = action === 'screenshot'
     ? await deps.screenshots.screenshot(sessionID, tabId, scale)
     : await deps.screenshots.zoom(sessionID, tabId, requireRegion(args.region), scale);
-  return { text: [result.text], images: [result.shot.image], tabId };
+  const text = [result.text];
+  if (save) text.push(`Saved to ${await deps.saveImage!(result.shot.image, `${result.shot.id}.jpg`)}`);
+  return { text, images: sees ? [result.shot.image] : [], tabId };
 }
 
 async function scrollToAction(pointOf: PointOf, args: Record<string, unknown>, tabId: number): Promise<ToolOutput> {
@@ -180,11 +184,31 @@ async function scrollAction(deps: ComputerDeps, pointOf: PointOf, args: Record<s
     const point = args.ref || args.coordinate
       ? await pointOf(tabId, args, false)
       : await viewportCenter(deps.reader, tabId);
+    const before = await scrollState(deps.reader, tabId);
     await wheel(send, point.x, point.y, direction, ticks);
-    const v = await deps.reader.callTop<{ scrollX: number; scrollY: number }>(tabId, 'viewport').catch(() => undefined);
-    return `Scrolled ${direction} ${ticks} tick(s)${v ? `; page now at ${v.scrollX},${v.scrollY}` : ''}.`;
+    await new Promise((resolve) => setTimeout(resolve, SMOOTH_SCROLL_MS));
+    return `Scrolled ${direction} ${ticks} tick(s)${scrollNote(before, await scrollState(deps.reader, tabId), direction)}`;
   });
   return { text: [done.text], tabId, effect: done.effect };
+}
+
+/** Smooth scrolling finishes after the wheel event returns; the position is read once it has. */
+const SMOOTH_SCROLL_MS = 250;
+
+type ScrollState = { height: number; scrollX: number; scrollY: number; scrollHeight: number };
+
+const scrollState = (reader: PageReader, tabId: number): Promise<ScrollState | undefined> =>
+  reader.callTop<ScrollState>(tabId, 'viewport').catch(() => undefined);
+
+/** Where the page is after a scroll, whether it grew (an infinite list loaded more) and whether an edge was reached. */
+export function scrollNote(before: ScrollState | undefined, after: ScrollState | undefined, direction: string): string {
+  if (!after) return '.';
+  const at = `; page now at ${after.scrollX},${after.scrollY} of ${after.scrollHeight} px`;
+  if (before && after.scrollHeight - before.scrollHeight > 20) return `${at}. The page grew from ${before.scrollHeight} to ${after.scrollHeight} px: more content loaded.`;
+  const atBottom = after.scrollY + after.height >= after.scrollHeight - 2;
+  if (direction === 'down' && atBottom) return `${at}. This is the bottom of the page. If it loads more when you reach the bottom, wait_for {idle: true} and scroll again.`;
+  if (direction === 'up' && after.scrollY <= 0) return `${at}. This is the top of the page.`;
+  return `${at}.`;
 }
 
 async function viewportCenter(reader: PageReader, tabId: number): Promise<{ x: number; y: number }> {
@@ -203,7 +227,7 @@ async function hoverAction(deps: ComputerDeps, pointOf: PointOf, args: Record<st
 
 async function clickAction(deps: ComputerDeps, pointOf: PointOf, args: Record<string, unknown>, sessionID: string, tabId: number, summary: string, action: Action, clickKind: { button: MouseButton; clicks: number; verb: string }): Promise<ToolOutput> {
   const p = await pointOf(tabId, args);
-  await deps.guard?.({ sessionID, tabId, tool: 'computer', action, summary, target: p.info });
+  await deps.guard?.({ sessionID, tabId, tool: 'computer', action, summary: summary || `${clickKind.verb} ${p.label}`, target: p.info });
   const done = await deps.actor.act(tabId, sessionID, async () => {
     await click(deps.actor.input(tabId), p.x, p.y, { button: clickKind.button, clicks: clickKind.clicks, modifiers: parseModifiers(args.modifiers as string | undefined) });
     return `${clickKind.verb} ${p.label}.`;
@@ -217,7 +241,7 @@ async function dragAction(deps: ComputerDeps, pointOf: PointOf, args: Record<str
   const frame = deps.screenshots.frameOf(tabId);
   const from = args.ref ? await pointOf(tabId, { ref: args.ref }) : { ...toPoint(toViewport(args.start_coordinate as [number, number], frame)), label: '' };
   const to = toViewport(args.coordinate as [number, number], frame);
-  await deps.guard?.({ sessionID, tabId, tool: 'computer', action: 'left_click_drag', summary });
+  await deps.guard?.({ sessionID, tabId, tool: 'computer', action: 'left_click_drag', summary: summary || 'Drags on the page' });
   const done = await deps.actor.act(tabId, sessionID, async () => {
     await drag(deps.actor.input(tabId), [from.x, from.y], to);
     return `Dragged from (${Math.round(from.x)}, ${Math.round(from.y)}) to (${Math.round(to[0])}, ${Math.round(to[1])}).`;
@@ -231,9 +255,15 @@ async function typingAction(deps: ComputerDeps, args: Record<string, unknown>, s
   const focused = await deps.reader.callTop<{ label: string; secret: string | null; editable: boolean; inForm: boolean } | null>(tabId, 'focused');
   assertSummaryHasNoSecret(action, focused?.secret, text, summary);
   const chords = action === 'key' ? parseKeysOrFail(text) : [];
-  await deps.guard?.({ sessionID, tabId, tool: 'computer', action, summary, target: focused ?? undefined, text });
+  const said = summary || typingSummary(action, text, focused?.label);
+  await deps.guard?.({ sessionID, tabId, tool: 'computer', action, summary: said, target: focused ?? undefined, text });
   const out = await deps.actor.act(tabId, sessionID, () => sendTyping(deps, action, args, tabId, text, focused ?? null, chords));
   return { text: [out.text], tabId, effect: out.effect };
+}
+
+/** The approval text when the model gave none. A typed value is never part of it. */
+function typingSummary(action: 'type' | 'key', text: string, label: string | undefined): string {
+  return action === 'key' ? `Presses ${text}` : `Types into ${label ?? 'the page'}`;
 }
 
 function assertSummaryHasNoSecret(action: 'type' | 'key', secret: string | null | undefined, text: string, summary: string): void {

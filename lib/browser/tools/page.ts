@@ -1,9 +1,17 @@
 // read_page, find, get_page_text (spec browser/page-snapshot).
+import { botCheckNote } from '../bot-check';
 import { findInLines } from '../snapshot/find';
 import type { PageReader } from '../snapshot/reader';
 import type { TabScope } from '../tabs';
 import { untrusted, type ToolDef } from './registry';
 import { requirePage, tabIdProperty } from './tabs';
+
+/** The bot-check note, from the tab as it is after the read (a challenge page sets its title late). */
+async function blockedNote(scope: TabScope, sessionID: string, tabId: number): Promise<string[]> {
+  const tab = await scope.resolve(sessionID, tabId).catch(() => undefined);
+  const note = tab && botCheckNote(tab);
+  return note ? [note] : [];
+}
 
 export function pageTools(scope: TabScope, reader: PageReader): ToolDef[] {
   return [
@@ -37,7 +45,7 @@ export function pageTools(scope: TabScope, reader: PageReader): ToolDef[] {
           maxChars: args.max_chars as number | undefined,
           window: args.window as 'near' | 'viewport' | 'page' | undefined,
         });
-        return { text: [text], tabId: tab.id };
+        return { text: [text, ...(await blockedNote(scope, sessionID, tab.id))], tabId: tab.id };
       },
     },
     {
@@ -54,7 +62,7 @@ export function pageTools(scope: TabScope, reader: PageReader): ToolDef[] {
         const tab = await requirePage(scope, sessionID, args.tabId);
         const { matches, total } = findInLines(await reader.lines(tab.id), String(args.query));
         if (matches.length === 0) {
-          return { text: [`No element matched "${String(args.query)}". Try other words, or read_page to see the whole page.`], tabId: tab.id };
+          return { text: [`No element matched "${String(args.query)}". Try other words, or read_page to see the whole page.`, ...(await blockedNote(scope, sessionID, tab.id))], tabId: tab.id };
         }
         const more = total > matches.length ? `\n${total - matches.length} more matched; use more specific words.` : '';
         return { text: [`${untrusted(matches.join('\n'))}${more}`], tabId: tab.id };
@@ -70,7 +78,7 @@ export function pageTools(scope: TabScope, reader: PageReader): ToolDef[] {
       },
       async handler(args, { sessionID }) {
         const tab = await requirePage(scope, sessionID, args.tabId);
-        return { text: [await reader.text(tab.id, args.max_chars as number | undefined)], tabId: tab.id };
+        return { text: [await reader.text(tab.id, args.max_chars as number | undefined), ...(await blockedNote(scope, sessionID, tab.id))], tabId: tab.id };
       },
     },
   ];

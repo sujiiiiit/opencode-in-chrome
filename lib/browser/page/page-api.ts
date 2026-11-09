@@ -15,6 +15,8 @@ import {
   type TargetInfo,
   type UploadFile,
 } from './actions-page';
+import { createProbe, type ProbeArgs, type ProbeResult } from './wait-page';
+import { defaultRoot, extract, type Extracted } from './extract-page';
 
 export const PAGE_API_KEY = '__opencodeBrowserPage';
 
@@ -32,9 +34,15 @@ export type PageApi = {
   fill(ref: number, value: string | number | boolean): FillResult | PageError;
   setFiles(ref: number, files: UploadFile[]): { label: string; names: string[] } | PageError;
   settle(quietMs: number, capMs: number): Promise<boolean>;
-  viewport(): { width: number; height: number; dpr: number; scrollX: number; scrollY: number };
+  viewport(): { width: number; height: number; dpr: number; scrollX: number; scrollY: number; scrollHeight: number };
   focused(): ReturnType<typeof focusedInfo>;
   drop(x: number, y: number, file: UploadFile): boolean;
+  /** One check for `wait_for`: text, selector and idle state of this document. */
+  probe(args: ProbeArgs): ProbeResult;
+  /** The HTTP status of this document's own load (0 when the browser does not say). */
+  navStatus(): number;
+  /** Rows from the table/list at a ref (or the page's main content when ref is null). */
+  extract(ref: number | null, max: number): Extracted | PageError;
 
   registry: ElementRegistry;
 };
@@ -45,7 +53,15 @@ export type PageEnv = {
 
 export function createPageApi(doc: Document, env: PageEnv = {}): PageApi {
   const registry = new ElementRegistry();
+  const probe = createProbe(doc);
   return {
+    probe,
+    navStatus: () => ((doc.defaultView?.performance.getEntriesByType('navigation')[0] as { responseStatus?: number } | undefined)?.responseStatus ?? 0),
+    extract: (ref, max) => {
+      const root = ref === null ? defaultRoot(doc) : registry.get(ref);
+      if (!root) return { error: 'STALE_REF', message: 'element gone' };
+      return extract(root, max);
+    },
     registry,
     walk: (args) => {
       if (args.rootRef !== undefined && !registry.get(args.rootRef)) return { stale: true };
@@ -68,6 +84,7 @@ export function createPageApi(doc: Document, env: PageEnv = {}): PageApi {
         dpr: view.devicePixelRatio || 1,
         scrollX: Math.round(view.scrollX),
         scrollY: Math.round(view.scrollY),
+        scrollHeight: Math.round(doc.documentElement.scrollHeight),
       };
     },
   };

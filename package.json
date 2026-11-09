@@ -20,6 +20,10 @@
     "test": "vitest run",
     "e2e": "wxt build && playwright test",
     "test:live": "node scripts/test-live.mjs",
+    "mcp": "node mcp/server.mjs",
+    "mcp:install": "node scripts/install-native-host.mjs",
+    "build:setup": "node scripts/setup.mjs",
+    "mcp:browser": "node scripts/agent-browser.mjs",
     "import:doodles": "node scripts/import-doodles.mjs"
   },
   "dependencies": {
@@ -32,6 +36,7 @@
     "cn": "^0.5.0",
     "framer-motion": "^11.18.2",
     "gifenc": "^1.0.3",
+    "jsonc-parser": "3.3.1",
     "motion": "^12.43.0",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",

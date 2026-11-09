@@ -50,6 +50,7 @@ describe('DebuggerSessions', () => {
       'Runtime.enable',
       'Network.enable',
       'Log.enable',
+      'Emulation.setFocusEmulationEnabled',
       'Target.setAutoAttach',
     ]);
     expect(api.commands.at(-1)!.params).toEqual({ autoAttach: true, waitForDebuggerOnStart: false, flatten: true });

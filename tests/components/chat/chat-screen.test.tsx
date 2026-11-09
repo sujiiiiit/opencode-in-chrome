@@ -314,7 +314,7 @@ describe('ChatScreen: sending and the submit button', () => {
     await waitFor(() => expect(fake.log.filter((entry) => entry === 'create')).toHaveLength(2));
   });
 
-  it('warns on a version mismatch and when the token is about to expire', () => {
+  it('warns when the token is about to expire, not on a version mismatch', () => {
     vi.stubGlobal('fetch', routeFetch({}));
     render(
       <ChatScreen
@@ -322,7 +322,7 @@ describe('ChatScreen: sending and the submit button', () => {
         onUnauthorized={vi.fn()}
       />,
     );
-    expect(screen.getByText(/2\.9\.0/)).toBeInTheDocument();
+    expect(screen.queryByText(/2\.9\.0/)).toBeNull();
     expect(screen.getByText(/expires in 2 days/i)).toBeInTheDocument();
   });
 });

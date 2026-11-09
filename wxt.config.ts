@@ -1,6 +1,7 @@
 import { resolve } from 'node:path';
 import tailwindcss from '@tailwindcss/vite';
 import { defineConfig } from 'wxt';
+import { EXTENSION_KEY } from './mcp/extension-key.mjs';
 
 // See https://wxt.dev/api/reference/wxt/interfaces/inlineconfig.html
 export default defineConfig({
@@ -31,6 +32,8 @@ export default defineConfig({
   }),
   manifest: {
     name: 'Opencode',
+    // Pins the extension id (mcp/extension-key.mjs) so the native host can trust exactly this extension.
+    key: EXTENSION_KEY,
     short_name: 'Opencode',
     // No popup is built for Chromium/Firefox, so declare the toolbar action
     // explicitly. Clicking it opens the side panel (see entrypoints/background.ts).
@@ -53,6 +56,8 @@ export default defineConfig({
       'webNavigation',
       'alarms',
       'downloads',
+      // The standalone MCP server (mcp/server.mjs) reaches the tools through a native host.
+      'nativeMessaging',
     ],
     // Pages in any site are scripted for the browser agent; the opencode server
     // itself stays loopback-only (lib/opencode/link.ts).

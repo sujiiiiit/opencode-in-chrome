@@ -10,7 +10,7 @@ import {
 } from './client';
 import { releaseImage, type ImageAttachment, type PromptFile } from './attachments';
 import { parseSentFiles, withFiles, type SentFile } from './sent-files';
-import type { Connection } from './connection';
+import { authHeader, type Connection } from './connection';
 import { EventHub, type HubStatus } from './events';
 import { addForm, createdForm, parseForm, parseForms, removeForm, settledFormID, type FormAnswer, type PendingForm } from './forms';
 import { createMessageID } from './ids';
@@ -32,6 +32,7 @@ import {
   type PendingPrompt,
   type PendingStatus,
   type Timeline,
+  type Turn,
 } from './timeline';
 import { ensureWorkspace } from './workspace';
 import type { PromptRefs } from './mentions';
@@ -110,6 +111,8 @@ export type ChatSessionOptions = {
   /** The attached session no longer exists (deleted elsewhere). */
   onMissing?: () => void;
   onUnauthorized?: () => void;
+  /** The session went idle; `turn` is the turn that just ended (V4: the browser `done` check). Must not throw. */
+  onTurnEnded?: (client: OpenCodeClient, sessionID: string, turn: Turn) => void;
 };
 
 export const INITIAL_CHAT_STATE: ChatState = {
@@ -456,10 +459,18 @@ export class ChatSession extends Store<ChatState> {
     const durable = durablePatch(event);
     if (durable) this.set((state) => ({ durable: { ...state.durable, ...durable } }));
     this.applyExecutionInfo(event);
+    this.applyTimeline(event, this.sessionID);
+  }
+
+  /** Folds an event into the timeline; reports the turn that just ended when the session goes idle. */
+  private applyTimeline(event: ServerEvent, sessionID: string): void {
     const timeline = this.state.timeline;
     if (!timeline) return;
     const next = reduceTimeline(timeline, event);
-    if (next !== timeline) this.set({ timeline: next });
+    if (next === timeline) return;
+    this.set({ timeline: next });
+    const ended = timeline.working && !next.working ? next.turns.at(-1) : undefined;
+    if (ended) this.options.onTurnEnded?.(this.client, sessionID, ended);
   }
 
   private queueChildRequest(event: ServerEvent): void {
@@ -882,6 +893,23 @@ export class ChatSession extends Store<ChatState> {
     } catch (error) {
       if (!this.disposed && !this.unauthorized(error)) this.set({ notice: describeError(error) });
     }
+  }
+
+  /**
+   * The panel is closing: stop the agent it started, so it does not keep working unseen. A
+   * `keepalive` request outlives the page; the SDK client's requests would be cancelled with it.
+   * Queued prompts are dropped too (no `resume`), since nobody is left to watch them run.
+   */
+  interruptOnClose(): void {
+    const { timeline, submitting } = this.state;
+    const running = timeline?.working === true || (timeline?.pending.length ?? 0) > 0;
+    if (!this.sessionID || !(running || submitting)) return;
+    const { baseUrl, token } = this.options.connection;
+    void (this.options.fetch ?? fetch)(`${baseUrl}/api/session/${encodeURIComponent(this.sessionID)}/interrupt`, {
+      method: 'POST',
+      keepalive: true,
+      headers: { authorization: authHeader(token) },
+    }).catch(() => undefined);
   }
 
   /** Interrupts the running turn. `resume` lets prompts that are still waiting continue. */

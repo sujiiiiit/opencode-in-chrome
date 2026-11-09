@@ -126,9 +126,9 @@ export function locate(registry: ElementRegistry, doc: Document, n: number, chec
 }
 
 function interactabilityError(el: Element, label: string, rect: DOMRect, style: CSSStyleDeclaration): PageError | undefined {
-  if (rect.width < 1 || rect.height < 1) return { error: 'NOT_INTERACTABLE', message: `${label} has no visible size (it may be hidden or collapsed).` };
-  if (style.visibility === 'hidden' || style.display === 'none') return { error: 'NOT_INTERACTABLE', message: `${label} is hidden.` };
-  if ((el as HTMLButtonElement).disabled || el.getAttribute('aria-disabled') === 'true') return { error: 'NOT_INTERACTABLE', message: `${label} is disabled.` };
+  if (rect.width < 1 || rect.height < 1) return { error: 'NOT_INTERACTABLE', message: `${label} has no visible size (it may be hidden or collapsed). Open the menu, tab or section that holds it, then find it again.` };
+  if (style.visibility === 'hidden' || style.display === 'none') return { error: 'NOT_INTERACTABLE', message: `${label} is hidden. Open the menu, tab or section that holds it, then find it again.` };
+  if ((el as HTMLButtonElement).disabled || el.getAttribute('aria-disabled') === 'true') return { error: 'NOT_INTERACTABLE', message: `${label} is disabled. Something must be done first (a required field, an option): read_page shows what is missing.` };
   return undefined;
 }
 
@@ -137,7 +137,7 @@ function visiblePoint(rect: DOMRect, view: Window, label: string): { x: number; 
   const top = Math.max(rect.top, 0);
   const right = Math.min(rect.right, view.innerWidth);
   const bottom = Math.min(rect.bottom, view.innerHeight);
-  if (right <= left || bottom <= top) return { error: 'NOT_INTERACTABLE', message: `${label} could not be scrolled into view.` };
+  if (right <= left || bottom <= top) return { error: 'NOT_INTERACTABLE', message: `${label} could not be scrolled into view. Scroll the area that holds it, or find it again.` };
   return { x: (left + right) / 2, y: (top + bottom) / 2 };
 }
 
@@ -145,7 +145,7 @@ function coverError(el: Element, doc: Document, x: number, y: number, label: str
   const hit = deepElementFromPoint(doc, x, y);
   if (!hit || containsDeep(el, hit) || el.tagName === 'LABEL' || containsDeep(hit, el)) return undefined;
   if ((hit as HTMLLabelElement).control === el) return undefined;
-  return { error: 'OBSCURED', message: `${label} is covered by ${coverLabel(hit)}.` };
+  return { error: 'OBSCURED', message: `${label} is covered by ${coverLabel(hit)}. Close or accept that first (find its button), then try again.` };
 }
 
 /** The focused element (through shadow roots): what `type` and `key` will reach. */

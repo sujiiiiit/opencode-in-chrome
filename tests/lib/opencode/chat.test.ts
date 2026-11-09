@@ -421,6 +421,19 @@ describe('ChatSession.stop', () => {
     expect(fake.interrupts).toEqual([{ resume: null }]);
   });
 
+  it('interrupts without resuming when the panel closes mid-turn', async () => {
+    const { fake, chat } = await attached({ running: true, messages: [{ id: 'msg_u1', type: 'user', text: 'go', time: { created: 1 } }] });
+    chat.interruptOnClose();
+    await vi.waitFor(() => expect(fake.interrupts).toEqual([{ resume: null }]));
+  });
+
+  it('does not interrupt on close when the agent is idle', async () => {
+    const { fake, chat } = await attached({ running: false });
+    chat.interruptOnClose();
+    await Promise.resolve();
+    expect(fake.interrupts).toEqual([]);
+  });
+
   it('swallows interrupt failures', async () => {
     const { fake, chat } = await attached({ running: true });
     fake.hooks.onInterrupt = () => Promise.reject(new TypeError('Failed to fetch'));

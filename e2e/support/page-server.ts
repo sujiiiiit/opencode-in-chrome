@@ -76,6 +76,11 @@ async function servePage(req: IncomingMessage, res: ServerResponse): Promise<voi
     res.end(JSON.stringify({ items: [1, 2, 3] }));
     return;
   }
+  if (url.pathname === '/export.csv') {
+    res.writeHead(200, { 'content-type': 'text/csv', 'content-disposition': 'attachment; filename="export.csv"' });
+    res.end('item,price\nRed kettle,24.00\n');
+    return;
+  }
   if (url.pathname === '/slow') {
     const ms = Number(url.searchParams.get('ms') ?? 20_000);
     await new Promise((r) => setTimeout(r, ms));

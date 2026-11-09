@@ -183,7 +183,26 @@ function controlName(el: Element): string {
   const input = el as HTMLInputElement;
   if (el.tagName === 'INPUT' && ['submit', 'button', 'reset'].includes(input.type)) return firstName(input.value, input.type);
   if (el.tagName === 'INPUT' && input.type === 'image') return firstName(input.alt, 'image');
-  return firstName(labelText(el), el.getAttribute('placeholder'), el.getAttribute('title'), input.name);
+  return firstName(labelText(el), el.getAttribute('placeholder'), el.getAttribute('title'), adjacentText(input), input.name);
+}
+
+const INLINE_LABELS = new Set(['SPAN', 'B', 'I', 'EM', 'STRONG', 'SMALL']);
+
+/** The text next to a field that has no label: after a checkbox or radio, before any other field. */
+function adjacentText(input: HTMLInputElement): string {
+  const choice = input.type === 'checkbox' || input.type === 'radio';
+  const sides = choice ? [input.nextSibling, input.previousSibling] : [input.previousSibling];
+  for (const node of sides) {
+    const text = shortText(node);
+    if (text) return text;
+  }
+  return '';
+}
+
+function shortText(node: Node | null): string {
+  if (!node || (node.nodeType !== 3 && !INLINE_LABELS.has((node as Element).tagName))) return '';
+  const text = clean(node.textContent);
+  return text.length <= 60 ? text : '';
 }
 
 function ownText(el: Element): string {
@@ -355,11 +374,17 @@ type WalkState = {
   visited: number;
 };
 
+/** A rich-text frame (TinyMCE, CKEditor, ...) is a body that is itself the editable field. */
+function isEditableBody(root: Element): boolean {
+  const editable = root.getAttribute('contenteditable');
+  return root.tagName === 'BODY' && editable !== null && editable !== 'false';
+}
+
 export function walk(doc: Document, registry: ElementRegistry, options: WalkOptions = {}): WalkResult {
   const state = makeWalkState(doc, registry, options);
   const root = options.rootRef !== undefined ? registry.get(options.rootRef) : doc.body ?? doc.documentElement;
   if (root) {
-    const nodes = options.rootRef !== undefined ? [root] : childrenOf(root, options.shadowRootOf);
+    const nodes = options.rootRef !== undefined || isEditableBody(root) ? [root] : childrenOf(root, options.shadowRootOf);
     for (const node of nodes) visitNode(state, node, 0);
   }
   return {

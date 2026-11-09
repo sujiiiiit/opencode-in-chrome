@@ -5,6 +5,7 @@ let registry: ElementRegistry;
 beforeEach(() => {
   document.head.innerHTML = '';
   document.body.innerHTML = '';
+  for (const name of ['contenteditable', 'aria-label']) document.body.removeAttribute(name);
   document.title = 'Fixture';
   registry = new ElementRegistry();
 });
@@ -12,6 +13,18 @@ beforeEach(() => {
 const lines = (opts: Parameters<typeof walk>[2] = {}) => walk(document, registry, opts).lines;
 
 describe('walk: names, roles and refs', () => {
+  it('lists a rich-text frame whose body is the editable field', () => {
+    document.body.innerHTML = '<p>Your content goes here.</p>';
+    document.body.setAttribute('contenteditable', 'true');
+    document.body.setAttribute('aria-label', 'Rich Text Area');
+    expect(lines()).toEqual([expect.stringMatching(/^textbox "Rich Text Area" \[@1\] value="Your content goes here\."/)]);
+  });
+
+  it('names a checkbox, radio or field from the text beside it when it has no label', () => {
+    document.body.innerHTML = '<form><input type="checkbox"> checkbox 1<br><input type="checkbox" checked>checkbox 2<br>Nickname <input name="n1"></form>';
+    expect(lines()).toEqual(['checkbox "checkbox 1" [@1]', 'checkbox "checkbox 2" [@2] (checked)', 'textbox "Nickname" [@3]']);
+  });
+
   it('names inputs from their labels and lists buttons', () => {
     document.body.innerHTML = `
       <form>
