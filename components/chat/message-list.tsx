@@ -524,8 +524,8 @@ function EmptyMark() {
   return (
     <svg
       viewBox="0 0 240 300"
-      width={68}
-      height={85}
+      width={56}
+      height={70}
       aria-hidden="true"
       data-slot="empty-mark"
       className="pointer-events-none select-none text-border-primary animate-[calm-fade_600ms_var(--ease-calm)_200ms_both] motion-reduce:animate-none"
