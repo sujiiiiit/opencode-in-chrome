@@ -516,6 +516,26 @@ function useGoalOutcome(turns: Turn[], goal: Goal | null | undefined): { turnID?
   }, [turns, goal]);
 }
 
+/**
+ * The OpenCode mark, quiet in the middle of an empty chat. Drawn in currentColor so it follows the
+ * theme; it fades in after a beat, so a chat whose turns are still loading does not flash it.
+ */
+function EmptyMark() {
+  return (
+    <svg
+      viewBox="0 0 240 300"
+      width={68}
+      height={85}
+      aria-hidden="true"
+      data-slot="empty-mark"
+      className="pointer-events-none select-none text-border-primary animate-[calm-fade_600ms_var(--ease-calm)_200ms_both] motion-reduce:animate-none"
+    >
+      <path d="M180 240H60V120H180V240Z" fill="currentColor" fillOpacity={0.28} />
+      <path d="M180 60H60V240H180V60ZM240 300H0V0H240V300Z" fill="currentColor" />
+    </svg>
+  );
+}
+
 const TurnList = memo(function TurnList({ turns, switches = [], pending, previewFiles, goal, hasEarlier = false, loadingEarlier = false, onLoadEarlier }: Props) {
   const outcome = useGoalOutcome(turns, goal);
   const { ref, spacer, awayFromBottom, goToBottom } = usePageTurn(turns, pending);
@@ -523,7 +543,11 @@ const TurnList = memo(function TurnList({ turns, switches = [], pending, preview
   const streaming = turns.at(-1)?.reply.status === 'running';
 
   if (empty) {
-    return <div className="flex min-h-0 flex-1"></div>;
+    return (
+      <div className="flex min-h-0 flex-1 items-center justify-center">
+        <EmptyMark />
+      </div>
+    );
   }
 
   return (
