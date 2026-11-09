@@ -3,10 +3,11 @@
 // step boundary and starts a new turn mid-execution, and a queued prompt is delivered (one at a
 // time) once every steer has drained. Assistant output always belongs to the latest delivered turn.
 import { subagentNotice, type BackgroundNotice, type NoticeState } from './background';
+import { dropQueued, isCompactionEvent, queueCompaction, reduceCompaction, snapshotCompaction } from './compaction';
 import { goalMarker, type GoalMarker } from './goal-marker';
-import { initialReply, isRecord, parseError, reduceReply, snapshotStep, type ReplyState, type StepModel } from './reply';
+import { initialReply, isRecord, parseError, reduceReply, snapshotStep, upsert, type ReplyState, type StepModel } from './reply';
 import { parseSentFiles, withFiles, type SentFile } from './sent-files';
-import type { ServerEvent } from './sse';
+import { eventMessageID, type ServerEvent } from './sse';
 
 export type Delivery = 'steer' | 'queue';
 /** A user prompt in the inbox, in the server's admission order. `files`: its attachments. */
@@ -15,9 +16,10 @@ export type PendingPrompt = { id: string; text: string; delivery: Delivery; crea
 export type GoalStart = { id: string; objective: string };
 /**
  * A non-prompt inbox item (compaction, move, a synthetic note). A queued one blocks reordering the
- * queue. `notice`: the item reports a background subagent's completion.
+ * queue. `notice`: the item reports a background subagent's completion; `compaction`: it compacts
+ * the conversation (shown as queued in the latest turn until it starts).
  */
-export type ControlItem = { id: string; delivery: Delivery; notice?: BackgroundNotice; goal?: GoalMarker };
+export type ControlItem = { id: string; delivery: Delivery; notice?: BackgroundNotice; goal?: GoalMarker; compaction?: true };
 /** `created`: server time (ms) the prompt was sent, when known. `files`: its attachments. */
 export type ModelSwitch = { id: string; model: StepModel; previous?: StepModel };
 export type Turn = { id: string; text: string; reply: ReplyState; created?: number; files?: SentFile[]; switches?: ModelSwitch[]; goal?: GoalStart };
@@ -71,10 +73,13 @@ function modelSwitch(id: string, data: Record<string, unknown>): ModelSwitch | u
 const delivery = (v: unknown): Delivery | undefined => (v === 'steer' || v === 'queue' ? v : undefined);
 const hasTurn = (t: Timeline, id: string) => t.turns.some((turn) => turn.id === id);
 
-function upsert<T extends { id: string }>(list: T[], item: T): T[] {
-  const index = list.findIndex((entry) => entry.id === item.id);
-  return index === -1 ? [...list, item] : list.map((entry, i) => (i === index ? item : entry));
-}
+
+/** The latest turn's reply, updated. */
+const withReply = (t: Timeline, update: (reply: ReplyState) => ReplyState): Timeline =>
+  replaceLastTurn(t, (turn) => {
+    const reply = update(turn.reply);
+    return reply === turn.reply ? turn : { ...turn, reply };
+  });
 
 function replaceLastTurn(t: Timeline, update: (turn: Turn) => Turn): Timeline {
   const last = t.turns.at(-1);
@@ -87,7 +92,7 @@ function replaceLastTurn(t: Timeline, update: (turn: Turn) => Turn): Timeline {
 function parseControl(id: string, item: Record<string, unknown>, mode: Delivery): ControlItem {
   const notice = item.type === 'synthetic' ? subagentNotice(id, item.payload) : null;
   const goal = item.type === 'synthetic' ? goalMarker(id, item.payload) : null;
-  return { id, delivery: mode, ...(notice && { notice }), ...(goal && { goal }) };
+  return { id, delivery: mode, ...(notice && { notice }), ...(goal && { goal }), ...(item.type === 'compaction' && { compaction: true as const }) };
 }
 
 /** The goal a kickoff starts (a `start` marker), as its turn carries it. */
@@ -123,7 +128,10 @@ function markFinished(t: Timeline, notice: BackgroundNotice | undefined): Timeli
 function enqueue(t: Timeline, d: Record<string, unknown>, created: number): Timeline {
   const parsed = parseInboxItem(d.inboxID, d.item, created);
   if (!parsed) return t;
-  if ('control' in parsed) return markFinished({ ...t, controls: upsert(t.controls, parsed.control) }, parsed.control.notice);
+  if ('control' in parsed) {
+    const next = markFinished({ ...t, controls: upsert(t.controls, parsed.control) }, parsed.control.notice);
+    return parsed.control.compaction ? withReply(next, (reply) => queueCompaction(reply, parsed.control.id)) : next;
+  }
   if (hasTurn(t, parsed.prompt.id)) return t;
   return { ...t, pending: upsert(t.pending, parsed.prompt) };
 }
@@ -248,7 +256,7 @@ function settle(t: Timeline, event: ServerEvent, d: Record<string, unknown>): Ti
 function addModelSwitch(t: Timeline, event: ServerEvent): Timeline {
   // Choosing the first prompt's model is setup, not a change between user turns.
   if (t.turns.length === 0 && t.pending.length === 0) return t;
-  const id = (event.id ?? `model-${event.created ?? Date.now()}`).replace(/^evt_/, 'msg_');
+  const id = eventMessageID(event, 'model');
   const notice = modelSwitch(id, event.data);
   if (!notice || t.switches.some((item) => item.id === id) || t.turns.some((turn) => turn.switches?.some((item) => item.id === id))) return t;
   return { ...t, switches: [...t.switches, notice] };
@@ -259,6 +267,7 @@ export function reduceTimeline(t: Timeline, event: ServerEvent): Timeline {
   if (d.sessionID !== t.sessionID) return t;
   if (event.type === 'session.model.selected') return addModelSwitch(t, event);
   if (Object.hasOwn(OUTCOMES, event.type)) return settle(t, event, d);
+  if (isCompactionEvent(event)) return withReply(t, (reply) => reduceCompaction(reply, event));
   const inboxID = str(d.inboxID);
   switch (event.type) {
     case 'session.inbox.enqueued':
@@ -266,7 +275,7 @@ export function reduceTimeline(t: Timeline, event: ServerEvent): Timeline {
     case 'session.inbox.delivered':
       return inboxID ? deliver(t, inboxID, event.created) : t;
     case 'session.inbox.cancelled':
-      return inboxID ? withoutInbox(t, inboxID) : t;
+      return inboxID ? withReply(withoutInbox(t, inboxID), (reply) => dropQueued(reply, (id) => id !== inboxID)) : t;
     case 'session.inbox.delivery.changed': {
       const mode = delivery(d.delivery);
       return inboxID && mode ? changeDelivery(t, inboxID, mode) : t;
@@ -306,7 +315,12 @@ export function syncInbox(t: Timeline, items: unknown): Timeline {
     if ('control' in parsed) controls.push(parsed.control);
     else if (!hasTurn(t, parsed.prompt.id)) pending.push(parsed.prompt);
   }
-  return controls.reduce((next, control) => markFinished(next, control.notice), { ...t, pending, controls });
+  const marked = controls.reduce((next, control) => markFinished(next, control.notice), { ...t, pending, controls });
+  // Queued compactions follow the inbox: the ones in it show, the ones gone from it no longer do.
+  const queued = controls.filter((control) => control.compaction).map((control) => control.id);
+  return withReply(marked, (reply) =>
+    queued.reduce(queueCompaction, dropQueued(reply, (id) => queued.includes(id))),
+  );
 }
 
 export function pendingStatus(t: Timeline, prompt: Pick<PendingPrompt, 'delivery' | 'created'>): PendingStatus {
@@ -393,6 +407,11 @@ const SNAPSHOT_READERS: Record<string, (acc: SnapshotAcc, m: SnapshotMessage, se
     const last = acc.turns.at(-1);
     if (last) acc.turns[acc.turns.length - 1] = withNotice(last, notice);
     return { ...acc, sinceIdle: true, finished: { ...acc.finished, [notice.childID]: notice.state } };
+  },
+  compaction: (acc, m) => {
+    const last = acc.turns.at(-1);
+    if (last) acc.turns[acc.turns.length - 1] = { ...last, reply: snapshotCompaction(last.reply, m) };
+    return acc;
   },
   idle: (acc, m) => {
     const last = acc.turns.at(-1);

@@ -35,6 +35,7 @@ const shape = (items: FlowItem[]) =>
     if (item.type === 'work') return `work[${item.parts.map((p) => p.id).join(',')}]`;
     if (item.type === 'agents') return `agents[${item.parts.map((p) => p.id).join(',')}]`;
     if (item.type === 'round') return `round:${item.label}`;
+    if (item.type === 'compaction') return `compaction:${item.compaction.id}`;
     return `answer:${item.part.id}`;
   });
 
