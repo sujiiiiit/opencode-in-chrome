@@ -1,5 +1,10 @@
 # OpenCode in Chrome
 
+
+https://github.com/user-attachments/assets/008b8a39-c4d9-470a-be95-07b055c5762b
+
+
+
 A Chrome extension that lets an AI agent use the browser for you.
 
 You open a chat panel next to any tab, describe a task ("open my GitHub PRs and list the failing checks", "fill this form from my notes"), and the [OpenCode](https://opencode.ai) agent does it **in your own Chrome**, with your existing sign-ins. You watch every step as it happens. The agent asks before anything risky, and it never types passwords, card numbers or one-time codes.
